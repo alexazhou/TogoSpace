@@ -457,36 +457,64 @@ def test_no_misnamed_param_lines_in_tools_docstrings():
 # 多分支 Union：全局生成器**不**展开成 anyOf，而是回退成 {"type": "object"}
 # ---------------------------------------------------------------------------
 
-def test_multi_branch_union_falls_back_to_object_not_any_of():
-    """全局生成器维持 b33a7318 行为：多分支 Union 不展开成 anyOf（Operator 裁定不动生成器）。
+def test_multi_branch_union_expands_to_any_of():
+    """多分支 Union 展开成 `anyOf`，`Optional[...]` 由 schema 自身表达 null。
 
-    背景：`Union[A, B]` 这类多分支联合，生成器给模型的是一个**裸** `{"type": "object"}`
-    ——既没说能传什么，也没有 enum。`65908bd9` 曾把它改成逐分支 `anyOf` 展开，后来
-    Operator 裁定回退（改生成器会牵动全部工具参数形态），于是又有 `53cc4cee` 的回退。
+    ## 旧裁定的作废依据（必须写明，否则下一个人会把这次改动当成违规回潮）
 
-    坑在于：**回退之后这条分支零覆盖**——`list_tasks.status` 用的是
-    `Optional[list[Literal[...]]]`，走的是「`Union[T, None]` 剥掉 None」那条路，
-    多分支这段根本不执行；全仓 26 个工具也没有任何多分支 Union 参数。所以那时候
-    把生成器换回 anyOf 版跑全量是**一行都不红**（实测 1466 passed），只能靠人工
-    `git diff` 发现。本用例就是把这个「回退」钉住：一旦有人再把分支展开成 anyOf，
-    这里必然变成 `{"anyOf": [{"type": "string"}, {"type": "array", ...}]}` 而失败。
+    Operator **2026-11-12 00:20** 授权（#195）：「ok，就按这个方案修改下，开一个任务，
+    先 hold；后续我喊你再开始」。该授权**明确取代** #83 事件 215（2026-10-28）的旧裁定
+    「`funcToolType.python_type_to_json_schema` 的 Union 多分支 → anyOf 改动必须回退、
+    全局生成器保持零改动」。旧裁定的理由是「claude_sdk 下只支持列表，anyOf 不再是必要
+    手段」；新裁定认为必须改生成器，因为 `Optional[T]` 被剥成 `T` 会让 19 个注解不含
+    None 的字段接受 null（`create_task.description=null` 一路撞到
+    `NOT NULL constraint failed`）。
 
-    同时钉住「`Optional[...]` 包裹**不改变**结论」：`Optional[Union[str, list[str]]]`
-    是三分支（含 `NoneType`），不能被误判成「`Union[T, None]` 剥 None」那条更早的
-    分支——否则它会退化成 `{"anyOf": [...]}`，与本用例断言相反。
+    ## 本用例现在钉什么
+
+    - 多分支 Union ⇒ `anyOf` 逐分支展开（不再是裸 `{"type": "object"}`）；
+    - `Optional[...]` 包裹 ⇒ 结果里**必须出现 null 分支**（`type` 数组含 `"null"` 或
+      `anyOf` 含 `{"type": "null"}`），且不能退化成 `object`；
+    - 反向对照：`Optional[str]` 仍是 `type: ["string", "null"]` —— 扁平化不能把它
+      变成 `object`，也不能反向把非 Optional 的 `str` 弄成可空。
     """
-    assert python_type_to_json_schema(Optional[Union[str, list[str]]]) == {"type": "object"}
 
-    # 裸多分支 Union（无 NoneType）同样是回退，不是展开。
-    assert python_type_to_json_schema(Union[str, list[str]]) == {"type": "object"}
+    def allows_null(schema: dict) -> bool:
+        """schema 是否声明允许 null（两种合法表达都认）。"""
+        declared = schema.get("type")
+        if isinstance(declared, list) and "null" in declared:
+            return True
+        any_of = schema.get("anyOf")
+        return isinstance(any_of, list) and {"type": "null"} in any_of
+
+    # 裸多分支 Union（无 NoneType）：逐分支展开。
+    assert python_type_to_json_schema(Union[str, list[str]]) == {
+        "anyOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"type": "string"}},
+        ]
+    }
     # `A | B` 语法与 `typing.Union` 是同一件事，必须给同一个结果。
-    assert python_type_to_json_schema(str | list[str]) == {"type": "object"}
+    assert python_type_to_json_schema(str | list[str]) == {
+        "anyOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"type": "string"}},
+        ]
+    }
 
-    # 反向对照：这两条是「会走别的分支」的形态，不能被上面的断言顺带盖过去。
-    # `Union[T, None]` 剥掉 None 退化到 T 的 schema（不是 object、也不是 anyOf）。
-    assert python_type_to_json_schema(Optional[str]) == {"type": "string"}
-    # 多分支 Union 里出现 NoneType 时，NoneType 分支不参与「是否只剥 None」的判断。
-    assert python_type_to_json_schema(Optional[Union[str, int, list[str]]]) == {"type": "object"}
+    # `Optional[Union[...]]` 是三分支：**不扁平化**，保留 anyOf 且含 null 分支。
+    optional_union = python_type_to_json_schema(Optional[Union[str, list[str]]])
+    assert allows_null(optional_union), optional_union
+    assert optional_union.get("type") != "object", optional_union
+
+    # 多分支（含 NoneType 的三分支以上）同样保留 anyOf 形态。
+    three_branch = python_type_to_json_schema(Optional[Union[str, int, list[str]]])
+    assert allows_null(three_branch), three_branch
+
+    # 反向对照：单纯 `Optional[T]` 走扁平化 ⇒ `type: [T, "null"]`，不是 object、不是 anyOf。
+    assert python_type_to_json_schema(Optional[str]) == {"type": ["string", "null"]}
+    # 非 Optional 的标量不能变成可空（防扁平化把 null 泄漏到所有类型上）。
+    assert python_type_to_json_schema(str) == {"type": "string"}
 
 
 def _multi_branch_union_params() -> list[str]:
@@ -517,15 +545,16 @@ def test_no_local_tool_uses_multi_branch_union_param():
 
     `python_type_to_json_schema` 的多分支 Union 分支现在只有上面那条用例覆盖，
     没有任何真实工具会走到它。所以这里立一个信号灯：**谁第一个给工具参数写了
-    多分支 Union，这条就红**，提示他去看一眼生成器给出的到底是 `{"type": "object"}`
-    够不够用（很可能不够：模型拿不到任何类型信息，单值/数组二选一这种语义表达不出来）。
+    多分支 Union，这条就红**，提示他去看一眼生成器给出的 `anyOf` 形态是否就是他要的
+    （给模型逐分支的类型信息，已不再是改造前的裸 `{"type": "object"}`）。
 
-    红的时候不要直接把参数改掉绕过去，也不要顺手改生成器 —— 生成器形态归 Operator 裁定
-    （见 `docs/` 与 #83 记录），先按上一条用例的结论确认自己要的行为，再决定。
+    红的时候不要直接把参数改掉绕过去：先按上一条用例的结论确认自己要的行为
+    （`anyOf` 会逐分支展开，模型能看到每个分支的类型），再决定参数该不该这么写。
+    多分支 Union 的形态已由 Operator 2026-11-12 00:20 授权（#195），**不是**违规回潮。
     """
     hits = _multi_branch_union_params()
     assert not hits, (
-        "出现了首个多分支 Union 工具参数，生成器对它只回退成 {\"type\": \"object\"}：\n"
+        "出现了首个多分支 Union 工具参数，生成器会对它展开成 `anyOf`：\n"
         + "\n".join(hits)
-        + "\n请确认这是你要的 schema；若需要别的形态，先跟 Operator 确认再动生成器。"
+        + "\n请确认这是你要的 schema（逐分支展开，不再是改造前的裸 {\"type\": \"object\"}）。"
     )

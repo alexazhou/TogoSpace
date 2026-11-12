@@ -74,6 +74,30 @@ def _schema_of(func: Any) -> dict:
     return get_function_metadata("x", func)["parameters"]
 
 
+def _declared_types(prop: dict) -> set[str]:
+    """取某个属性 schema 声明的 `type` 集合（`type` 可能是字符串或字符串数组）。
+
+    #195 之后 `Optional[T]` 产 `{"type": ["string", "null"]}`，`type` 不再是单值字符串；
+    沿用 `prop.get("type") == "array"` 这种写法会让**所有** array/object 型参数从扫描
+    结果里静默消失（判据变成空转还全绿）。所以这里统一归一成集合，调用方必须显式写清
+    自己认哪些类型（例如 `"array" in _declared_types(prop)`）。
+    """
+
+    declared = prop.get("type")
+    if isinstance(declared, str):
+        return {declared}
+    if isinstance(declared, list):
+        return {item for item in declared if isinstance(item, str)}
+    return set()
+
+
+def _non_null_type(prop: dict) -> str | None:
+    """取非 `null` 的那个类型名（造合法值 / 造非法值都按它来）。"""
+
+    types = _declared_types(prop) - {"null"}
+    return next(iter(types)) if len(types) == 1 else None
+
+
 def _invalid_args_for(schema: dict) -> Any:
     """按 schema 造一份**必定非法**的参数。
 
@@ -83,6 +107,9 @@ def _invalid_args_for(schema: dict) -> Any:
 
     这样每组工具（含零参工具）都能拿到一条真实非法参数，不必为了「有东西可喂」而给
     零参工具编造参数。
+
+    #195：`type` 可能已是 `["string", "null"]`，按**非 null 分支**造错值（喂 `null`
+    对可空参数是合法的，那不叫非法参数）。
     """
 
     required = schema.get("required") or []
@@ -92,7 +119,7 @@ def _invalid_args_for(schema: dict) -> Any:
     for name, prop in (schema.get("properties") or {}).items():
         if "enum" in prop:
             return {name: "__value_not_in_enum__"}
-        declared = prop.get("type")
+        declared = _non_null_type(prop)
         replacement = {
             "string": 12345,
             "integer": "not-an-integer",
@@ -638,7 +665,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
         except Exception:  # noqa: BLE001 —— schema 不可用的工具不参与本判据
             continue
         for param_name, prop in (parameters.get("properties") or {}).items():
-            if prop.get("type") == "array":
+            if "array" in _declared_types(prop):
                 array_params.append((name, param_name))
 
     assert len(array_params) == 10, array_params
@@ -727,9 +754,12 @@ def _build_valid_args(parameters: dict) -> dict:
 def _sample_value(prop: dict) -> Any:
     """按单个属性的 schema 造一个合法值。"""
 
+def _sample_value(prop: dict) -> Any:
+    """按单个属性的 schema 造一个合法值（按**非 null 分支**造，`type` 可能是数组）。"""
+
     if "enum" in prop:
         return prop["enum"][0]
-    type_name = prop.get("type")
+    type_name = _non_null_type(prop)
     if type_name == "string":
         return "x"
     if type_name == "integer":
@@ -743,6 +773,18 @@ def _sample_value(prop: dict) -> Any:
     if type_name == "object":
         return {}
     return "x"
+
+
+def _allows_null(prop: dict) -> bool:
+    """该属性 schema **是否声明允许 null**（#195 之后唯一正确的判定依据）。
+
+    改造前判据只能按「是否必填」猜 nullability；现在 schema 自己说了算：
+    `Optional[T]` ⇒ `{"type": [T, "null"]}` 或 `{"anyOf": [..., {"type": "null"}]}`。
+    """
+    if "null" in _declared_types(prop):
+        return True
+    any_of = prop.get("anyOf")
+    return isinstance(any_of, list) and {"type": "null"} in any_of
 
 
 def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
@@ -771,14 +813,16 @@ def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
         base.pop(name, None)  # 注入位置本身先摘掉，避免"必填缺失"与"注入 null"混为一谈
         args = {**base}
         args[name] = None
-        # 必填 ⇒ 应拦；非必填 ⇒ 应放行（Optional[T] 被剥成 T，null 合法性在 schema 外）
-        points.append((f"P1:{name}", json.dumps(args), name not in required))
+        # 必填 ⇒ 应拦；非必填 ⇒ **由 schema 自己说**能不能 null（#195）。
+        # #195 之前这里是「非必填 ⇒ 放行」——那条线是按默认值切的，而 nullability 该按
+        # 注解切；两条线不重合的 19 个字段（非必填、注解不含 None）就是本单的缺陷面。
+        points.append((f"P1:{name}", json.dumps(args), _allows_null(prop)))
 
         # P2：数组元素（每个 array 取「第 2 个元素」注入 null，保留 1 个合法元素；
         # 本单 10 个 array 的 items 类型各自统一，同一 array 内元素类型不异构，
         # 故单点注入足以覆盖整类。`items` 缺 `type` 但有 `enum` 的 2 个
         # （update_task.clear_fields / list_tasks.status）由 `_sample_value` 取首枚举值。）
-        if prop.get("type") == "array":
+        if "array" in _declared_types(prop):
             items = prop.get("items") or {}
             element = _sample_value(items)
             args2 = _build_valid_args(parameters)
@@ -786,7 +830,7 @@ def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
             points.append((f"P2:{name}[1]", json.dumps(args2), False))
 
         # P3：嵌套 object 内部 key —— 只有 schema 真的给了 `properties` 才可枚举
-        if prop.get("type") == "object":
+        if "object" in _declared_types(prop):
             inner_props = prop.get("properties") or {}
             inner_required = set(prop.get("required") or [])
             for inner_name in inner_props:
@@ -866,7 +910,7 @@ async def test_null_injection_exhaustive_table() -> None:
 
         p3_fields += sum(
             1 for prop in (parameters.get("properties") or {}).values()
-            if prop.get("type") == "object" and not (prop.get("properties") or {})
+            if "object" in _declared_types(prop) and not (prop.get("properties") or {})
         )
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----

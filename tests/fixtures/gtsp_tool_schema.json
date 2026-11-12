@@ -1,0 +1,328 @@
+{
+ "__provenance__": {
+  "binary_md5": "b32f5cdcdf8fa303f3cc1eb8a3398942",
+  "dumped_at": "2026-11-12",
+  "gtsp_version": "v0.4.19",
+  "note": "真实远端 schema 快照；不由本仓库生成器产出",
+  "source": "assets/execute/gtsp/gtsp-darwin-arm64 schema -o"
+ },
+ "tools": [
+  {
+   "description": "- Efficiently explores file system structure\n- Supports recursive listing with depth control\n- Default ignores common build/cache directories: .git, .venv, node_modules, __pycache__, .mypy_cache, dist, build, etc.\n- Pass ignore_patterns to add extra exclusions, or leave empty to use defaults only\n- Returns metadata like size, modification time, and type\n- Results are limited to 50 items by default; set limit to get more. If truncated=true, narrow your query\n- Use this tool when you need to understand the directory structure or find files in a specific path",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "depth": {
+      "description": "The maximum recursion depth. 0 means current directory only. Defaults to 0.",
+      "type": "integer"
+     },
+     "dir_path": {
+      "description": "The path to the directory to list.",
+      "type": "string"
+     },
+     "ignore_patterns": {
+      "description": "Optional: Custom glob patterns to ignore (e.g., ['*.tmp', 'node_modules']).",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "limit": {
+      "description": "Maximum number of items to return. Defaults to 50. Increase if results are truncated.",
+      "type": "integer"
+     },
+     "recursive": {
+      "description": "Whether to list subdirectories recursively. Defaults to false.",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "dir_path"
+    ],
+    "type": "object"
+   },
+   "name": "list_dir"
+  },
+  {
+   "description": "- Reads and returns the content of a specified file\n- Supports line-based slicing for reading specific portions of large files\n- Full reads of files larger than 25KB are truncated to the first ~1KB of content and marked with 'truncated: true' (plus a notice); use 'start_line'/'end_line' or 'grep_search' to page through large files\n- Detects and rejects binary files for safety\n- Each content line is prefixed with its 1-based line number (e.g. \"   12│code\") for reference\n- When using 'edit', provide the exact text WITHOUT the line-number prefix\n- Use this tool when you need to read the contents of a file to understand its logic or data",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "encoding": {
+      "description": "Optional: The file encoding to use. Defaults to utf-8.",
+      "type": "string"
+     },
+     "end_line": {
+      "description": "Optional: The 1-based line number to end reading at (inclusive). Defaults to the end of the file or 500 lines.",
+      "type": "integer"
+     },
+     "file_path": {
+      "description": "The path to the file to read.",
+      "type": "string"
+     },
+     "start_line": {
+      "description": "Optional: The 1-based line number to start reading from. Defaults to 1.",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "file_path"
+    ],
+    "type": "object"
+   },
+   "name": "read_file"
+  },
+  {
+   "description": "- Reads and returns an image file as base64 plus metadata (mime_type/format/width/height/size_bytes)\n- Detects format by magic bytes (png/jpeg/gif/webp/bmp), not by file extension\n- Width/height are returned for png/jpeg/gif; webp/bmp return 0 (no external image lib in v1)\n- Rejects images over the max size limit (default 5MB; 0 disables the limit)\n- Use this tool when the agent needs to view or analyze an image file (e.g. a screenshot)",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "file_path": {
+      "description": "The path to the image file to read.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_path"
+    ],
+    "type": "object"
+   },
+   "name": "read_image"
+  },
+  {
+   "description": "- Writes complete content to a specified file\n- Automatically creates missing parent directories\n- Uses atomic writing (temp file then rename) for safety\n- Enforces a size limit to prevent accidental large writes\n- Use this tool when you need to create a new file or fully overwrite an existing one",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "content": {
+      "description": "The complete content to write. Provide the full file; do not use placeholders.",
+      "type": "string"
+     },
+     "encoding": {
+      "description": "Optional: The file encoding to use. Defaults to utf-8.",
+      "type": "string"
+     },
+     "file_path": {
+      "description": "The path to the file to write.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_path",
+     "content"
+    ],
+    "type": "object"
+   },
+   "name": "write_file"
+  },
+  {
+   "description": "- Performs precision string replacement in a file\n- Requires an exact, unique match for the 'old_string' unless 'allow_multiple' is set\n- Preserves indentation and line endings\n- Use this tool when you need to make surgical changes to specific parts of a file without rewriting it entirely",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "allow_multiple": {
+      "description": "Optional: If true, replace all occurrences of 'old_string'. Defaults to false.",
+      "type": "boolean"
+     },
+     "file_path": {
+      "description": "The path to the file to modify.",
+      "type": "string"
+     },
+     "instruction": {
+      "description": "Optional: A brief description of the change.",
+      "type": "string"
+     },
+     "new_string": {
+      "description": "The exact literal text to replace 'old_string' with.",
+      "type": "string"
+     },
+     "old_string": {
+      "description": "The exact literal text to replace. Must match exactly including whitespace.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_path",
+     "old_string",
+     "new_string"
+    ],
+    "type": "object"
+   },
+   "name": "edit"
+  },
+  {
+   "description": "- High-performance code searching tool\n- Supports both literal strings and regular expressions\n- Provides context lines around matches to help understand code logic\n- Includes built-in safety limits for total matches and matches per file\n- Use this tool when you need to find specific strings, patterns, or definitions across multiple files without reading them one by one\n- NOTE: Common build, dependency, and version control directories (e.g., .git, node_modules, dist, build, .venv) and binary/media file types are automatically excluded to improve performance and reduce noise.",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "case_sensitive": {
+      "description": "Optional: Whether the search should be case-sensitive. Defaults to false.",
+      "type": "boolean"
+     },
+     "context": {
+      "description": "Optional: Number of context lines to return around each match.",
+      "type": "integer"
+     },
+     "exclude_pattern": {
+      "description": "Optional: Glob pattern to exclude files or paths.",
+      "type": "string"
+     },
+     "fixed_strings": {
+      "description": "Optional: If true, treat the pattern as a literal string. Defaults to false (regex).",
+      "type": "boolean"
+     },
+     "include_pattern": {
+      "description": "Optional: Glob pattern to filter files (e.g., '*.go').",
+      "type": "string"
+     },
+     "max_matches_per_file": {
+      "description": "Optional: Maximum matches to return per individual file. Defaults to 10.",
+      "type": "integer"
+     },
+     "path": {
+      "description": "Optional: Subdirectory to search within. Defaults to the current directory.",
+      "type": "string"
+     },
+     "pattern": {
+      "description": "The regex or literal pattern to search for.",
+      "type": "string"
+     },
+     "total_max_matches": {
+      "description": "Optional: Maximum total matches to return across all files. Defaults to 100.",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "name": "grep_search"
+  },
+  {
+   "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths sorted by modification time\n- Use this tool when you need to find files by name patterns\n- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead\n- You can call multiple tools in a single response. It is always better to speculatively perform multiple searches in parallel if they are potentially useful.",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "case_sensitive": {
+      "description": "Optional: Whether the glob search should be case-sensitive. Defaults to false.",
+      "type": "boolean"
+     },
+     "path": {
+      "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided.",
+      "type": "string"
+     },
+     "pattern": {
+      "description": "The glob pattern to match against (e.g., 'src/**/*.go').",
+      "type": "string"
+     }
+    },
+    "required": [
+     "pattern"
+    ],
+    "type": "object"
+   },
+   "name": "glob"
+  },
+  {
+   "description": "- Executes a shell command in a controlled environment\n- Shell: Unix: commands are interpreted by `bash -c`\n- Paths: Working directory: the directory gtsp was started from, or --workdir if given (execute_bash does not change it per call).\nPaths: ordinary POSIX paths, the same ones read_file/write_file use.\n- Three execution modes:\n  1. Synchronous with timeout (default): command runs up to task_timeout seconds (default 180s); if still running, the action taken depends on 'timeout_action'\n  2. Synchronous no timeout: use run_in_background:true to start immediately in background\n  3. Background (run_in_background:true): starts immediately in background, returns process_id right away\n- Use process_output to poll or wait for background process completion\n- Automatically truncates large outputs to protect context window\n- Use this tool when you need to run shell commands, build scripts, run tests, or perform other system-level operations",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "command": {
+      "description": "The exact shell command to execute. Unix: commands are interpreted by `bash -c`.",
+      "type": "string"
+     },
+     "description": {
+      "description": "Optional: A brief description of the command's purpose.",
+      "type": "string"
+     },
+     "run_in_background": {
+      "description": "Optional: Start the process immediately in the background and return a process_id right away, without waiting. Unlike setting task_timeout=0 (which falls back to the default 180s and only promotes to background if the command is still running then), this never blocks. Defaults to false.",
+      "type": "boolean"
+     },
+     "task_timeout": {
+      "description": "Optional: Timeout in seconds (default 180s). When the command exceeds this timeout, the action taken depends on 'timeout_action'. Set to 0 to use the default timeout.",
+      "type": "integer"
+     },
+     "timeout_action": {
+      "description": "Optional: Action to take when task_timeout expires. 'background' (default) promotes the process to background and returns a process_id. 'kill' terminates the process and returns partial output.",
+      "enum": [
+       "background",
+       "kill"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "command"
+    ],
+    "type": "object"
+   },
+   "name": "execute_bash"
+  },
+  {
+   "description": "- Retrieves output from a running or completed background process\n- Use block:true (default) to wait for process completion up to the timeout\n- Use block:false for a non-blocking snapshot of current output\n- Returns stdout, stderr, running status, and exit code when complete\n- Process IDs are only valid while the server session is active; they are lost on server restart\n- process_id is only returned when a process is promoted to background (via task_timeout expiry or run_in_background:true), not for processes that complete synchronously",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "block": {
+      "description": "Whether to wait for process completion. Defaults to true.",
+      "type": "boolean"
+     },
+     "process_id": {
+      "description": "The process ID returned by execute_bash.",
+      "type": "string"
+     },
+     "timeout": {
+      "description": "Max wait time in ms when block:true. Defaults to 30000, max 60000. Note: actual effective wait time is also limited by the client's transport request timeout (typically 30-65s); if you need to wait longer, use block:false and poll repeatedly.",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "process_id"
+    ],
+    "type": "object"
+   },
+   "name": "process_output"
+  },
+  {
+   "description": "- Terminates a running background process\n- If the process has already exited, this is a no-op and returns successfully\n- Returns process_id, success (true/false), and exit_code\n- Use this to clean up long-running background processes",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+     "process_id": {
+      "description": "The process ID to terminate.",
+      "type": "string"
+     }
+    },
+    "required": [
+     "process_id"
+    ],
+    "type": "object"
+   },
+   "name": "process_stop"
+  },
+  {
+   "description": "- Lists all currently running background processes started by execute_bash\n- Returns process_id, command, running_time, and status for each process\n- Use this to check what background processes are active before calling process_output or process_stop",
+   "input_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {},
+    "required": [],
+    "type": "object"
+   },
+   "name": "process_list"
+  }
+ ]
+}
