@@ -171,20 +171,38 @@ def _first_clause(description: Any) -> str:
     return text
 
 
-def describe_param(name: str, prop: dict, *, required: bool) -> str:
-    """把一个参数渲染成 help 里的一行（名字 / 类型 / 必填 / 一句说明）。"""
+def describe_param(
+    name: str,
+    prop: dict,
+    *,
+    required: bool,
+    aliases: tuple[str, ...] = (),
+) -> str:
+    """把一个参数渲染成 help 里的一行（名字 / 类型 / 别名 / 必填 / 一句说明）。
+
+    `aliases` 是该参数的**短别名**（`--kw` 之于 `title_keyword`）。别名必须显式标注：
+    否则 help 里只出现真名，照旧习惯敲 `--kw` 的人会以为它不存在；反过来若 help 里
+    只写别名，模型又会以为工具参数就叫那个名字。
+    """
     kind = param_kind(prop)
     marker = "必填" if required else "可选"
     head = f"--{name} <{kind}>" if kind != "boolean" else f"--{name}"
+    if aliases:
+        head += "（别名 " + " / ".join("--" + alias for alias in aliases) + "）"
     note = _first_clause(prop.get("description"))
     tail = f"（{marker}）" + (f" {note}" if note else "")
     return f"{head}{tail}"
 
 
-def describe_tool_params(tool_name: str) -> list[str]:
-    """某工具全部参数的 help 行（schema 顺序）；schema 取不到返回空列表。"""
+def describe_tool_params(tool_name: str, *, aliases: dict[str, tuple[str, ...]] | None = None) -> list[str]:
+    """某工具全部参数的 help 行（schema 顺序）；schema 取不到返回空列表。
+
+    `aliases` 是「真名 → 别名元组」的反向映射（命令行才有别名，schema 里没有），
+    由命令表按 `CommandSpec.key` 提供。
+    """
+    alias_map = aliases or {}
     required = set(required_params(tool_name))
     return [
-        describe_param(name, prop, required=name in required)
+        describe_param(name, prop, required=name in required, aliases=alias_map.get(name, ()))
         for name, prop in param_schemas(tool_name).items()
     ]

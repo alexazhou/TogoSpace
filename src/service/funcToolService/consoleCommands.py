@@ -1,20 +1,28 @@
-"""console 工具的静态部分：命令表、转发目标、help 文本。
+"""console 工具的静态部分：命令表、转发目标、动作语义。
 
-拆成独立模块的原因有两个（都是硬理由，不是「分层好看」）：
+拆成独立模块的原因有三个（都是硬理由，不是「分层好看」）：
 1. **「命令 → 转发目标」必须是一张纯数据表**（#160）。权限判定现在完全由唯一
    执行入口 `AgentToolRegistry.execute_tool_call` 在第 2 跳做，命令表只负责声明
    这条命令等价于哪个原工具（`legacy_tool`）。加命令时**必须同时填等价工具名**，
    漏填会让转发目标为空、命令直接不可用，而不是「没填就放行」。
 2. **help 文本要能单独量体积**（#154 CC6）。它是唯一额外注入 context 的文本，
    跟解析逻辑混在一个文件里会让「help 有多大」这件事变得难以独立测。
+3. **命令表要能承载「动作语义」**（#196 P2）。`verb`（GET / LIST / SAVE / DELETE /
+   DIRECT）决定这条命令交给哪个通用处理器，`locator` 决定位置参数 target 落到哪个
+   工具参数上。加一条命令只改这一张表：help 行、选项白名单、布尔开关判定、选项值
+   类型转换全部由本表 + `consoleSchema` 派生，不再有第三份手抄副本。
 
-只依赖标准库，不 import 任何 service 模块 —— 这样单元测试可以脱离 DB 直接跑。
+依赖：模块顶层只有标准库。选项面（`options` / `boolean_options` / `option_kinds` /
+`param_names`）做成了 **property**，只在被真正访问时才 import `consoleSchema`；
+而 `consoleSchema` 自己的 `tools` import 又延迟到函数体内。因此
+`import consoleCommands`（含构造 `COMMAND_SPECS`）不拉起任何 service 模块，
+单元测试仍可脱离 DB 直接跑。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass
+from typing import Literal, Optional
 
 # ---------------------------------------------------------------------------
 # 单点开关（#154 D2）：原 16 个工具是否保留。
@@ -63,6 +71,82 @@ LEGACY_CONVERGED_TOOLS: tuple[str, ...] = (
 
 InputSource = Literal["inline", "payload", "local", "heredoc"]
 
+#: 命令的动作语义（#196 P2）。前四类各对应一个通用处理器，`DIRECT` 是「位置参数
+#: 就是工具参数、没有定位/patch 语义」的直通命令（`agent wake` / `agent dm` /
+#: `reload` / `help`）。
+#:
+#: 为什么要有这一层：P2 之前 `_route` 是一条 200 行的 `if key == "dept rm":` 长链，
+#: 每条命令的定位/补丁/预演逻辑各写一遍。同一种语义出现 5 次就会漂移 5 次，于是
+#: 只能靠 `test_p165_c` 那种「数 `_resolve_` 调用次数」的结构测试去兜——那是把
+#: 症状写进测试。把语义提到命令表上，处理器只有 5 个，加命令不必再动处理器。
+Verb = Literal["GET", "LIST", "SAVE", "DELETE", "DIRECT"]
+
+
+@dataclass(frozen=True)
+class Locator:
+    """位置参数 target 如何落到底层工具参数上（#196 P2 D8）。
+
+    Attributes:
+        id_param: 「数字形态的 target」落到哪个工具参数（`int`）。空表示这条命令
+            不做 id 定位。
+        name_param: 「非数字形态的 target」落到哪个工具参数（`str`）。空表示这条
+            命令不做名称定位。
+        ambiguous_by_name: 按名定位时是否需要在本地做同名消歧（`ambiguous_target`）。
+            目前只有 `agent update` 置真：`save_agent` 在 tools 层按名取运行时首个，
+            同名两人时会静默改错人。`agent get` 不置真——纯查询，按名取首个是既有
+            行为（`get_agent_info` 的语义），P2 不在这里引入新的歧义判定。
+
+    三者组合出的三种定位形态：
+        - `id` + `name` 都填 = **双定位**（按 target 形态二选一，D8 兼容方案）；
+        - 只有 `id_param` = **纯 id 定位**（target 必须是正整数，如 `task get 187`）；
+        - 只有 `name_param` = **纯名定位**（target 原样作为名字，如 `role get tester`）。
+    """
+
+    id_param: Optional[str] = None
+    name_param: Optional[str] = None
+    ambiguous_by_name: bool = False
+
+    @property
+    def kind(self) -> str:
+        if self.id_param and self.name_param:
+            return "both"
+        if self.id_param:
+            return "id"
+        if self.name_param:
+            return "name"
+        return "none"
+
+
+def _loc(
+    id_param: Optional[str] = None,
+    name_param: Optional[str] = None,
+    *,
+    ambiguous_by_name: bool = False,
+) -> Locator:
+    return Locator(id_param=id_param, name_param=name_param, ambiguous_by_name=ambiguous_by_name)
+
+
+#: 选项别名 → 工具真名（#196 P2）。
+#:
+#: 为什么需要别名：真名是从 schema 派生的（`title_keyword` / `timezone` /
+#: `clear_fields` / `keywords`），照抄到命令行上是**对模型最省心的形态**——schema 里
+#: 写什么，命令行就写什么，不需要第二张映射表。但既有 help 与用例里已有短别名
+#: （`--kw` / `--tz` / `--remove-field`），直接改名是破坏性变更且没带来收益。
+#:
+#: 所以「真名 + 别名」双轨：白名单同时认两者，**存储时保留用户写下的原名**
+#: （`test_console_task` 对 `options["remove-field"]` 是按原名断言的），由
+#: `normalize_option()` 只在需要落到工具参数时归一。
+#:
+#: 键是 `CommandSpec.key`（如 `"task ls"`），因为同名别名在不同命令下可能要落到
+#: 不同真名（`name` 对 `role update` 是 `role_name` 的别名，对 `dept update` 就是真名）。
+_OPTION_ALIASES: dict[str, dict[str, str]] = {
+    "role ls": {"kw": "keywords"},
+    "role update": {"role_name": "name"},
+    "task ls": {"kw": "title_keyword"},
+    "task update": {"remove-field": "clear_fields"},
+    "time get": {"tz": "timezone"},
+}
+
 
 @dataclass(frozen=True)
 class CommandSpec:
@@ -73,33 +157,140 @@ class CommandSpec:
         action: 操作词（ls / get / create / update / rm / wake / dm / reload）。
         legacy_tool: 这条命令转发到的原工具名（#160）。它是**转发目标**，权限判定
             由统一入口在第 2 跳做，所以它必须非空；只有 `help` 这种纯本地命令可以留空。
+        verb: 动作语义（见 `Verb`）。决定交给哪个通用处理器，也决定 help 里这一行
+            归到哪一类。
         accepts_input: 是否接受配置输入（内联 JSON / `--from`）。
         needs_target: 是否需要位置参数 target。
         input_optional: `accepts_input` 为真时，「没有配置输入」是否合法（#187）。
             默认 False ⇒ 沿用 create/update 的老语义：没输入就报 `missing_input_source`。
             只有 `task update` 置 True：它的配置输入和 `--remove-field` 都是可选的，
-            两者都没有时才由路由层显式报 `no_update_action`（见 `consoleTool._route`）。
+            两者都没有时才由路由层显式报 `no_update_action`。
             —— 为什么不用「先判断 options 再决定要不要输入」的做法：那样把「这条命令
             能不能没有输入」这件事藏进路由的 if 分支里，命令表就不再是唯一事实源了。
         self_interrupt: 执行时会不会自中断当前 turn（#154 D6）。目前只有 `reload`。
         min_args / max_args: 位置参数个数约束。
+        locator: 位置参数 target 落到哪个工具参数（见 `Locator`）。无 target 的命令留空。
+        needs_padding: SAVE 命令是否需要在本地补齐必填参数。只有 `role update` 置真：
+            `save_role_template` 的 name/type/soul 三者必填，且**没有**「省略即保持现值」
+            的语义（P1 只给 save_dept / save_agent / save_room 做了 PATCH），所以
+            `role update tester '{"soul":"s2"}'` 必须先把 name/type 读出来填进去。
+        patch_by_name: 该命令的**语义就是更新**，所以在只能按名字定位时要替调用方补
+            `overwrite_existing=True`。
+
+            `save_dept` / `save_agent` / `save_room` 的 `overwrite_existing` 原本用于
+            「create 撞到同名，是否覆盖」。但 `update` 命令按名字定位时（`dept update
+            root '{...}'`）走的是同一个参数：不传就会被判成「同名已存在、请设
+            overwrite_existing」——**连自己指定的目标都改不了**。旧实现靠先读库拿到
+            id 再传 `dept_id` 绕开（id 路径忽略 overwrite_existing），P2 改成纯转发后
+            必须显式表达「这是更新」。这里用命令表声明，而不是恢复读库：是否更新是
+            **命令的语义**，不是要去查的事实。
+
+            `agent update` 也置真：它按名字定位时已经先查出 id（同名歧义保护），
+            查不到才会按名字落到 create 分支，那时 overwrite 不影响结果；
+            置真是为了「查得到 id 那条路断掉时」仍有更新语义。
+        input_defaults: 配置输入里**没出现**的字段用这里的值补上（只补「键不存在」，
+            显式给 `null` 不覆盖）。
+
+            这是**命令层契约**，不是从工具签名推出来的默认值，所以只能声明：
+            - `dept create` 的 `member_names: []`：新建一个「只有负责人」的部门。
+              工具签名里它是 `None`，而 `None` 在更新分支上有另一层含义（PATCH 保持
+              现值）—— 两者不是同一件事，推不出来。旧实现靠手抄 `_pick(data,
+              "member_names", [])` 表达，P2 收敛成纯转发后必须重新声明。
+            - `role create` 的 `type: "USER"`：`save_role_template` 的 `type` 是必填
+              且 `value_of(None)` 返回 None ⇒ 不补就报「只允许 SYSTEM 或 USER」。
+              旧 console 默认 USER（help 也这么写），保持不变。
+
+            ⚠️ 只能挂在 create 上：`dept update` 若也补 `member_names`，一次只改
+            responsibility 的 PATCH 会把成员清空。
+
+    选项面（`options` / `param_names` / `boolean_options` / `option_kinds`）**不是字段**：
+    它们从 `legacy_tool` 的 schema 派生（`consoleSchema`），访问时才 import。
+    这样一来「加了参数但命令行不认」这种漂移在结构上就不可能发生。
     """
 
     resource: str
     action: str
     legacy_tool: str
+    verb: Verb = "DIRECT"
     accepts_input: bool = False
     needs_target: bool = False
     input_optional: bool = False
     self_interrupt: bool = False
     min_args: int = 0
     max_args: int = 0
-    #: 可用选项名（不带前导 `--`），用于「未知选项」报错时给出正确候选。
-    options: tuple[str, ...] = field(default_factory=tuple)
+    locator: Optional[Locator] = None
+    needs_padding: bool = False
+    patch_by_name: bool = False
+    input_defaults: tuple[tuple[str, object], ...] = ()
 
     @property
     def key(self) -> str:
         return f"{self.resource} {self.action}".strip()
+
+    # -- 选项面（延迟派生）---------------------------------------------------
+    @property
+    def alias_map(self) -> dict[str, str]:
+        """本命令的「别名 → 真名」映射（见 `_OPTION_ALIASES`）。"""
+        return _OPTION_ALIASES.get(self.key, {})
+
+    @property
+    def param_names(self) -> tuple[str, ...]:
+        """底层工具的**真参数名**（schema 声明顺序）。无转发目标时为空。"""
+        if not self.legacy_tool:
+            return ()
+        from .consoleSchema import param_schemas
+
+        return tuple(param_schemas(self.legacy_tool))
+
+    @property
+    def options(self) -> tuple[str, ...]:
+        """命令行认可的选项名（不带 `--`）：真名 + 该命令的别名。
+
+        「未知选项」报错时给的就是这份清单，所以别名的存在必须在这里体现，否则
+        用户照 help 写 `--kw` 会被自己的白名单拒绝。
+        """
+        real = self.param_names
+        return real + tuple(alias for alias in self.alias_map if alias not in real)
+
+    @property
+    def params(self) -> tuple[str, ...]:
+        """同 `options` 的别名：help 用法行只关心「这条命令有没有选项」。"""
+        return self.options
+
+    def normalize_option(self, name: str) -> str:
+        """选项名 → 工具真名（别名归一；真名原样返回）。"""
+        return self.alias_map.get(name, name)
+
+    @property
+    def boolean_options(self) -> frozenset[str]:
+        """不带值即可出现的开关选项（schema 里 `type: boolean` 的那批，含别名形态）。
+
+        P2 之前这是手写的 `frozenset({"recursive"})`：`dry_run` 被加进 schema 后它
+        不会自动变成开关，解析器会把 `--dry-run` 的下一个 token 当成它的值吃掉。
+        """
+        if not self.legacy_tool:
+            return frozenset()
+        from .consoleSchema import boolean_params
+
+        booleans = boolean_params(self.legacy_tool)
+        aliases = {alias for alias, real in self.alias_map.items() if real in booleans}
+        return frozenset(booleans | aliases)
+
+    @property
+    def option_kinds(self) -> dict[str, str]:
+        """选项名（真名 + 别名）→ 类型类别（`integer` / `boolean` / `array` / ...）。"""
+        if not self.legacy_tool:
+            return {}
+        from .consoleSchema import param_kinds
+
+        kinds = dict(param_kinds(self.legacy_tool))
+        kinds.update({alias: kinds.get(real, "string") for alias, real in self.alias_map.items()})
+        return kinds
+
+    @property
+    def locator_kind(self) -> str:
+        """定位形态：`both` / `id` / `name` / `none`（见 `Locator`）。"""
+        return self.locator.kind if self.locator is not None else "none"
 
 
 def _spec(
@@ -107,101 +298,157 @@ def _spec(
     action: str,
     legacy_tool: str,
     *,
+    verb: Verb,
     accepts_input: bool = False,
     needs_target: bool = False,
     input_optional: bool = False,
     self_interrupt: bool = False,
     min_args: int = 0,
     max_args: int = 0,
-    options: tuple[str, ...] = (),
+    locator: Optional[Locator] = None,
+    needs_padding: bool = False,
+    patch_by_name: bool = False,
+    input_defaults: tuple[tuple[str, object], ...] = (),
 ) -> CommandSpec:
     return CommandSpec(
         resource=resource,
         action=action,
         legacy_tool=legacy_tool,
+        verb=verb,
         accepts_input=accepts_input,
         needs_target=needs_target,
         input_optional=input_optional,
         self_interrupt=self_interrupt,
         min_args=min_args,
         max_args=max_args,
-        options=options,
+        locator=locator,
+        needs_padding=needs_padding,
+        patch_by_name=patch_by_name,
+        input_defaults=input_defaults,
     )
 
 
-#: 全部 console 子命令。**这张表是权限校验与命令解析的唯一事实源。**
+#: 全部 console 子命令。**这张表是权限校验、命令解析与 help 的唯一事实源。**
 COMMAND_SPECS: tuple[CommandSpec, ...] = (
     # 部门
-    _spec("dept", "ls", "get_dept_info"),
-    _spec("dept", "get", "get_dept_info", needs_target=True, min_args=1, max_args=1),
-    _spec("dept", "create", "save_dept", accepts_input=True, max_args=0),
+    _spec("dept", "ls", "get_dept_info", verb="LIST"),
     _spec(
-        "dept", "update", "save_dept",
-        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        "dept", "get", "get_dept_info", verb="GET",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc("dept_id", "name"),
     ),
     _spec(
-        "dept", "rm", "delete_dept",
+        "dept", "create", "save_dept", verb="SAVE", accepts_input=True, max_args=0,
+        # 旧实现 `member_names=_pick(data, "member_names", [])`：新建「只有负责人」的
+        # 部门是合法用法（负责人会自动入成员）。见 `CommandSpec.input_defaults`。
+        input_defaults=(("member_names", []),),
+    ),
+    _spec(
+        "dept", "update", "save_dept", verb="SAVE",
+        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        locator=_loc("dept_id", "name"),
+        patch_by_name=True,
+    ),
+    _spec(
+        "dept", "rm", "delete_dept", verb="DELETE",
         needs_target=True, min_args=1, max_args=1,
-        options=("recursive",),
+        locator=_loc("dept_id", "name"),
     ),
     # 成员
-    _spec("agent", "ls", "get_agent_info"),
-    _spec("agent", "get", "get_agent_info", needs_target=True, min_args=1, max_args=1),
-    _spec("agent", "create", "save_agent", accepts_input=True),
+    _spec("agent", "ls", "get_agent_info", verb="LIST"),
     _spec(
-        "agent", "update", "save_agent",
-        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        "agent", "get", "get_agent_info", verb="GET",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc("agent_id", "name"),
     ),
-    _spec("agent", "wake", "wake_up_agent", needs_target=True, min_args=1, max_args=1),
-    _spec("agent", "dm", "start_chat", needs_target=True, min_args=1, max_args=1),
+    _spec("agent", "create", "save_agent", verb="SAVE", accepts_input=True),
+    _spec(
+        "agent", "update", "save_agent", verb="SAVE",
+        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        # 只有这里要本地同名消歧：`save_agent` 按名取运行时首个，同名两人时会静默
+        # 改错人。`agent get` 按名取首个是 `get_agent_info` 的既有语义，不在此列。
+        locator=_loc("agent_id", "name", ambiguous_by_name=True),
+        patch_by_name=True,
+    ),
+    # `wake` / `dm` 没有定位与补丁语义：位置参数原样就是工具参数（agent_name）。
+    _spec("agent", "wake", "wake_up_agent", verb="DIRECT", needs_target=True, min_args=1, max_args=1),
+    _spec("agent", "dm", "start_chat", verb="DIRECT", needs_target=True, min_args=1, max_args=1),
     # 房间
-    _spec("room", "ls", "get_room_info"),
-    _spec("room", "get", "get_room_info", needs_target=True, min_args=1, max_args=1),
-    _spec("room", "create", "save_room", accepts_input=True),
+    _spec("room", "ls", "get_room_info", verb="LIST"),
     _spec(
-        "room", "update", "save_room",
-        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        "room", "get", "get_room_info", verb="GET",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc("room_id", "name"),
     ),
-    _spec("room", "rm", "delete_room", needs_target=True, min_args=1, max_args=1),
+    _spec("room", "create", "save_room", verb="SAVE", accepts_input=True),
+    _spec(
+        "room", "update", "save_room", verb="SAVE",
+        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        locator=_loc("room_id", "name"),
+        patch_by_name=True,
+    ),
+    _spec(
+        "room", "rm", "delete_room", verb="DELETE",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc("room_id", "name"),
+    ),
     # 角色模板
-    _spec("role", "ls", "list_role_templates", options=("kw",)),
-    _spec("role", "get", "get_role_template", needs_target=True, min_args=1, max_args=1),
-    _spec("role", "create", "save_role_template", accepts_input=True),
+    _spec("role", "ls", "list_role_templates", verb="LIST"),
     _spec(
-        "role", "update", "save_role_template",
-        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        "role", "get", "get_role_template", verb="GET",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="role_name"),
     ),
-    _spec("role", "rm", "delete_role_template", needs_target=True, min_args=1, max_args=1),
+    _spec(
+        "role", "create", "save_role_template", verb="SAVE", accepts_input=True,
+        # `save_role_template` 的 type 必填且没有默认；旧 console 默认 USER。
+        input_defaults=(("type", "USER"),),
+    ),
+    _spec(
+        "role", "update", "save_role_template", verb="SAVE",
+        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        # `save_role_template` 的定位参数真名叫 `name`；对外统一叫 `role_name`
+        # （别名见 `_OPTION_ALIASES`）。注意它 **没有 PATCH 语义**：name/type/soul
+        # 三者必填，所以 `role update` 必须先在本地读出原值补齐（见 consoleTool）。
+        locator=_loc(name_param="name"),
+        needs_padding=True,
+    ),
+    _spec(
+        "role", "rm", "delete_role_template", verb="DELETE",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="role_name"),
+    ),
     # 任务（#187）
     #
     # `legacy_tool` 照旧填转发目标，第 2 跳做权限校验与执行。task 三工具在主干上
     # 都已是 `ToolCategory.BASIC`（见 `toolRegistry.CATEGORY_CONFIG`），所以这三条命令
     # 的可达性由第 2 跳的原工具权限决定，console 侧不另算。
+    #
+    # 选项面（`status` / `assignee` / `reviewer` / `scope` / `kw` / `limit`，以及 P2
+    # 起自动派生出来的 `open_only` / `event_limit`）全部来自 `list_tasks` /
+    # `get_task_detail` 的 schema，本表不再手抄。
+    _spec("task", "ls", "list_tasks", verb="LIST"),
     _spec(
-        "task", "ls", "list_tasks",
-        # `--status` 接受逗号分隔多值（`TODO,DONE`），`--kw` 映射 `title_keyword`。
-        # 选项名不带前导 `--`（见 `CommandSpec.options` 注释）。
-        # 刻意**不**暴露 `open-only`：工具层默认就是 True（只看未完结），而给布尔开关
-        # 只会得到一个「开了等于没开」的骗人选项；要含已完结任务请用 `--status` 显式列出。
-        options=("status", "assignee", "reviewer", "scope", "kw", "limit"),
+        "task", "get", "get_task_detail", verb="GET",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(id_param="task_id"),
     ),
-    _spec("task", "get", "get_task_detail", needs_target=True, min_args=1, max_args=1),
     _spec(
-        "task", "update", "update_task",
+        "task", "update", "update_task", verb="SAVE",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
         # 任务 id 是必填位置参数；配置输入与 `--remove-field` 都可省略 —— 单独给
         # `task update 187 --remove-field reviewer_id` 是合法调用（撤销验收人），
         # 它没有配置输入。详见 `CommandSpec.input_optional`。
         input_optional=True,
-        options=("remove-field",),
+        locator=_loc(id_param="task_id"),
     ),
     # 其他
-    _spec("time", "get", "get_time", options=("tz",)),
-    _spec("reload", "", "reload_team", self_interrupt=True),
+    _spec("time", "get", "get_time", verb="GET"),
+    _spec("reload", "", "reload_team", verb="DIRECT", self_interrupt=True),
 )
 
 #: `help` 是纯本地命令，不映射任何原工具，也不做权限校验（它不碰数据）。
-HELP_SPEC = _spec("help", "", "")
+HELP_SPEC = _spec("help", "", "", verb="DIRECT")
 
 COMMAND_INDEX: dict[str, CommandSpec] = {spec.key: spec for spec in COMMAND_SPECS}
 
@@ -210,6 +457,11 @@ ACTIONS_BY_RESOURCE: dict[str, tuple[str, ...]] = {}
 for _spec_item in COMMAND_SPECS:
     _existing = ACTIONS_BY_RESOURCE.get(_spec_item.resource, ())
     ACTIONS_BY_RESOURCE[_spec_item.resource] = _existing + (_spec_item.action,) if _spec_item.action else _existing
+
+#: 同一资源下的完整 spec（help 自动生成按资源分组时用，保持命令表顺序）。
+SPECS_BY_RESOURCE: dict[str, tuple[CommandSpec, ...]] = {}
+for _spec_item in COMMAND_SPECS:
+    SPECS_BY_RESOURCE[_spec_item.resource] = SPECS_BY_RESOURCE.get(_spec_item.resource, ()) + (_spec_item,)
 
 RESOURCE_NAMES: tuple[str, ...] = tuple(ACTIONS_BY_RESOURCE.keys())
 

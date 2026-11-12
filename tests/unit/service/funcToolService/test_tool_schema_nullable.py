@@ -28,8 +28,11 @@ schema 里丢失，于是校验层用 `_is_ignorable_null` 按**「是否必填�
 
 from __future__ import annotations
 
+import asyncio
+import ast as _ast
 import inspect
 import json
+import re
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
 import pytest
@@ -195,7 +198,7 @@ def _parameters(tool_name: str) -> dict:
     return get_function_metadata(tool_name, func_tool.callable)["parameters"]
 
 
-#: schema 层拒绝文案的固定前缀（与 `toolArgsValidation.validate_tool_args` 里那条对齐）。
+#: schema 层拒绝文案的固定前缀 —— **从源码 import，本文件不再抄一份**。
 #:
 #: ⚠️ **不能只看 `error_code`**：`save_agent` / `save_dept` / `save_room` / `delete_dept` /
 #: `delete_room` 的 `required` 在 #196 后为空（PATCH 语义要求「未传」可达），必填校验
@@ -203,7 +206,112 @@ def _parameters(tool_name: str) -> dict:
 #: 于是「两个定位参数都不给」在运行时被拒时也会带 `invalid_tool_args` ——
 #: 只看码会把 27 个合法 null 注入判成「被 schema 误拒」（本单实测）。
 #: 判据要问的是「**schema 层**放不放行 null」，所以必须同时匹配层文案。
-SCHEMA_LAYER_MARK = "参数校验失败（tool="
+#:
+#: ⚠️ 单一来源（小马哥 23:08 第②件）：这里**不再硬编码**，改为从
+#: `toolArgsValidation.SCHEMA_LAYER_MARK` 取。原来本文件与 `test_tool_args_validation.py`
+#: 各硬编码一份同样的字符串 —— 文案一改，两份常量一起改，判据照样绿，等于没测。
+SCHEMA_LAYER_MARK = toolArgsValidation.SCHEMA_LAYER_MARK
+
+
+def test_schema_layer_mark_matches_the_message_actually_emitted() -> None:
+    """meta 断言（小马哥 23:08 第①件）：常量与 schema 层**真实产出**的文案同源。
+
+    为什么需要这条兜底：第②件把常量收敛成单一来源后，「常量本身写错」或「文案改了但
+    常量没改」仍然不会被任何用例发现 —— 因为 62 组只是拿常量去 `in` 匹配，
+    两边一起漂就一起绿。这里**构造一次必被 schema 层拒的调用**（`create_task` 的
+    `description` 传 `null`，它非 `Optional` 且非 `str`），直接断言：
+
+      1. `error_code == INVALID_TOOL_ARGS`（层码没丢）
+      2. `SCHEMA_LAYER_MARK in message`（常量真的出现在真实文案里）
+
+    这条**不依赖** 62 组、19 组或任何一组的语义方向，只问「文案长什么样」。
+    """
+
+    async def _run() -> dict:
+        return await funcCore.run_tool_call(
+            json.dumps({"title": "t", "assignee_id": 38, "description": None}),
+            _ctx("create_task"),
+        )
+
+    result = asyncio.run(_run())
+
+    assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (
+        f"`create_task(description=None)` 应被 schema 层以 invalid_tool_args 拒绝，实际：{result}"
+    )
+    assert SCHEMA_LAYER_MARK in result.get("message", ""), (
+        f"SCHEMA_LAYER_MARK={SCHEMA_LAYER_MARK!r} 没有出现在真实拒绝文案里："
+        f"{result.get('message')!r} —— 常量与实际文案不同步"
+    )
+
+
+def _declares_nullable(prop: dict) -> bool:
+    """schema 是否声明了 `null` 是合法值（**读源头**，不看文案、不看层）。
+
+    ⚠️ **不许写成 `{"type": "null"} in prop.get("anyOf", [])`**：那是字典精确相等，
+    只要 schema 生成器给 null 支补一个 `description` / `title` 就漏判，而漏判的正好是
+    风险最高的那两条（`create_task.status` / `list_tasks.scope`，`Optional[Literal[...]]`，
+    `_flatten_nullable` 专门为它们留了不扁平化分支）。实测反例：
+
+        {"anyOf": [..., {"type": "null", "description": "未指定"}]}   → 精确相等为 False
+
+    所以按字段判：`branch.get("type") == "null"`。两种形态都要认：
+
+    - `{"type": ["string", "null"]}`                       ← `initial_topic` / `driver`
+    - `{"anyOf": [{"enum": [...], "type": "string"}, {"type": "null"}]}` ← 上面那两条
+    """
+    declared = prop.get("type")
+    if isinstance(declared, list) and "null" in declared:
+        return True
+    any_of = prop.get("anyOf")
+    return isinstance(any_of, list) and any(
+        isinstance(branch, dict) and branch.get("type") == "null" for branch in any_of
+    )
+
+
+async def _inject_null_schema_layer(tool_name: str, param_name: str) -> None:
+    """**只在 schema 层**注入 `null`，不走端到端（不经过 `run_tool_call`）。
+
+    与 `_inject_null` 分开是结构上的隔离，不是风格偏好：
+
+    62 组的结论是「schema 声明并放行 null」。若它和 19 组共用 `_inject_null`
+    （那个 helper 走 `run_tool_call` 端到端），就共用「走端到端」这个前提 ——
+    哪天有人给 `_inject_null` 加个参数或改内部，62 组会**静默回到端到端**，而 62 组
+    自己一行代码都没动过。独立函数把这条耦合物理切断，守卫判据
+    （`test_optional_group_does_not_go_through_end_to_end`）只是防止有人再合并回去。
+
+    ⚠️ **必须合法打底**（#189 踩过的坑）：把全部 `required` 填上再单点注入 null。
+    不打底时 required 错误会**前置遮住** null 的结论（`update_task` 只传
+    `{"clear_fields": None}` 会先报「缺少必填参数 task_id」），判据假红/假绿。
+
+    三条断言缺一不可：
+      ① `schema is not None` —— 否则下面两条都在空转（`validate_tool_args` 取不到
+         schema 时**也返回 None**，只断言「放行」会让 schema 整段删掉还全绿）；
+      ② `_declares_nullable(prop)` —— **真正被测的事实**，读注解层，不依赖文案；
+      ③ `validate_tool_args(... ) is None` —— 校验器确实放行。
+    """
+    func_tool = funcCore.get_func_tool(tool_name)
+    assert func_tool is not None, f"{tool_name} 未注册"
+    func = func_tool.callable
+
+    schema = toolArgsValidation.get_tool_parameters_schema(tool_name, func)
+    assert schema is not None, f"{tool_name}.{param_name} 取不到 schema，判据无法成立"  # 锚点①
+
+    prop = schema["properties"][param_name]
+    assert _declares_nullable(prop), (  # 锚点②
+        f"{tool_name}.{param_name} 的 schema 未声明 null 合法：{prop!r}"
+    )
+
+    # 合法打底：补齐全部 required，再单点注入 null。
+    required = list(schema.get("required") or [])
+    assert param_name not in required, f"{tool_name}.{param_name} 是必填参数，不属于本判据"
+    args: dict[str, Any] = {
+        name: _sample(schema["properties"][name]) for name in required
+    }
+    args[param_name] = None
+
+    assert toolArgsValidation.validate_tool_args(  # 放行
+        tool_name, args, func=func
+    ) is None, f"{tool_name}.{param_name} 传 null 被 schema 层拒了"
 
 
 def _rejected_by_schema(result: dict) -> bool:
@@ -288,11 +396,12 @@ async def test_field_null_accepted_for_all_optional_params() -> None:
 
     failures: list[str] = []
     for tool_name, param_name in OPTIONAL_WITH_DEFAULT:
-        result = await _inject_null(tool_name, param_name)
-        if _rejected_by_schema(result):
-            failures.append(f"{tool_name}.{param_name} 被误拒：{result.get('message')}")
+        try:
+            await _inject_null_schema_layer(tool_name, param_name)
+        except AssertionError as exc:
+            failures.append(str(exc))
 
-    assert not failures, "以下 Optional 字段传 null 被误拒：\n" + "\n".join(failures)
+    assert not failures, "以下 Optional 字段的 null 合法性问题：\n" + "\n".join(failures)
 
 
 @pytest.mark.asyncio
@@ -363,7 +472,13 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #:      没有被稀释，只是随接口扩容重算了基线。
 #: 复核方式（可复现）：`git show 5d231bf0:src/...` 旧树算得 100 参数 /
 #: digest `10a72bd6…`，与旧常量逐字相同 ⇒ 本单没有在「顺手」改 description。
-BASELINE_TEXT_DIGEST = "6365f3f7b61aafe96cdf76e1366d4f31f3401d0e7b798fab082d0ad257d11de9"
+#:
+#: #196 P2 再次重算（`6365f3f7…` → `7ab24aee…`）：**只有一处 description 变化**，
+#: `console.command` 末尾加「任意命令加 --help / -h 可看该命令的参数清单。」
+#: 理由：P2 让 `--help` / `-h` 在任意位置可用（draft D12），这是模型必须知道的能力，
+#: 不写进工具说明等于「实现了但没人知道」。工具数与参数数不变（38 / 108），
+#: required 不变 —— 已实测快照 diff 里只有 `[console.command] 参数说明变化` 一条。
+BASELINE_TEXT_DIGEST = "7ab24aee752aa011bcec1e1b525de3605367247d432b2c74b235b82b75bd6c37"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -409,4 +524,59 @@ def test_descriptions_and_required_do_not_drift() -> None:
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "
         "BASELINE_TEXT_DIGEST。"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 62 组的「不走端到端」守卫（小马哥 23:08 第③件）
+#
+# 判据要钉的是**调用链**（有没有间接走端到端），不是「关键字出现与否」。
+# 62 组的通道原本是 `_inject_null` → `run_tool_call` 两跳，只盯第二跳会漏掉第一跳。
+#
+# 为什么用 AST 取函数体，而不是行号 / sed / awk / 关键字 grep：
+#   - 行号：插一行就腐化（本单实测过 `source.index(f"async def {plan_name}(")` 直接崩）；
+#   - 相邻函数名：改名就失效；
+#   - 不带 `\b` 的子串匹配：`_inject_null_schema_layer`.count("_inject_null") == 1 ⇒ 误报红。
+# 这三样都是**与结论无关的表示细节**，判据依赖它们就会在正确实现上假红。
+# --------------------------------------------------------------------------- #
+
+
+def _body_of_test_function(func_name: str) -> str:
+    """取某个测试函数的**语句体**源码（剥掉 docstring 与 decorator）。
+
+    `ast.unparse` 会丢弃全部注释（注释在 `ast.parse` 阶段就不进树），所以函数体里
+    写「本判据不走 `_inject_null`」这类注释**不会**让下面的守卫假红 —— 只有真实调用
+    才会被 `re.findall` 抓到。
+    """
+    path = __file__
+    tree = _ast.parse(open(path, encoding="utf-8").read())
+    node = next(
+        n for n in _ast.walk(tree)
+        if isinstance(n, (_ast.AsyncFunctionDef, _ast.FunctionDef)) and n.name == func_name
+    )
+    stmts = [
+        stmt for stmt in node.body
+        if not (
+            isinstance(stmt, _ast.Expr)
+            and isinstance(stmt.value, _ast.Constant)
+            and isinstance(stmt.value.value, str)
+        )
+    ]
+    return "\n".join(_ast.unparse(stmt) for stmt in stmts)
+
+
+def test_optional_group_does_not_go_through_end_to_end() -> None:
+    """62 组必须**直连 schema 层**，不得经 `_inject_null` / `run_tool_call` 两跳。
+
+    结构上的保证在 `_inject_null_schema_layer`（独立函数），这条判据只是防止有人
+    把 62 组改回共用 `_inject_null` —— 那会让「走端到端」这个前提悄悄复活：
+    62 组自己的代码一行没动，结论却已经变成了端到端结果。
+
+    `\\b` 词边界是必须的：`_inject_null_schema_layer` 里含 `_inject_null` 子串。
+    """
+    body = _body_of_test_function("test_field_null_accepted_for_all_optional_params")
+    hits = sorted(set(re.findall(r"\b_inject_null\b|\brun_tool_call\b", body)))
+    assert not hits, (
+        f"62 组必须直连 schema 层，函数体里命中了：{hits} —— "
+        "请改调 `_inject_null_schema_layer`（不要共用 `_inject_null`）"
     )

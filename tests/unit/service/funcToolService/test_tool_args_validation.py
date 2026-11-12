@@ -79,7 +79,11 @@ def _ctx(tool_name: str) -> ToolCallContext:
 #: ⇒ 凡是要测「**schema 层**放不放行 null」的判据，不能只看 `error_code`
 #: （会把运行时拒绝误认成 schema 拒绝 ⇒ P1 注入表出现 27 处假红）；必须同时匹配层文案。
 #: 只看层文案不判码则更糟：schema 层一旦丢码，判据仍绿。两者一起判。
-SCHEMA_LAYER_MARK = "参数校验失败（tool="
+#:
+#: ⚠️ 单一来源（小马哥 23:08 第②件）：直接取源码常量，本文件不再硬编码。
+#: 与 `test_tool_schema_nullable.py` 共用同一个来源，文案变更只需改
+#: `toolArgsValidation.py` 一处（并有 meta 断言钉住它没漂）。
+SCHEMA_LAYER_MARK = toolArgsValidation.SCHEMA_LAYER_MARK
 
 
 def _rejected_by_schema(result: dict) -> bool:

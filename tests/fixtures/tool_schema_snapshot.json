@@ -3,7 +3,7 @@
     "description": "团队/组织/成员/房间/角色模板的管理控制台，用命令行完成管理操作。",
     "parameters": {
       "command": {
-        "description": "要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令。",
+        "description": "要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令；任意命令加 --help / -h 可看该命令的参数清单。",
         "schema": {
           "type": "string"
         }

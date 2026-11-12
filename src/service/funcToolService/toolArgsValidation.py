@@ -50,6 +50,18 @@ logger = logging.getLogger(__name__)
 #: schema 不可用 ⇒ 跳过校验。**文案固定**：用例与 grep 都靠它定位。
 _SCHEMA_UNAVAILABLE_TMPL = "工具参数 schema 不可用，已跳过校验: tool=%s, reason=%s"
 
+#: schema 层拒绝文案的固定前缀。**这是唯一来源**：测试要判「这次拒绝是 schema 层还是
+#: 运行时层」时必须从这里 import（`from ...toolArgsValidation import SCHEMA_LAYER_MARK`），
+#: 不许在测试里再抄一份字符串。
+#:
+#: 为什么这件事必须单点：`error_code == "invalid_tool_args"` 有**两个**产出层 ——
+#: schema 层（本模块）与运行时层（`tools.py` 里的 locator / 新建必填缺失，同码是
+#: 小马哥 12:02 的硬条件 1，让调用方一个码就能判「补参数重试」）。判据要问的是
+#: 「**schema 层**放不放行 null」，只看码会把运行时的拒绝误认成 schema 的拒绝
+#: （实测出现过 27 处假红）。所以必须按层文案区分，而「层文案」这个字符串只能有一处
+#: 定义 —— 抄两份的话，文案改了、两份常量一起改，判据照样绿，等于没测。
+SCHEMA_LAYER_MARK = "参数校验失败（tool="
+
 #: 从 jsonschema 的 required 错误文案里取缺失参数名（`"'x' is a required property"`）。
 _REQUIRED_NAME_PATTERN = re.compile(r"'([^']+)' is a required property")
 
@@ -486,6 +498,6 @@ def validate_tool_args(
     errors.sort(key=lambda error: ([str(part) for part in error.absolute_path], error.validator))
     details = "；".join(_describe(error) for error in errors)
     return failure(
-        f"参数校验失败（tool={tool_name}）：{details}。请按提示修正参数后重试。",
+        f"{SCHEMA_LAYER_MARK}{tool_name}）：{details}。请按提示修正参数后重试。",
         INVALID_TOOL_ARGS,
     )

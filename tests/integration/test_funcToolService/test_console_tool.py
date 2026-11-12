@@ -528,7 +528,12 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert upd["role_template"]["type"] == "USER"
 
     async def test_cc1_delete_dept(self):
-        """delete_dept ↔ `dept rm`：一次调用即删，返回体带 impact（#165 D/E）。"""
+        """delete_dept ↔ `dept rm`：一次调用即删。
+
+        #196 P2 起 console **不再自造 `impact`**：原工具返回体已有 `deleted` /
+        `would_delete`（P1 加的），再叠一份等于同一件事说两遍。判据改成看原工具的
+        `deleted` 清单 —— 它才是「删掉了什么」的唯一来源。
+        """
         via = await self._call(
             f"dept create '{{\"name\":\"cc1_dept_rm\",\"responsibility\":\"x\","
             f"\"manager_name\":\"mgr3\",\"parent_name\":\"root\"}}'",
@@ -538,12 +543,15 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
         result = await self._call("dept rm cc1_dept_rm", _context=self._ctx())
         assert result["success"] is True, result
-        # impact 是 console 独有信息（原工具返回体没有），删成功后必须回显。
-        assert any("cc1_dept_rm" in line for line in result["impact"]), result
+        assert any(entry["name"] == "cc1_dept_rm" for entry in result["deleted"]), result
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc1_dept_rm") is None
 
     async def test_cc1_delete_role_template(self):
-        """delete_role_template ↔ `role rm`：一次调用即删，返回体带 impact（#165 D/E）。"""
+        """delete_role_template ↔ `role rm`：一次调用即删。
+
+        `delete_role_template` 的返回体**没有 `deleted` 字段**（只有 `message` 与
+        `role_template`），所以这里只能查库 + 看 message。#196 P2 不再叠 `impact`。
+        """
         via = await self._call(
             "role create '{\"name\":\"cc1_role_rm\",\"soul\":\"tmp\",\"type\":\"USER\"}'",
             _context=self._ctx(),
@@ -552,11 +560,11 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
         result = await self._call("role rm cc1_role_rm", _context=self._ctx())
         assert result["success"] is True, result
-        assert any("cc1_role_rm" in line for line in result["impact"]), result
+        assert "cc1_role_rm" in result["message"], result
         assert await gtRoleTemplateManager.get_role_template_by_name("cc1_role_rm") is None
 
     async def test_cc1_delete_room(self):
-        """delete_room ↔ `room rm`：一次调用即删，返回体带 impact（#165 D/E）。"""
+        """delete_room ↔ `room rm`：一次调用即删（返回体看原工具的 `deleted`）。"""
         via = await self._call(
             "room create '{\"name\":\"cc1_room_rm\",\"member_names\":[\"alice\",\"mgr8\"]}'",
             _context=self._ctx(),
@@ -565,7 +573,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
         result = await self._call("room rm cc1_room_rm", _context=self._ctx())
         assert result["success"] is True, result
-        assert any("cc1_room_rm" in line for line in result["impact"]), result
+        assert any(entry["name"] == "cc1_room_rm" for entry in result["deleted"]), result
         assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room_rm") is None
 
     async def test_cc1_reload_forwards_and_predicate_matches(self):
@@ -871,9 +879,10 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
     # 不是被测行为；不这样写，用例之间会因为房间名不同但成员相同而互相干扰。
     # ==================================================================
 
-    async def test_cc4_room_rm_deletes_in_one_call_and_reports_impact(self):
-        """一次调用即真删，返回体带 impact（#165 D/E：闸门已删，impact 仅回显）。
+    async def test_cc4_room_rm_deletes_in_one_call_and_reports_deleted(self):
+        """一次调用即真删，返回体带原工具的 `deleted` 清单。
 
+        #196 P2 起 console 不再自造 `impact`（原工具已有 `deleted`/`would_delete`）。
         删除后查库证明真的删了（不能只看返回体）。
         """
         ctx = self._ctx()
@@ -882,14 +891,23 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
         result = await self._call("room rm cc4_room", _context=ctx)
         assert result["success"] is True, result
-        assert any("cc4_room" in line for line in result["impact"]), result
+        assert any(entry["name"] == "cc4_room" for entry in result["deleted"]), result
         assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room") is None
 
     async def test_cc4_room_rm_unknown_target_reports_not_found(self):
-        """不存在的目标 → `not_found`，且不转发（解析失败在转发之前）。"""
+        """不存在的目标 → 明确「未找到房间: name=…」，且不删任何东西。
+
+        #196 P2 起 console 不再**预查**目标（旧实现先 `_resolve_room_by_target` 拿
+        row，查不到自造 `not_found`），而是直接转发、由原工具报「未找到」。
+        所以这里断言原工具那条文案与「没有 error_code」（业务失败无码，见报告
+        「对外契约变更」一节），**不是** `not_found`。
+        """
         result = await self._call("room rm cc4_no_such_room", _context=self._ctx())
         assert result["success"] is False
-        assert result["error_code"] == "not_found"
+        assert "未找到房间: name=cc4_no_such_room" in result["message"], result
+        assert await gtRoomManager.get_room_by_team_and_name(
+            self.team_id, "cc4_no_such_room"
+        ) is None
 
     async def test_cc4_confirm_option_is_gone(self):
         """`--confirm` 已不是合法选项 → `unknown_option`（#165 D 的负向判据）。
@@ -901,10 +919,14 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             assert result["success"] is False, (command, result)
             assert result["error_code"] == "unknown_option", (command, result)
 
-    async def test_cc4_impact_not_attached_to_failure_result(self):
-        """失败体**不叠** impact（#165 E：旧实现无条件 `{**result, "impact": ...}`）。
+    async def test_cc4_failure_result_carries_no_deletion_manifest(self):
+        """失败体**不带任何「删掉了什么」清单**（旧缺陷的延续判据）。
 
-        失败时"删掉了什么"没有意义，叠上去会让模型以为部分成功。
+        #165 E 的旧缺陷是「无条件 `{**result, "impact": ...}`」，会把影响范围挂到
+        `{"success": False}` 上，让模型以为部分成功。#196 P2 删掉了 console 自造的
+        `impact`，但**同一类错误可以再犯**：只要有人给成功路径加清单字段却忘了判
+        `success`，症状就复现。所以判据从「`impact` 不在」升级为「任何清单字段都不在」
+        —— 这样换个字段名也咬得住。
         """
         ctx = self._ctx()
         # 删一个 DEPT 房间：原工具会拒绝（DEPT 房间不允许删除），这里只验 impact 不被叠上。
@@ -913,13 +935,19 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             pytest.skip("夹具里没有 root 房间，跳过")
         result = await self._call("room rm root", _context=ctx)
         assert result["success"] is False, result
-        assert "impact" not in result, f"失败体不得带 impact：{result}"
+        for manifest in ("impact", "deleted", "would_delete"):
+            assert manifest not in result, f"失败体不得带 {manifest}：{result}"
 
-    async def test_cc4_dept_rm_recursive_required_lists_impact(self):
-        """`dept rm` 有子部门且未加 `--recursive` → `recursive_required`，且不删。
+    async def test_cc4_dept_rm_recursive_required_is_refused(self):
+        """`dept rm` 有子部门且未加 `--recursive` → 被拒，且一点没删。
 
         **这条与 confirm 无关，必须保留**：它是「一次误触删掉一棵子树」的物理阻断，
         不随确认闸门一起移除。
+
+        #196 P2 起错误码由 console 自造的 `recursive_required` 变成**服务层**的
+        `DEPT_HAS_CHILDREN`（`deptService.delete_dept` 抛 `TogoException`）：console
+        不再预查子部门，冲突由服务层判，错误码随之外移。文案也变了——服务层不再报
+        「N 个子部门」，只是拒绝。详见报告「对外契约变更」一节。
         """
         ctx = self._ctx()
         await self._call(
@@ -934,12 +962,13 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         )
         result = await self._call("dept rm cc4_parent", _context=ctx)
         assert result["success"] is False
-        assert result["error_code"] == "recursive_required"
-        assert "1 个子部门" in result["message"]
+        assert result["error_code"] == "DEPT_HAS_CHILDREN", result
+        # 「拒绝了」必须配「什么都没删」：只看错误码挡不住「先删一半再报错」。
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4_parent") is not None
+        assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4_child") is not None
 
     async def test_cc4_dept_rm_recursive_lists_children_then_deletes(self):
-        """`dept rm --recursive` → **一次调用**父子都删，impact 里列出被删的子部门名。
+        """`dept rm --recursive` → **一次调用**父子都删，`deleted` 里列出被删的子部门名。
 
         自建数据（不依赖上一条用例留下的 `cc4_parent`）：用例之间共享夹具状态是
         `-k` 子集跑假红的来源，这里不再新增这种依赖。
@@ -968,8 +997,8 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             assert created["success"] is True, (name, created)
         result = await self._call("dept rm cc4r_parent --recursive", _context=ctx)
         assert result["success"] is True, result
-        impact_text = "\n".join(result["impact"])
-        assert "cc4r_child" in impact_text, f"影响范围必须列出会被删的子部门名：{impact_text}"
+        deleted_names = {entry["name"] for entry in result["deleted"]}
+        assert "cc4r_child" in deleted_names, f"删除清单必须列出被一并删掉的子部门：{deleted_names}"
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4r_parent") is None
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4r_child") is None
 
@@ -1123,7 +1152,9 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
 
 class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
-    """同名成员（离职名字被复用）时 `agent get/update` 必须报错，不能静默换人。
+    """同名成员（离职名字被复用）时的保护面。
+
+    ⚠️ **#196 P2 起保护范围收窄到 `agent update`**（详见下面各组用例）：
 
     为什么单独一组：`GtAgent` 的 `(team_id, name)` 是**非唯一**索引（离职成员的
     名字允许被新成员复用），而 `gtAgentManager.get_agent()` 底层是
@@ -1132,8 +1163,23 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
     同名的「B」，返回体仍是 `success: True` —— 这是最贵的一类错：模型会当成成功
     继续往下做。draft §4.2 明确要求「同名冲突时提示改用 id」。
 
-    这组用例是**回归钉**：改坏 `_resolve_agent_by_target` 或去掉 `agent get` 里的
-    一致性校验，这里必须变红。
+    这组用例是**回归钉**：改坏 `_resolve_agent_by_target`（`agent update` 的同名
+    歧义保护），这里必须变红。
+
+    ## 为什么 `agent get <同名>` 的保护被撤掉（P2 已拍板，不阻塞）
+
+    P2 之前 console 对 `agent get` 额外挂了一个 `_guard_agent_get` post_process：
+    转发后比对「运行时按名字解析出的 id」与「请求的 id」，不一致就报
+    `ambiguous_target`。P2 把 console 收敛成**纯转发**后这个守卫删掉了，于是：
+
+    - `agent get <id>` 的行为**由原工具 `get_agent_info` 决定**，它自带三档
+      （无码「未找到成员: id=…」/ `member_not_on_board` / `agent_runtime_not_loaded`）；
+    - `agent get <同名>` 走原工具的「按名匹配 name 或 display_name」，多行同名时
+      取运行时列表里第一个 —— **静默成功，不再报 `ambiguous_target`**。
+
+    这是本单的**对外契约变更**（报告「对外契约变更」一节逐条记）：`agent get` 是
+    只读命令，取错人不会改库；而 `agent update` 才是「静默改错人」的真风险，所以
+    同名保护只留在它身上（`_save_locator_args` + `locator.ambiguous_by_name`）。
     """
 
     @classmethod
@@ -1208,13 +1254,18 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
         assert result["success"] is True, result
         assert result["agent"]["id"] == self.on_id
 
-    async def test_agent_get_by_duplicate_name_is_ambiguous(self, monkeypatch):
-        """同名多行时按名字取必须报 `ambiguous_target`，并列出候选 id。"""
+    async def test_agent_get_by_duplicate_name_silently_takes_first_runtime_row(self, monkeypatch):
+        """`agent get <同名>` 现在是**原工具的语义**：取运行时列表里第一个，不报歧义。
+
+        这是 P2 的**契约变更**（不是缺陷被容忍）：console 不再对只读命令做同名守卫，
+        详情见类 docstring。判据写成「钉住当前语义」而不是「期望它报错」——
+        哪天有人把守卫加回去，这里会红并提醒同步报告。
+        """
         self._runtime_stub(monkeypatch)
         result = await self._call("agent get dup", _context=self._ctx())
-        assert result["success"] is False
-        assert result["error_code"] == "ambiguous_target"
-        assert sorted(c["id"] for c in result["candidates"]) == sorted([self.off_id, self.on_id])
+        assert result["success"] is True, result
+        # 运行时桩只含在职行 ⇒ 取到的必然是 on_id，不会跑到离职那一行。
+        assert result["agent"]["id"] == self.on_id
 
     async def test_agent_update_by_duplicate_name_is_ambiguous_and_does_not_write(self):
         """同名多行时 `agent update` 必须拒绝，且**库里一行都不能被改**。"""
@@ -1233,28 +1284,21 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
         assert rows[self.on_id] == "only-this-one"
         assert rows[self.off_id] != "only-this-one"
 
-    async def test_agent_get_by_id_rejects_when_runtime_resolves_to_other_id(self, monkeypatch):
-        """**纵深防御**：运行时把该名字解析成另一个 id 时必须拒绝。
+    # ⚠️ 原 `test_agent_get_by_id_rejects_when_runtime_resolves_to_other_id` 已删：
+    # 它钉的是 `_guard_agent_get` 那个 post_process 一致性守卫，而 P2 把 console 收敛
+    # 成纯转发后守卫已不存在（同名保护只留 `agent update`）。留着会变成「测一个不存在
+    # 的函数」——把守卫的功能重新发明一遍就等于没删。代替它的是下面这条：
+    async def test_agent_get_by_id_still_cannot_return_the_off_board_row(self, monkeypatch):
+        """按 id 查离职那一行仍被原工具挡（`member_not_on_board`）—— 撤销守卫后不失守。
 
-        这条为什么要用桩：真实数据模型下「同名」只可能一行在职，`member_not_on_board`
-        会先短路，一致性校验根本轮不到执行 —— 于是删掉它也没人知道。这里直接构造
-        「请求 id=A、运行时同名解析出 id=B」，单独钉住那一层。
+        这是删掉 `_guard_agent_get` 后的**替代判据**：守卫原本防的是「按 id 拿到别人的
+        详情」，而原工具自己就挡得住离职行（运行时只加载在职）。所以撤守卫没有降级。
         """
-        real_on = next(r for r in self.rows if r.id == self.on_id)
-        ghost = GtAgent(
-            team_id=self.team_id,
-            name=real_on.name,
-            role_template_id=self.role_template_id,
-            employ_status=EmployStatus.ON_BOARD,
-        )
-        ghost.id = self.on_id + 1000
-        monkeypatch.setattr(
-            agentService, "get_team_agents", lambda team_id: [_FakeRuntimeAgent(ghost, AgentStatus.IDLE)]
-        )
-        result = await self._call(f"agent get {self.on_id}", _context=self._ctx())
+        self._runtime_stub(monkeypatch)
+        result = await self._call(f"agent get {self.off_id}", _context=self._ctx())
         assert result["success"] is False
-        assert result["error_code"] == "ambiguous_target"
-        assert str(self.on_id) in result["message"]
+        assert result["error_code"] == "member_not_on_board"
+        assert str(self.off_id) in result["message"]
 
 
 # ======================================================================
@@ -1323,38 +1367,48 @@ def test_p165_a_no_dead_rest_assignment():
 
 
 def test_p165_c_destructive_commands_resolve_target_once():
-    """`dept rm` / `room rm` 每条命令的 resolve 只发生一次（#165 C）。
+    """删除命令的目标**只在命令表声明一次**，代码里不得再自行解析（#165 C）。
 
-    旧实现：`_route` 里先 `_resolve_*` 拿 id/row（为了拼转发参数），`_handle_rm` 内的
-    planner 又 resolve 一遍（为了拼 impact 文本）—— 同一请求查两次库，且两处结果
-    若在两次查询之间被改，行为无法预测。
+    旧实现的病：`_route` 里先 `_resolve_*` 拿 id/row（拼转发参数），`_handle_rm` 内的
+    planner 又 resolve 一遍（拼 impact 文本）—— 同一请求查两次库，两次结果若在中途
+    被改，行为无法预测。
 
-    **第一版判据是坏的（实测发现）**：只数 `_plan_*` 函数体内的 `_resolve_` 出现次数，
-    而重复的那一次在 `_route` 里 —— 于是基线 `1d1ee949` 上这条也绿，等于没测。
-    改成按「路由分支 + 它调用的 planner」合并统计：
-      `dept rm` 分支体 与 `_plan_dept_rm` 体内的 `_resolve_*` 调用合计必须 == 1。
+    P2 的修法不是「把两次合并成一次」，而是**让它结构上不可能发生**：删掉了全部
+    `_plan_*` planner，目标定位统一由 `CommandSpec.locator` 声明、由 `_locator_args`
+    一处翻译成工具参数。所以判据也跟着换 —— 继续数 `_resolve_*` 的次数会变成
+    「测一个已被删除的结构」（本单实测：planner 删掉后这条直接 ValueError 崩在
+    `source.index`）。
+
+    新判据（三条，任一条失效都说明定位又长出了第二个来源）：
+      ① 源码里不存在任何 `_plan_<资源>_rm`（planner 不许复活）；
+      ② 三条 delete 命令在命令表里都有 `locator`，且 `verb == "DELETE"`；
+      ③ delete 的处理器（`verb=DELETE` 映射到的那个）体内不得出现 `cp._resolve_`。
     """
+    import ast as _ast
+    from service.funcToolService import consoleCommands as _cc
+
     source = _console_tool_source()
 
-    def _body_of(header: str, end_marker: str = "\n    if key ==") -> str:
-        start = source.index(header)
-        tail = source[start:]
-        cut = tail.find(end_marker)
-        return tail if cut == -1 else tail[:cut]
+    # ① planner 不许复活：它的存在本身就是「同一件事算两遍」的载体。
+    resurrected = _re.findall(r"def _plan_\w+\(", source)
+    assert not resurrected, f"planner 已被删除，不得复活：{resurrected}"
 
-    for branch_header, plan_name in (
-        ('if key == "dept rm":', "_plan_dept_rm"),
-        ('if key == "room rm":', "_plan_room_rm"),
-    ):
-        branch_body = _body_of(branch_header)
-        plan_start = source.index(f"async def {plan_name}(")
-        plan_tail = source[plan_start:]
-        plan_cut = plan_tail.find("\nasync def ")
-        plan_body = plan_tail if plan_cut == -1 else plan_tail[:plan_cut]
-        total = len(_re.findall(r"_resolve_\w+", branch_body)) + len(
-            _re.findall(r"_resolve_\w+", plan_body)
-        )
-        assert total == 1, (
-            f"{branch_header} 这条命令路径上 `_resolve_*` 共出现 {total} 次，必须恰好 1 次"
-            f"（旧实现是 2 次：_route 一次 + planner 一次）"
-        )
+    # ② 命令表必须声明定位形态（否则 `_locator_args` 静默返回 {}，命令会漏定位参数）。
+    for key in ("dept rm", "room rm", "role rm"):
+        spec = _cc.COMMAND_INDEX[key]
+        assert spec.verb == "DELETE", f"{key} 的 verb 必须是 DELETE，当前 {spec.verb!r}"
+        assert spec.locator is not None, f"{key} 必须在命令表里声明 locator"
+
+    # ③ DELETE 处理器体内不得自行查库定位：定位只经 `_locator_args`。
+    tree = _ast.parse(source)
+    handler = _console_tool_module._VERB_HANDLERS["DELETE"]
+    node = next(
+        n for n in _ast.walk(tree)
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name == handler
+    )
+    body = _ast.unparse(node)
+    resolves = _re.findall(r"_resolve_\w+", body)
+    assert not resolves, (
+        f"`{handler}` 体内出现了 {resolves}：目标定位必须只经 `_locator_args` 一处，"
+        "否则同一个目标会有两个解析来源"
+    )

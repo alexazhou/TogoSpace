@@ -103,7 +103,9 @@ def keep_legacy_admin_tools() -> bool:
     转发到」而在第 2 跳加旁路，会产生「注册表里能查到、但模型调不到」的第三种状态——
     这正是 #160 用 870 行消灭掉的东西。收益为零，风险是搅乱刚修好的结构。
 
-    修 A 时须同时评估 `consoleTool._handle_rm` docstring 里 §6.2 的删除保护缺口。
+    修 A 时须同时评估 console 删除命令（`dept rm` / `room rm` / `role rm`，命令表里
+    `verb=DELETE`）在隐藏模式下的「权限判据是否还是唯一防线」这一前提——上面第 85 行
+    的实测说明它**当前不成立**，通路修好后要回来重新评估（#196 报告「只报不改」）。
 
     **A 的修法方向已实测可行**（不必再从零设计）：把第 2 跳「`registered is None`」改为
     回落到 `get_func_tool(function_name)`，实测隐藏模式下 `get_time` 真返回了时间、
