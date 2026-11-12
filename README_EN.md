@@ -1,8 +1,8 @@
-![Togobot](image/togo_agent_team.png)
+![TogoSpace](image/togo_agent_team.png)
 
 <div align="center">
 
-# Togobot 🚀
+# TogoSpace 🚀
 
 **Turn a group of AIs into a real team.**
 
@@ -11,7 +11,7 @@ They split up work, hold discussions, assign tasks, review each other's output �
 [English](README_EN.md) | [中文](README.md)
 
 [![Release](https://img.shields.io/github/v/release/alexazhou/TogoSpace)](https://github.com/alexazhou/TogoSpace/releases)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED.svg?logo=docker&logoColor=white)](https://github.com/alexazhou/TogoSpace/pkgs/container/togobot)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED.svg?logo=docker&logoColor=white)](https://github.com/alexazhou/TogoSpace/pkgs/container/togospace)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#-quick-start)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -22,10 +22,10 @@ They split up work, hold discussions, assign tasks, review each other's output �
 
 ---
 
-## 🤔 What is Togobot?
+## 🤔 What is TogoSpace?
 
 Most AI tools give you **one** assistant — you still have to break down complex tasks, babysit them, and stitch the results together yourself.
-Togobot takes a different approach: it gives you an **AI team**.
+TogoSpace takes a different approach: it gives you an **AI team**.
 
 - Tell the "Project Manager" what you need. It breaks the work down for the "Engineer", who hands the result to the "Tester" for review — all communicated through group chat.
 - No flowcharts to draw: **the team decides for itself who steps up next**.
@@ -37,7 +37,7 @@ Togobot takes a different approach: it gives you an **AI team**.
 
 ---
 
-## ✨ Why Togobot
+## ✨ Why TogoSpace
 
 ### 🧑‍🤝‍🧑 Collaborate like a real team, not a rigid workflow
 
@@ -121,15 +121,15 @@ Grab the `.dmg` from the [Releases page](https://github.com/alexazhou/TogoSpace/
 
 ```bash
 docker run -d \
-  --name togobot \
+  --name togospace \
   -p 7180:7180 \
   -v ~/togospace-data:/storage \
-  ghcr.io/alexazhou/togobot:latest
+  ghcr.io/alexazhou/togospace:latest
 
 # Open http://localhost:7180 in your browser
 ```
 
-> The image is also published on Docker Hub: `alexazhou/togobot:latest`. See the [Docker Deployment Guide](docs/manual/DOCKER.md) for more options.
+> The image is also published on Docker Hub: `alexazhou/togospace:latest`. See the [Docker Deployment Guide](docs/manual/DOCKER.md) for more options.
 
 ### Option 3: Run from source
 
@@ -191,7 +191,7 @@ Join our WeChat group to report issues and share how you use your AI team:
 
 ![WeChat QR Code](image/wechat.JPG)
 
-If Togobot helps you, please give it a ⭐ Star — it means a lot to us!
+If TogoSpace helps you, please give it a ⭐ Star — it means a lot to us!
 
 ---
 

@@ -47,7 +47,7 @@ for tag in $tags; do
   for suffix in amd64 arm64; do
     code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
       -H "Authorization: JWT ${jwt}" \
-      "https://hub.docker.com/v2/repositories/${username}/togobot/tags/${tagname}-${suffix}/")
-    echo "delete ${username}/togobot:${tagname}-${suffix} -> HTTP ${code}"
+      "https://hub.docker.com/v2/repositories/${username}/togospace/tags/${tagname}-${suffix}/")
+    echo "delete ${username}/togospace:${tagname}-${suffix} -> HTTP ${code}"
   done
 done
