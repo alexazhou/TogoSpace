@@ -218,28 +218,63 @@ class TestCompatibilityGuard:
             + "\n  ".join(violations)
         )
 
-    def test_readme_clone_dir_matches_clone_url(self) -> None:
-        """README 的源码安装步骤：`git clone <url>/X.git` 之后必须 `cd X`。
+    def test_readme_repo_paths_use_real_repo_name(self) -> None:
+        """README 里一切「指向仓库 / 镜像」的路径，必须用**真实仓库名**，不能用应用名。
 
-        这是被人肉评审漏掉、又被反向对账抓出来的一处真实误伤：改名批次里把
-        `cd TogoSpace` 顺手改成了 `cd Togobot`，但 clone URL 指向的仓库仍叫
-        `TogoSpace`（仓库名本轮不改）⇒ 用户照抄命令会 `No such file or directory`。
+        背景（阿张 03:57 打回的那处）：改名批次把源码安装段的
+        `git clone https://github.com/alexazhou/TogoSpace.git` 下一行 `cd TogoSpace`
+        改成了 `cd Togobot`。`Togobot` 是**应用名**，`TogoSpace` 是**仓库名**，
+        本单把两者分在「改」与「不改」两侧 ⇒ clone 出来的目录仍叫 `TogoSpace`，
+        照抄 README 必然 `cd: Togobot: No such file or directory`。
 
-        判据不写死目录名，只校验「两者一致」：仓库将来真改名时这条会自动跟着变绿。
+        **为什么不能用「clone URL 末段 == cd 目标」这种自证式判据**（我第一版就是这么写的）：
+        两处一起被改错时它会绿。所以这里改用**权威源**：
+        `src/service/updateService.py` 的 `api.github.com/repos/<owner>/<repo>/`
+        是运行时真实请求的地址，改了就更新检查 404，因此它就是仓库名的权威定义。
+        三方交叉：权威源 == clone URL（末两段）== `cd` 目标。
+
+        另加一条守卫：README 里**不得出现**「应用名形态」的仓库/镜像路径
+        （`Togobot.git`、`github.com/<owner>/Togobot`、`ghcr.io/<owner>/Togobot`、
+        `<owner>/Togobot:tag`），这正是残留统计（只 grep `togospace`）查不到的第 9 类。
         """
-        pattern = re.compile(
-            r"git clone\s+(\S+?)(?:\.git)?\s*\n\s*cd\s+(\S+)",
+        update = _read("src/service/updateService.py")
+        match = re.search(r"api\.github\.com/repos/([\w.-]+)/([\w.-]+)/", update)
+        assert match, "无法从 updateService.py 提取权威仓库名，锚点口径失效"
+        owner, repo = match.group(1), match.group(2)
+        assert repo == OLD_NAME, (
+            f"权威源里的仓库名变成了 {repo!r}，但本单决定 GitHub 仓库名不改（更新检查会 404）"
         )
+
+        clone_pattern = re.compile(r"git clone\s+(\S+?)(?:\.git)?\s*\n\s*cd\s+(\S+)")
         checked = 0
         for rel in ("README.md", "README_EN.md"):
             text = _read(rel)
-            for url, directory in pattern.findall(text):
-                expected = url.rstrip("/").rsplit("/", 1)[-1]
-                if expected.endswith(".git"):
-                    expected = expected[:-4]
-                assert directory == expected, (
-                    f"{rel}: `git clone {url}` 得到的目录是 `{expected}`，"
+
+            # 1) clone URL 的 owner/repo 必须与权威源一致
+            for url in re.findall(r"git clone\s+(\S+)", text):
+                cleaned = url.rstrip("/")
+                if cleaned.endswith(".git"):
+                    cleaned = cleaned[: -len(".git")]
+                assert cleaned.endswith(f"/{owner}/{repo}"), (
+                    f"{rel}: `git clone {url}` 指向的仓库不是权威源的 {owner}/{repo}"
+                )
+
+                # 2) 紧随其后的 cd 必须落到 repo 这个名字上
+            for url, directory in clone_pattern.findall(text):
+                assert directory == repo, (
+                    f"{rel}: `git clone {url}` 得到的目录是 `{repo}`，"
                     f"但下一行写的是 `cd {directory}` ⇒ 用户照抄会失败"
                 )
                 checked += 1
+
+            # 3) 守卫：不得出现「应用名形态」的仓库 / 镜像路径
+            bad_paths = re.findall(
+                rf"(?:{re.escape(owner)}/{EXPECTED_NAME}|{EXPECTED_NAME}\.git|github\.com/{re.escape(owner)}/{EXPECTED_NAME}|ghcr\.io/{re.escape(owner)}/{EXPECTED_NAME})",
+                text,
+            )
+            assert not bad_paths, (
+                f"{rel} 里出现了应用名形态的仓库/镜像路径 {bad_paths} —— "
+                f"{EXPECTED_NAME} 是应用名，不是仓库名/镜像名"
+            )
+
         assert checked >= 2, f"只匹配到 {checked} 处 clone 片段，锚点口径失效"
