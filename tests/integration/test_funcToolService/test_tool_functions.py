@@ -78,12 +78,15 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
         assert python_type_to_json_schema(bool) == {"type": "boolean"}
 
     async def test_optional_str(self):
-        """Optional[T] 退化到 T 的 schema。"""
-        assert python_type_to_json_schema(Optional[str]) == {"type": "string"}
+        """`Optional[T]` 保留 nullability：`type` 是 `[T, "null"]`（#195 前是剥成 T）。"""
+        assert python_type_to_json_schema(Optional[str]) == {"type": ["string", "null"]}
 
     async def test_optional_list_str(self):
-        """Optional[list[str]] 应映射为 array with items。"""
-        assert python_type_to_json_schema(Optional[list[str]]) == {"type": "array", "items": {"type": "string"}}
+        """`Optional[list[str]]` ⇒ array with items，且 `type` 含 null。"""
+        assert python_type_to_json_schema(Optional[list[str]]) == {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+        }
 
     async def test_list_int(self):
         """list[int] 映射为 array with integer items。"""
@@ -107,8 +110,11 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
             python_type_to_json_schema(list)
 
     async def test_optional_list_int(self):
-        """Optional[list[int]] 应映射为 array with integer items。"""
-        assert python_type_to_json_schema(Optional[list[int]]) == {"type": "array", "items": {"type": "integer"}}
+        """`Optional[list[int]]` ⇒ array with integer items，且 `type` 含 null。"""
+        assert python_type_to_json_schema(Optional[list[int]]) == {
+            "type": ["array", "null"],
+            "items": {"type": "integer"},
+        }
 
     async def test_unknown_type_raises(self):
         """未知类型应报错，不静默兜底。"""
@@ -266,7 +272,7 @@ class TestToolFunctions(ServiceTestCase):
 
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=general)
         list_result = await get_room_info(_context=ctx)
-        detail_result = await get_room_info(room_name="general", _context=ctx)
+        detail_result = await get_room_info(name="general", _context=ctx)
 
         assert list_result["success"]
         assert {room["room_name"] for room in list_result["rooms"]} >= {"general", "pair"}
@@ -322,7 +328,7 @@ class TestToolFunctions(ServiceTestCase):
 
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
         list_result = await get_agent_info(_context=ctx)
-        detail_result = await get_agent_info(agent_name="bob", _context=ctx)
+        detail_result = await get_agent_info(name="bob", _context=ctx)
         wake_result = await wake_up_agent("bob", _context=ctx)
 
         assert list_result["success"]
@@ -378,9 +384,9 @@ class TestToolFunctions(ServiceTestCase):
 
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
         
-        alice_detail = await get_agent_info(agent_name="alice", _context=ctx)
-        bob_detail = await get_agent_info(agent_name="bob", _context=ctx)
-        char_detail = await get_agent_info(agent_name="char", _context=ctx)
+        alice_detail = await get_agent_info(name="alice", _context=ctx)
+        bob_detail = await get_agent_info(name="bob", _context=ctx)
+        char_detail = await get_agent_info(name="char", _context=ctx)
 
         assert alice_detail["success"]
         alice_depts = alice_detail["agent"]["departments"]

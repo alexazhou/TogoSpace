@@ -8,6 +8,16 @@
 
 3. **路由**在 `consoleTool`：它只负责「命令 → 目标工具 + 参数」。
 
+选项白名单与「哪些选项是不带值的开关」**不在这里手写**（#196 P2）：两者都从
+`CommandSpec` 派生，而 `CommandSpec` 又从被转发工具的 JSON Schema 派生
+（`consoleSchema`）。`--dry-run` 这类新增布尔参数因此自动成为开关，不会被解析器
+当成「需要值的选项」把下一个 token 吃掉。
+
+选项名支持**双轨**（真名 + 别名，见 `consoleCommands._OPTION_ALIASES`）：白名单
+同时认两者，但 `options` 字典里**存用户写下的原名**。原因是既有用例把
+`options["remove-field"]` 当契约钉住了；归一（别名 → 工具参数名）只在
+`consoleTool` 组装转发参数时做。
+
 **权限校验不在这里**（#160 起）：`console` 自己不再重算一遍权限，而是把调用
 转发给等价的原工具，由唯一执行入口 `AgentToolRegistry.execute_tool_call` 做鉴权。
 这样「原工具调不了、console 却能调」的错位在结构上不可能出现——判定只有一份实现。
@@ -83,8 +93,13 @@ class ParsedCommand:
         return self.positional[0] if self.positional else None
 
 
-#: 只带值、不带值的布尔开关。
-_BOOLEAN_OPTIONS = frozenset({"recursive"})
+#: 全局「请求帮助」开关（#196 P2 D12）：`--help` / `-h` 可以出现在**任何位置**，
+#: 命中即短路返回该命令的 help，且不占用选项白名单（否则每条命令都要在 schema 里
+#: 造一个并不存在的 `help` 参数）。
+#:
+#: 为什么保留裸 `help` 命令：`help task update` 这种「先看命令再问细节」的写法既有
+#: 用例与提示词都在用；`--help` 是给「已经把命令敲到一半」的场景。
+HELP_FLAGS = ("--help", "-h")
 
 
 def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], dict[str, Any], str | None]:
@@ -92,10 +107,17 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
 
     `--from` 是输入来源选择器，单独提取，不进 `options`（它不在 `spec.options` 里，
     否则会被「未知选项」误报）。
+
+    白名单与布尔开关都按 `spec` 派生（#196 P2）：`spec.options` 是真名 + 别名，
+    `spec.boolean_options` 是 schema 里 `type: boolean` 的那批（含其别名形态）。
+    `options` 里存的是**用户写下的原名**（别名不归一），归一由路由层做。
     """
     positional: list[str] = []
     options: dict[str, Any] = {}
     input_source: str | None = None
+
+    boolean_options = spec.boolean_options
+    allowed = spec.options
 
     idx = 0
     while idx < len(tokens):
@@ -116,17 +138,17 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
                 input_source = value.strip()
                 idx += 1
                 continue
-            if name not in spec.options:
+            if name not in allowed:
                 hint = (
-                    f"可用选项：{' | '.join('--' + o for o in spec.options)}"
-                    if spec.options else "这条命令不接受选项"
+                    f"可用选项：{' | '.join('--' + o for o in allowed)}"
+                    if allowed else "这条命令不接受选项"
                 )
                 raise ConsoleError(
                     "unknown_option",
                     f"未知选项：--{name}。{hint}",
                     example=spec.key,
                 )
-            if name in _BOOLEAN_OPTIONS:
+            if name in boolean_options:
                 options[name] = True
                 idx += 1
                 continue
@@ -287,32 +309,12 @@ def _input_payload_for(parsed: ParsedCommand, payload: dict[str, Any] | None) ->
 
 # ---------------------------------------------------------------------------
 # 目标定位辅助
+#
+# 部门/房间/角色的定位已改为由 `CommandSpec.locator` 声明、consoleTool 直接转发
+# `dept_id`/`name` 给原工具（原工具本身支持 id 或 name 两种定位），这里不再保留
+# `_resolve_dept_id` / `_resolve_room_by_target` / `_resolve_role_by_target`。
+# 成员是唯一例外：`GtAgent` 的 `(team_id, name)` 非唯一，必须在此拦同名歧义。
 # ---------------------------------------------------------------------------
-
-async def _resolve_dept_id(team_id: int, target: str) -> int | None:
-    from dal.db import gtDeptManager
-
-    stripped = target.strip()
-    if stripped.isdigit():
-        dept = await gtDeptManager.get_dept_by_id(int(stripped))
-        if dept is not None and dept.team_id == team_id:
-            return dept.id
-        return None
-    dept = await gtDeptManager.get_dept_by_name(team_id, stripped)
-    return dept.id if dept is not None else None
-
-
-async def _resolve_room_by_target(team_id: int, target: str):
-    from dal.db import gtRoomManager
-
-    stripped = target.strip()
-    if stripped.isdigit():
-        room = await gtRoomManager.get_room_by_id(int(stripped))
-        if room is not None and room.team_id == team_id:
-            return room
-        return None
-    return await gtRoomManager.get_room_by_team_and_name(team_id, stripped)
-
 
 async def _resolve_agent_by_target(team_id: int, target: str):
     """按 id 或名称定位成员；**同名多行时必须报错要求改用 id**（draft §4.2）。
@@ -352,9 +354,3 @@ async def _resolve_agent_by_target(team_id: int, target: str):
             ],
         )
     return matched[0]
-
-
-async def _resolve_role_by_target(target: str):
-    from dal.db import gtRoleTemplateManager
-
-    return await gtRoleTemplateManager.get_role_template_by_name(target.strip())

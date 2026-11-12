@@ -75,12 +75,18 @@ def test_cc6_help_detail_is_on_demand_only():
 
 
 def test_cc6_console_schema_shape():
-    """console 的 schema 必须只有 command(必填) + payload(可选)，不多不少。"""
+    """console 的 schema 必须只有 command(必填) + payload(可选)，不多不少。
+
+    #195 起 `payload` 的 `type` 是 **`["object", "null"]`**：注解是 `Optional[dict]`，
+    生成器改用 pydantic `TypeAdapter` 后 nullability 直接写进 schema（改造前是剥成
+    `{"type": "object"}`，靠校验层的 null 豁免兜住）。断言从「单值字符串」改成
+    「恰好这两个类型的列表」——仍钉住「是 object」，同时钉住「可 null」。
+    """
     meta = get_function_metadata("console", console)
     assert meta["name"] == "console"
     assert meta["parameters"]["required"] == ["command"]
     assert list(meta["parameters"]["properties"]) == ["command", "payload"]
-    assert meta["parameters"]["properties"]["payload"]["type"] == "object"
+    assert meta["parameters"]["properties"]["payload"]["type"] == ["object", "null"]
     assert meta["description"].strip(), "description 不能为空（模型据此决定何时用）"
 
 

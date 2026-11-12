@@ -3,7 +3,7 @@
     "description": "团队/组织/成员/房间/角色模板的管理控制台，用命令行完成管理操作。",
     "parameters": {
       "command": {
-        "description": "要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令。",
+        "description": "要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令；任意命令加 --help / -h 可看该命令的参数清单。",
         "schema": {
           "type": "string"
         }
@@ -11,7 +11,10 @@
       "payload": {
         "description": "仅当 command 使用 --from payload 时提供，作为 create/update 的 JSON 配置对象；其他命令不得提供。",
         "schema": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         }
       }
     },
@@ -25,13 +28,19 @@
       "image": {
         "description": "容器镜像名称，例如 \"ubuntu:24.04\"、\"python:3.11\"。必须是本地已存在的 Linux 镜像，系统不会自动拉取；省略时使用默认镜像。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "note": {
         "description": "这个容器的用途说明，例如「跑前端构建」「临时验证 python 脚本」。 创建后不能修改，可以用 list_containers 看到。最多 200 个字符， 超长会直接报错而不是截断；省略表示不写说明。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -52,7 +61,10 @@
           "items": {
             "type": "integer"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "description": {
@@ -70,7 +82,10 @@
       "parent_id": {
         "description": "父任务 ID，用于任务树拆解。除了 Operator 直接下达的任务，其他任务应按拆解关系设置父任务 ID，使所有任务能形成以 Operator 任务为根的任务树",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "priority": {
@@ -82,21 +97,35 @@
       "reviewer_id": {
         "description": "完成时若需要他人验收，则设置验收人 Agent ID，不填则无需验收流程；不能与 assignee_id 相同（同一人无需设置验收）",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "room_id": {
         "description": "关联房间 ID，便于溯源",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "status": {
         "description": "指定初始状态，可选 TODO / ON_HOLD。ON_HOLD 表示创建即搁置（优先于依赖推导）；TODO 与省略等价，由系统按 depends_on 自动判断（有未完成依赖为 PENDING，否则 TODO）",
         "schema": {
-          "enum": [
-            "TODO",
-            "ON_HOLD"
+          "anyOf": [
+            {
+              "enum": [
+                "TODO",
+                "ON_HOLD"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -118,13 +147,19 @@
       "container_id": {
         "description": "容器的 12 位容器 ID（十六进制）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "record_id": {
         "description": "容器列表里的记录编号（整数），与 container_id 二选一。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     },
@@ -134,15 +169,27 @@
     "description": "删除当前团队中的指定组织（部门）。",
     "parameters": {
       "dept_id": {
-        "description": "可选组织 ID。传入后按 ID 精确定位组织，此时 name 仅用于确认提示。",
+        "description": "组织 ID。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "dry_run": {
+        "description": "是否只预演不执行。true 时同样执行全部校验（含根组织保护、有子组织未加 recursive 的阻断），只返回将要删除的清单，**不改动任何数据**。",
+        "schema": {
+          "type": "boolean"
         }
       },
       "name": {
-        "description": "要删除的组织名称。",
+        "description": "要删除的组织名称；与 dept_id 二选一（至少给一个），同时给出时以 dept_id 为准。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "recursive": {
@@ -152,9 +199,7 @@
         }
       }
     },
-    "required": [
-      "name"
-    ]
+    "required": []
   },
   "delete_role_template": {
     "description": "删除指定的角色模板。注意：仅能删除由用户创建（USER 类型）且当前未被任何成员使用的模板。",
@@ -173,22 +218,32 @@
   "delete_room": {
     "description": "删除当前团队中的指定房间。DEPT 房间不允许删除；运行中的房间不允许删除。",
     "parameters": {
-      "name": {
-        "description": "要删除的房间名称。",
+      "dry_run": {
+        "description": "是否只预演不执行。true 时同样执行全部校验（含 DEPT / 运行中保护），只返回将要删除的清单，**不改动任何数据**。",
         "schema": {
-          "type": "string"
+          "type": "boolean"
+        }
+      },
+      "name": {
+        "description": "要删除的房间名称；与 room_id 二选一（至少给一个），同时给出时以 room_id 为准。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "room_id": {
-        "description": "可选房间 ID。传入后按 ID 精确定位，此时 name 仅用于确认提示。",
+        "description": "房间 ID。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     },
-    "required": [
-      "name"
-    ]
+    "required": []
   },
   "enter_container": {
     "description": "把执行环境切换到指定的容器，之后所有命令都在容器内执行。",
@@ -224,10 +279,22 @@
   "get_agent_info": {
     "description": "查询成员，返回 ID、name、display_name、状态与所在部门；详情另含房间与可唤醒状态。",
     "parameters": {
-      "agent_name": {
-        "description": "Agent 名称（内部标识符 name，非 display_name）；省略时返回团队成员列表",
+      "agent_id": {
+        "description": "成员 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回团队成员列表。",
         "schema": {
-          "type": "string"
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "name": {
+        "description": "Agent 名称（内部标识符 name，也接受 display_name）；纯数字名称请用本参数显式指定，避免被当作 ID。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -237,9 +304,21 @@
     "description": "查询部门，返回部门 ID、名称、职责、负责人、成员列表与子部门树。",
     "parameters": {
       "dept_id": {
-        "description": "部门 ID；省略时返回整个团队部门树",
+        "description": "部门 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回整个团队部门树。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "name": {
+        "description": "部门名称（内部标识，即 name 字段，非多语言展示名）；纯数字名称请用本参数显式指定，避免被当作 ID。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -262,10 +341,22 @@
   "get_room_info": {
     "description": "查询房间，返回房间名、类型、状态、成员与标签；详情另含当前轮次与消息数。",
     "parameters": {
-      "room_name": {
-        "description": "房间名称；省略时返回团队全部房间的列表",
+      "name": {
+        "description": "房间名称；纯数字名称请用本参数显式指定，避免被当作 ID。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "room_id": {
+        "description": "房间 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回团队全部房间的列表。",
+        "schema": {
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     },
@@ -311,7 +402,10 @@
       "timezone": {
         "description": "IANA 时区名，如 \"Asia/Shanghai\"；省略时使用本地时区",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -331,7 +425,10 @@
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       }
     },
@@ -343,7 +440,10 @@
       "before_id": {
         "description": "只返回 id 小于该值的事件；翻页时传上一页最后一条的 id，省略则取最新页",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "limit": {
@@ -369,13 +469,19 @@
       "assignee": {
         "description": "按执行人 Agent ID 过滤",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "limit": {
         "description": "本次返回条数，默认 20，取值 1-50，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "open_only": {
@@ -387,15 +493,26 @@
       "reviewer": {
         "description": "按验收人 Agent ID 过滤",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "scope": {
         "description": "self=与我相关的任务；team=我可见范围内的任务",
         "schema": {
-          "enum": [
-            "self",
-            "team"
+          "anyOf": [
+            {
+              "enum": [
+                "self",
+                "team"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -411,15 +528,22 @@
               "REVIEWING",
               "DONE",
               "CANCELLED"
-            ]
+            ],
+            "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "title_keyword": {
         "description": "按任务标题搜（子串匹配）：如 \"登录\" 能命中标题含「登录」的任务；大小写不敏感，匹配不到时返回空列表",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -466,7 +590,10 @@
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "title": {
@@ -534,7 +661,10 @@
       "content": {
         "description": "新正文，≤ 1000 字符（可含换行）",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "memory_id": {
@@ -546,19 +676,28 @@
       "star_level": {
         "description": "新星标级别：none / title / summary（活跃星标总数上限 12，其中 summary 上限 6）",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "status": {
         "description": "新状态：active / archived（归档自动剥离星标）",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "summary": {
         "description": "新概要，单行，≤ 100 字符（改 content 时必传）",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "tags": {
@@ -567,13 +706,19 @@
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "title": {
         "description": "新标题，单行，≤ 80 字符",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -592,49 +737,87 @@
       "agent_id": {
         "description": "成员 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "allow_skills": {
-        "description": "可见技能名称列表，如 [\"frontend-design\"]；load_skill 只能加载已授权的技能。省略（None）= 全部技能；[] = 不授权任何技能；更新已有成员时省略会重置为该默认。",
+        "description": "可见技能名称列表，如 [\"frontend-design\"]；load_skill 只能加载已授权的技能。新建时省略 = 全部技能，[] = 不授权任何技能；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认（全部技能）。",
         "schema": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "allow_tools": {
-        "description": "可见工具列表，元素为工具名（如 \"read_file\"）或类别语法（如 \"Category:Read\"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。省略（None）= 默认授予 Basic、Read、Write、Execute；更新已有成员时省略会重置为该默认。",
+        "description": "可见工具列表，元素为工具名（如 \"read_file\"）或类别语法（如 \"Category:Read\"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。新建时省略 = 默认授予 Basic、Read、Write、Execute；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认授予。",
         "schema": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "clear_fields": {
+        "description": "要清除（恢复默认）的字段名列表，可选 \"model\"、\"allow_tools\"、\"allow_skills\"。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。白名单之外的字段名返回 invalid_clear_field。",
+        "schema": {
+          "items": {
+            "enum": [
+              "model",
+              "allow_tools",
+              "allow_skills"
+            ],
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "driver": {
-        "description": "驱动类型，可选 native、claude_sdk、tsp，默认 tsp。",
+        "description": "驱动类型，可选 native、claude_sdk、tsp。新建时省略 = tsp。**不可通过 clear_fields 清除**（无「无驱动」这一合法状态）。更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "i18n": {
-        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"Alice\", \"en\": \"Alice\"}}。",
+        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"Alice\", \"en\": \"Alice\"}}。更新时省略表示保持现值。",
         "schema": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         }
       },
       "model": {
-        "description": "可选模型覆盖；省略表示不覆盖模板或系统默认模型。",
+        "description": "可选模型覆盖；新建时省略表示不覆盖模板或系统默认模型，更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "name": {
-        "description": "成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。",
+        "description": "成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。新建成员时必须给；更新时可省略（用 agent_id 定位）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "overwrite_existing": {
@@ -644,51 +827,81 @@
         }
       },
       "role_template_name": {
-        "description": "要绑定的角色模板名称。",
+        "description": "要绑定的角色模板名称。新建成员时必须给；更新时省略表示保持现有绑定。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
-    "required": [
-      "name",
-      "role_template_name"
-    ]
+    "required": []
   },
   "save_dept": {
     "description": "创建或更新组织（部门）。",
     "parameters": {
+      "clear_fields": {
+        "description": "要清除的字段名列表，当前仅 \"parent_name\"。clear_fields=[\"parent_name\"] 表示把组织设为根节点（须已是根，否则报错）。传空数组 [] 视为「未提供」。与 parent_name 给值同时出现报 ambiguous_clear_field。白名单之外返回 invalid_clear_field。",
+        "schema": {
+          "items": {
+            "enum": [
+              "parent_name"
+            ],
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
       "dept_id": {
         "description": "组织 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "i18n": {
-        "description": "多语言数据，如 {\"dept_name\": {\"zh-CN\": \"研发部\", \"en\": \"R&D\"}, \"responsibility\": {\"zh-CN\": \"负责研发\"}}。",
+        "description": "多语言数据，如 {\"dept_name\": {\"zh-CN\": \"研发部\", \"en\": \"R&D\"}, \"responsibility\": {\"zh-CN\": \"负责研发\"}}。更新时省略表示保持现值。",
         "schema": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         }
       },
       "manager_name": {
-        "description": "负责人成员名；不在 member_names 中会自动加入。",
+        "description": "负责人成员名；不在 member_names 中会自动加入。新建时必须给；更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "member_names": {
-        "description": "成员名称列表，全量替换而非追加。",
+        "description": "成员名称列表，全量替换而非追加。新建时必须给；更新时省略表示保持现值（不是清空成员）。",
         "schema": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "name": {
-        "description": "组织名称，团队内唯一标识，建议使用小写字母和下划线。",
+        "description": "组织名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 dept_id 定位）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "overwrite_existing": {
@@ -698,24 +911,25 @@
         }
       },
       "parent_name": {
-        "description": "父组织名称，新建时必须指定；不能是自身或自身子组织；更新根组织时可省略或传 null 以保持根节点。",
+        "description": "父组织名称，新建时必须指定；不能是自身或自身子组织。更新时省略表示**保持现有父组织**；要把组织变成根节点须显式 clear_fields=[\"parent_name\"]（仅当它已是根组织时才允许，否则报错——创建/删除根组织属管理员通过组织树编辑器的操作）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "responsibility": {
-        "description": "组织职责描述。",
+        "description": "组织职责描述。新建时必须给；更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
-    "required": [
-      "name",
-      "responsibility",
-      "manager_name",
-      "member_names"
-    ]
+    "required": []
   },
   "save_role_template": {
     "description": "创建或更新角色模板；只能操作 USER 类型，SYSTEM 内置模板只读不可改。",
@@ -723,7 +937,10 @@
       "i18n": {
         "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"高级写手\", \"en\": \"Senior Writer\"}}。",
         "schema": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         }
       },
       "name": {
@@ -760,31 +977,59 @@
   "save_room": {
     "description": "创建或更新房间；成员 2 人为单聊，3 人及以上为群聊。",
     "parameters": {
-      "initial_topic": {
-        "description": "房间初始话题，可选。",
+      "clear_fields": {
+        "description": "要清除（恢复默认）的字段名列表，可选 \"initial_topic\"、\"max_rounds\"。initial_topic 清空后：群聊为空话题；单聊仍会自动生成默认话题（沿用 `upsert_room` 既有行为，不是本次引入）。max_rounds 清除 = 回到系统默认（NULL）。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。",
         "schema": {
-          "type": "string"
+          "items": {
+            "enum": [
+              "initial_topic",
+              "max_rounds"
+            ],
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "initial_topic": {
+        "description": "房间初始话题。新建时省略 = 空话题（单聊会自动生成话题）；更新时省略 = 保持现值。清空用 clear_fields=[\"initial_topic\"]。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "max_rounds": {
-        "description": "最大轮次，省略用系统默认；<=0 表示不限轮次。",
+        "description": "最大轮次；<=0 表示不限轮次。新建时省略 = 用系统默认；更新时省略 = 保持现值。重置为系统默认用 clear_fields=[\"max_rounds\"]。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "member_names": {
-        "description": "成员名称列表，至少 2 人，全量替换。",
+        "description": "成员名称列表，至少 2 人，全量替换。新建时必须给；更新时省略表示保持现成员集合。",
         "schema": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "name": {
-        "description": "房间名称，团队内唯一标识，建议使用小写字母和下划线。",
+        "description": "房间名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 room_id 定位）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "overwrite_existing": {
@@ -796,14 +1041,14 @@
       "room_id": {
         "description": "房间 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     },
-    "required": [
-      "name",
-      "member_names"
-    ]
+    "required": []
   },
   "send_chat_msg": {
     "description": "向房间发送消息，消息对房间内所有成员可见。",
@@ -855,15 +1100,22 @@
           "items": {
             "enum": [
               "reviewer_id"
-            ]
+            ],
+            "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "new_status": {
         "description": "目标状态，可选 TODO、PENDING、IN_PROGRESS、ON_HOLD、REVIEWING、DONE、CANCELLED；省略或等于当前状态表示追加评论。权限：提交验收（→REVIEWING）只能由执行人发起，且任务须设有验收人；通过或打回验收（REVIEWING→DONE、REVIEWING→IN_PROGRESS）只能由验收人操作；取消（→CANCELLED）只能由验收人或创建人操作；其余流转只能由执行人操作。终态 DONE、CANCELLED 不可流转，只能追加评论；设有验收人的任务不能绕过验收直接到 DONE；依赖任务未全部 DONE 时 PENDING 不能转为 IN_PROGRESS。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "note": {
@@ -875,7 +1127,10 @@
       "reviewer_id": {
         "description": "把验收人设为该团队成员（写时间线一条「验收人变更：旧 → 新」）。只有任务创建人或当前验收人可以操作，执行人不能操作；不能设成执行人自己；与当前验收人相同时不写事件。省略表示不改验收人。**不能与状态流转（非自环的 new_status）在同一次调用里做**。",
         "schema": {
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "task_id": {

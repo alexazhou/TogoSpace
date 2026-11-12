@@ -281,6 +281,26 @@ ClearField = Literal["reviewer_id"]
 ALLOWED_CLEAR_FIELDS: frozenset[str] = frozenset(get_args(ClearField))
 
 
+# `save_agent / save_dept / save_room` 的 `clear_fields` 白名单（#196 PATCH 下沉）。
+#
+# 与上面 `ClearField` 同一套「Literal → frozenset 派生」口径，理由不再赘述。
+# 三张表**分开**而不是共用一个（如 `ClearField` 那样合并），是因为它们描述的是
+# **不同工具**的可清除面：合成一个大集合后，`save_agent(clear_fields=["max_rounds"])`
+# 这种跨工具的错配就只能靠服务层各自再拦一遍，白名单就不再是「这一个工具能清什么」
+# 的事实源。分开后每个 Literal 就是该工具面上的完整答案。
+#
+# 语义口径（draft §2.2 字段级语义表）：清除 = 回到「没有这层覆盖」的状态，
+# 不是写一个空值。各字段的落库形态由对应 save 工具实现决定。
+AgentClearField = Literal["model", "allow_tools", "allow_skills"]
+ALLOWED_AGENT_CLEAR_FIELDS: frozenset[str] = frozenset(get_args(AgentClearField))
+
+DeptClearField = Literal["parent_name"]
+ALLOWED_DEPT_CLEAR_FIELDS: frozenset[str] = frozenset(get_args(DeptClearField))
+
+RoomClearField = Literal["initial_topic", "max_rounds"]
+ALLOWED_ROOM_CLEAR_FIELDS: frozenset[str] = frozenset(get_args(RoomClearField))
+
+
 # 面向 Agent 呈现任务事件时的**单条内容**截断长度（Operator 2026-10-26 定调）：
 # 所有「注入 / 展示」事件内容的路径（任务通知注入、get_task_detail、list_task_events，
 # 以及由事件派生的 last_note / current_block_reason）都按此长度截断，超出部分丢弃并加省略标记；

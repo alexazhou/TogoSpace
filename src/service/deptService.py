@@ -271,12 +271,19 @@ async def get_agent_depts(team_id: int, agent_id: int) -> list[tuple[GtDept, str
     return results
 
 
-async def delete_dept(team_id: int, dept_id: int, recursive: bool = False) -> None:
-    """删除指定部门。
+async def delete_dept(
+    team_id: int, dept_id: int, recursive: bool = False, dry_run: bool = False
+) -> list[GtDept]:
+    """删除指定部门，返回**实际（或将要）删除**的部门行（自身在前，按树序）。
 
     - 不能删除根部门。
     - recursive=False 时若有子部门则报错；recursive=True 时递归删除所有子孙部门。
     - 删除后同步部门房间。
+
+    `dry_run=True` 时**零副作用**：所有校验（存在性 / 根部门 / 子部门阻断）照常执行、
+    返回将要删除的清单，但不落库、不同步房间。实现红线（draft §2.3）：预演必须
+    「算出来就返回」，**禁止**「真执行 + 事务回滚」——回滚会留下自增序列、事件、
+    缓存失效等不可见副作用，且回滚失败时是静默改库。
     """
     all_depts = await gtDeptManager.get_all_depts(team_id)
     dept_map: dict[int, GtDept] = {d.id: d for d in all_depts if d.id is not None}
@@ -289,13 +296,16 @@ async def delete_dept(team_id: int, dept_id: int, recursive: bool = False) -> No
     if target.parent_id is None:
         raise TogoException("不能删除根部门", error_code="DEPT_DELETE_ROOT_FORBIDDEN")
 
-    # 收集所有子孙部门 ID
-    def _collect_subtree_ids(pid: int) -> list[int]:
-        ids: list[int] = [pid]
+    # 收集所有子孙部门 ID（树序：自身 → 子 → 孙，与递归展开顺序一致）
+    ordered_ids: list[int] = []
+
+    def _collect_subtree(pid: int) -> None:
+        ordered_ids.append(pid)
         for d in all_depts:
             if d.id is not None and d.parent_id == pid:
-                ids.extend(_collect_subtree_ids(d.id))
-        return ids
+                _collect_subtree(d.id)
+
+    _collect_subtree(dept_id)
 
     children = [d for d in all_depts if d.parent_id == dept_id]
     if children and not recursive:
@@ -304,8 +314,13 @@ async def delete_dept(team_id: int, dept_id: int, recursive: bool = False) -> No
             error_code="DEPT_HAS_CHILDREN",
         )
 
-    ids_to_delete = _collect_subtree_ids(dept_id)
-    await gtDeptManager.delete_depts_by_ids(ids_to_delete)
+    doomed = [dept_map[i] for i in ordered_ids if i in dept_map]
+
+    if dry_run:
+        # 预演到此为止：校验全部走过，写入一步不做。
+        return doomed
+
+    await gtDeptManager.delete_depts_by_ids(ordered_ids)
 
     # 同步部门房间
     tree = await get_dept_tree(team_id)
@@ -315,7 +330,8 @@ async def delete_dept(team_id: int, dept_id: int, recursive: bool = False) -> No
         # 树已为空，清除所有 DEPT 房间
         await roomService.overwrite_dept_rooms(team_id, [])
 
-    logger.info(f"部门已删除（team_id={team_id}，dept_id={dept_id}，recursive={recursive}，共删除 {len(ids_to_delete)} 个）")
+    logger.info(f"部门已删除（team_id={team_id}，dept_id={dept_id}，recursive={recursive}，共删除 {len(ordered_ids)} 个）")
+    return doomed
 
 
 async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> None:

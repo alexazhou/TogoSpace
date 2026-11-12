@@ -6,8 +6,10 @@ import logging
 from zoneinfo import ZoneInfo
 
 from constants import (
+    AgentClearField, ALLOWED_AGENT_CLEAR_FIELDS, ALLOWED_DEPT_CLEAR_FIELDS, ALLOWED_ROOM_CLEAR_FIELDS,
     AgentStatus, ScheduleJobType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
-    ClearField, DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomState, RoomType, SpecialAgent, TaskStatus,
+    ClearField, DeptClearField, DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomClearField,
+    RoomState, RoomType, SpecialAgent, TaskStatus,
 )
 from exception import TogoException
 from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamManager, gtAgentTaskManager
@@ -141,6 +143,34 @@ def _find_dept_node(node: GtDept | None, dept_id: int) -> GtDept | None:
     return None
 
 
+def _find_dept_node_by_name(node: GtDept | None, name: str) -> GtDept | None:
+    """在部门树里按**内部标识** name 定位（与 `dept get --name` 同口径，不比对 i18n 展示名）。
+
+    为什么按 `node.name` 而不按 `_serialize_dept_node` 的展示名：定位参数必须是**可回写**
+    的标识——展示名取 i18n、会随语言设置变化，拿它定位会出现「换个语言就查不到」。
+    """
+    if node is None:
+        return None
+    if node.name == name:
+        return node
+    for child in node.children:
+        found = _find_dept_node_by_name(child, name)
+        if found is not None:
+            return found
+    return None
+
+
+def _locator_label(dept_id: int | None, name: str | None) -> str:
+    """生成「未找到」文案里的定位值片段（draft §2.1：错误文案带实际使用的定位值）。
+
+    同时给出 id 与 name 时以 id 为准，文案也只报 id —— 报两个值会让调用方以为两个都没命中，
+    实际只查了 id 那一个。
+    """
+    if dept_id is not None:
+        return f"id={dept_id}"
+    return f"name={name}"
+
+
 def _tool_error_result(exc: BaseException) -> dict[str, Any]:
     """把异常转成工具层的结构化失败返回体。
 
@@ -202,11 +232,84 @@ def _truncate_error_message(message: str | None, limit: int = 100) -> str:
     return message[:limit].rstrip() + "..."
 
 
-async def get_dept_info(dept_id: Optional[int] = None, _context: ToolCallContext = None) -> dict:
+def _normalize_clear_fields(
+    clear_fields: Any, allowed: frozenset[str], tool_name: str
+) -> tuple[list[str], dict[str, Any] | None]:
+    """把 `clear_fields` 收口成去重后的字段名列表；不合法则返回失败返回体。
+
+    口径完全照 `taskService.update_task`（#181/#158 已验证的那一套），不发明新规则：
+
+    1. **类型收口先于归一**：`5` 直接迭代会抛未捕获 `TypeError`（模型看到 Python 堆栈措辞
+       而不是错误码）；`dict` 可迭代且会拿到 keys，若 key 恰是合法字段名就会**静默清除**，
+       属「输入形态错但意图被猜对」——正是要避免的静默取一边。
+       接受 `str`（裸字符串兼容）或元素全为 `str` 的 `list`/`tuple`，其余一律报错。
+    2. **白名单校验放在这里**（工具层），而不是只靠签名上的 `Literal`：`Literal` 生成的
+       enum 约束由 #189 校验层负责拦「直调/console 转发」两条路径；但工具也可能被直接
+       函数调用（测试、内部代码），这层是纵深防御，错误码 `invalid_clear_field`。
+    3. **空数组合法**：`[]` = 「没要清任何字段」= 省略，不是错误（与 `list_tasks.status=[]`
+       的「意图不明故报错」相反，见 `update_task` docstring 的口径说明）。
+    """
+    if clear_fields is None:
+        return [], None
+    if isinstance(clear_fields, str):
+        names = [clear_fields]
+    elif isinstance(clear_fields, (list, tuple)) and all(isinstance(f, str) for f in clear_fields):
+        names = list(clear_fields)
+    else:
+        return [], {
+            "success": False,
+            "message": (
+                f"clear_fields 必须是字段名数组（{tool_name} 当前可用："
+                f"{' / '.join(sorted(allowed)) or '无'}），收到的是 {type(clear_fields).__name__}"
+            ),
+            "error_code": "invalid_clear_field",
+        }
+
+    names = list(dict.fromkeys(names))
+    invalid = [f for f in names if f not in allowed]
+    if invalid:
+        return [], {
+            "success": False,
+            "message": (
+                f"不支持清除的字段：{'、'.join(invalid)}；"
+                f"{tool_name} 当前可清除的字段只有 {' / '.join(sorted(allowed)) or '无'}"
+            ),
+            "error_code": "invalid_clear_field",
+        }
+    return names, None
+
+
+def _clear_field_conflict(
+    clearing: set[str], provided: dict[str, Any], tool_name: str
+) -> dict[str, Any] | None:
+    """同一字段既给值又列入 `clear_fields` ⇒ 拒绝。
+
+    两个参数表达相反的意图（设置 vs 清除），静默取一边就是「把猜测当授权」。
+    与 `update_task` 的 `ambiguous_reviewer_change` 同口径：有歧义就报错，不猜。
+    """
+    both = [field for field, value in provided.items() if value is not None and field in clearing]
+    if not both:
+        return None
+    return {
+        "success": False,
+        "message": (
+            f"字段 {'、'.join(both)} 不能同时给值和列入 clear_fields："
+            "给值表示设置，clear_fields 表示清除，请二选一。"
+        ),
+        "error_code": "ambiguous_clear_field",
+    }
+
+
+async def get_dept_info(
+    dept_id: Optional[int] = None,
+    name: Optional[str] = None,
+    _context: ToolCallContext = None,
+) -> dict:
     """查询部门，返回部门 ID、名称、职责、负责人、成员列表与子部门树。
 
     Args:
-        dept_id: 部门 ID；省略时返回整个团队部门树
+        dept_id: 部门 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回整个团队部门树。
+        name: 部门名称（内部标识，即 name 字段，非多语言展示名）；纯数字名称请用本参数显式指定，避免被当作 ID。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -218,19 +321,33 @@ async def get_dept_info(dept_id: Optional[int] = None, _context: ToolCallContext
     if root is None:
         return {"success": False, "message": "当前团队还没有部门信息。"}
 
-    target = root if dept_id is None else _find_dept_node(root, dept_id)
+    normalized_name = None if name is None else name.strip()
+    if dept_id is not None:
+        target = _find_dept_node(root, dept_id)
+    elif normalized_name:
+        target = _find_dept_node_by_name(root, normalized_name)
+    elif normalized_name == "":
+        # 显式传空串不等于「省略」：省略是「返回全树」，空串是一个不存在的名字。
+        return {"success": False, "message": "未找到部门: name="}
+    else:
+        target = root
     if target is None:
-        return {"success": False, "message": f"未找到部门: dept_id={dept_id}"}
+        return {"success": False, "message": f"未找到部门: {_locator_label(dept_id, normalized_name)}"}
 
     id_to_name = await _build_team_agent_name_map(team_id)
     return {"success": True, "dept": _serialize_dept_node(target, id_to_name)}
 
 
-async def get_room_info(room_name: Optional[str] = None, _context: ToolCallContext = None) -> dict:
+async def get_room_info(
+    room_id: Optional[int] = None,
+    name: Optional[str] = None,
+    _context: ToolCallContext = None,
+) -> dict:
     """查询房间，返回房间名、类型、状态、成员与标签；详情另含当前轮次与消息数。
 
     Args:
-        room_name: 房间名称；省略时返回团队全部房间的列表
+        room_id: 房间 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回团队全部房间的列表。
+        name: 房间名称；纯数字名称请用本参数显式指定，避免被当作 ID。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -238,7 +355,9 @@ async def get_room_info(room_name: Optional[str] = None, _context: ToolCallConte
 
     id_to_name = await _build_team_agent_name_map(team_id)
 
-    if room_name is None:
+    normalized_name = None if name is None else name.strip()
+
+    if room_id is None and normalized_name is None:
         room_configs = await gtRoomManager.get_rooms_by_team(team_id)
         rooms: list[dict[str, Any]] = []
         for room_config in room_configs:
@@ -261,9 +380,17 @@ async def get_room_info(room_name: Optional[str] = None, _context: ToolCallConte
             })
         return {"success": True, "rooms": rooms}
 
-    room_config = await gtRoomManager.get_room_by_team_and_name(team_id, room_name)
+    if room_id is not None:
+        room_config = await gtRoomManager.get_room_by_id(room_id)
+        if room_config is not None and room_config.team_id != team_id:
+            room_config = None
+    elif normalized_name == "":
+        # 显式传空串不等于「省略」：省略是「返回全部房间」，空串是一个不存在的名字。
+        return {"success": False, "message": "未找到房间: name="}
+    else:
+        room_config = await gtRoomManager.get_room_by_team_and_name(team_id, normalized_name)
     if room_config is None:
-        return {"success": False, "message": f"未找到房间: {room_name}"}
+        return {"success": False, "message": f"未找到房间: {_locator_label(room_id, normalized_name)}"}
 
     runtime_room = roomService.get_room(room_config.id)
     room_dict: dict[str, Any] = {
@@ -361,11 +488,16 @@ async def start_chat(
     }
 
 
-async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallContext = None) -> dict:
+async def get_agent_info(
+    agent_id: Optional[int] = None,
+    name: Optional[str] = None,
+    _context: ToolCallContext = None,
+) -> dict:
     """查询成员，返回 ID、name、display_name、状态与所在部门；详情另含房间与可唤醒状态。
 
     Args:
-        agent_name: Agent 名称（内部标识符 name，非 display_name）；省略时返回团队成员列表
+        agent_id: 成员 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回团队成员列表。
+        name: Agent 名称（内部标识符 name，也接受 display_name）；纯数字名称请用本参数显式指定，避免被当作 ID。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -404,13 +536,55 @@ async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallCon
             info["can_wake_up"] = agent.status == AgentStatus.FAILED
         return info
 
-    if agent_name is None:
+    normalized_name = None if name is None else name.strip()
+
+    if agent_id is None and normalized_name is None:
         agents = [await _build_agent_dict(agent, detail=False) for agent in team_agents]
         return {"success": True, "agents": agents}
 
-    target_agent = next((agent for agent in team_agents if agent.gt_agent.name == agent_name or agent.gt_agent.display_name == agent_name), None)
-    if target_agent is None:
-        return {"success": False, "message": f"未找到成员: {agent_name}"}
+    if agent_id is not None:
+        target_agent = next((agent for agent in team_agents if agent.gt_agent.id == agent_id), None)
+        if target_agent is None:
+            # 按 ID 定位时，「查不到」有三种完全不同的原因，必须分开报：
+            # ① 库里根本没有这个 ID（真未找到）；
+            # ② 库里有、但已离职（`agentService` 只加载 ON_BOARD）⇒ 详情里的 rooms / 状态
+            #    这些运行态信息取不到；
+            # ③ 库里有、在职，但运行时尚未加载（刚建/刚改、还没 reload）⇒ 同样取不到运行态。
+            # 把 ②③ 说成「未找到成员」都是误导：用户的实体明明存在，该做的是 reload。
+            row = await gtAgentManager.get_agent_by_id(agent_id)
+            if row is None or row.team_id != team_id:
+                return {"success": False, "message": f"未找到成员: {_locator_label(agent_id, normalized_name)}"}
+            if row.employ_status != EmployStatus.ON_BOARD:
+                return {
+                    "success": False,
+                    "error_code": "member_not_on_board",
+                    "message": (
+                        f"成员 {row.name}（id={row.id}）当前不在职（{row.employ_status.name}），"
+                        "未加载到运行时，无法返回房间与状态详情。若刚刚创建/修改，需要 reload 后才生效。"
+                    ),
+                }
+            return {
+                "success": False,
+                "error_code": "agent_runtime_not_loaded",
+                "message": (
+                    f"成员 {row.name}（id={row.id}）的配置已落库，但运行时尚未加载，"
+                    "无法返回房间与状态详情。请先 reload_team 后重试。"
+                ),
+            }
+    elif normalized_name == "":
+        # 显式传空串不等于「省略」：省略是「返回全部成员」，空串是一个不存在的名字。
+        return {"success": False, "message": "未找到成员: name="}
+    else:
+        target_agent = next(
+            (
+                agent
+                for agent in team_agents
+                if agent.gt_agent.name == normalized_name or agent.gt_agent.display_name == normalized_name
+            ),
+            None,
+        )
+        if target_agent is None:
+            return {"success": False, "message": f"未找到成员: {_locator_label(None, normalized_name)}"}
 
     return {"success": True, "agent": await _build_agent_dict(target_agent, detail=True)}
 
@@ -557,51 +731,75 @@ async def save_role_template(
 
 
 async def save_agent(
-    name: str,
-    role_template_name: str,
+    name: Optional[str] = None,
+    role_template_name: Optional[str] = None,
     model: str | None = None,
-    driver: str = DriverType.TSP.value,
+    driver: Optional[str] = None,
     allow_tools: list[str] | None = None,
     allow_skills: list[str] | None = None,
     i18n: dict | None = None,
     overwrite_existing: bool = False,
     agent_id: int | None = None,
+    clear_fields: Optional[list[AgentClearField]] = None,
     _context: ToolCallContext = None,
 ) -> dict:
     """在当前团队中创建或更新成员。
 
+    ⚠️ **更新已有成员时，省略某个可选字段 = 保持该字段现值**（不是重置为默认）。
+    要把字段恢复成「没有这层覆盖」，用 clear_fields 显式声明。这是 #196 的行为变更：
+    改造前「省略即重置为默认」，现改为 PATCH 语义——因为省略与「没打算改」在调用方
+    视角下无法区分，按重置处理会让一次只想改 model 的调用顺手清掉 allow_tools。
+
     Args:
-        name: 成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。
-        role_template_name: 要绑定的角色模板名称。
-        model: 可选模型覆盖；省略表示不覆盖模板或系统默认模型。
-        driver: 驱动类型，可选 native、claude_sdk、tsp，默认 tsp。
-        allow_tools: 可见工具列表，元素为工具名（如 "read_file"）或类别语法（如 "Category:Read"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。省略（None）= 默认授予 Basic、Read、Write、Execute；更新已有成员时省略会重置为该默认。
-        allow_skills: 可见技能名称列表，如 ["frontend-design"]；load_skill 只能加载已授权的技能。省略（None）= 全部技能；[] = 不授权任何技能；更新已有成员时省略会重置为该默认。
-        i18n: 多语言名称，如 {"display_name": {"zh-CN": "Alice", "en": "Alice"}}。
+        name: 成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。新建成员时必须给；更新时可省略（用 agent_id 定位）。
+        role_template_name: 要绑定的角色模板名称。新建成员时必须给；更新时省略表示保持现有绑定。
+        model: 可选模型覆盖；新建时省略表示不覆盖模板或系统默认模型，更新时省略表示保持现值。
+        driver: 驱动类型，可选 native、claude_sdk、tsp。新建时省略 = tsp。**不可通过 clear_fields 清除**（无「无驱动」这一合法状态）。更新时省略表示保持现值。
+        allow_tools: 可见工具列表，元素为工具名（如 "read_file"）或类别语法（如 "Category:Read"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。新建时省略 = 默认授予 Basic、Read、Write、Execute；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认授予。
+        allow_skills: 可见技能名称列表，如 ["frontend-design"]；load_skill 只能加载已授权的技能。新建时省略 = 全部技能，[] = 不授权任何技能；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认（全部技能）。
+        i18n: 多语言名称，如 {"display_name": {"zh-CN": "Alice", "en": "Alice"}}。更新时省略表示保持现值。
         overwrite_existing: 同名成员已存在时需设为 true 才会覆盖更新，默认 false；传入 agent_id 时本参数不生效。
         agent_id: 成员 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
+        clear_fields: 要清除（恢复默认）的字段名列表，可选 "model"、"allow_tools"、"allow_skills"。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。白名单之外的字段名返回 invalid_clear_field。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
-    normalized_name = name.strip()
-    if not normalized_name:
-        return {"success": False, "message": "成员名称不能为空。"}
+    if agent_id is None and name is None:
+        return {
+            "success": False,
+            "message": "请用 agent_id 或 name 指定成员；新建成员必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
-    name_error = workspaceUtil.validate_dir_name(normalized_name)
-    if name_error is not None:
-        return {"success": False, "message": name_error}
+    normalized_name: str | None = None
+    if name is not None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            return {"success": False, "message": "成员名称不能为空。"}
 
-    special_agent = SpecialAgent.value_of(normalized_name)
-    if special_agent is not None:
-        return {"success": False, "message": f"保留成员 {special_agent.name} 不允许通过工具创建或修改。"}
+        name_error = workspaceUtil.validate_dir_name(normalized_name)
+        if name_error is not None:
+            return {"success": False, "message": name_error}
 
-    normalized_role_template_name = role_template_name.strip()
-    if not normalized_role_template_name:
+        special_agent = SpecialAgent.value_of(normalized_name)
+        if special_agent is not None:
+            return {"success": False, "message": f"保留成员 {special_agent.name} 不允许通过工具创建或修改。"}
+
+    normalized_role_template_name = None if role_template_name is None else role_template_name.strip()
+    if normalized_role_template_name is not None and not normalized_role_template_name:
         return {"success": False, "message": "角色模板名称不能为空。"}
 
-    driver_type = DriverType.value_of(driver)
+    # driver 是「给了就校验」：省略时按参数默认值 tsp 走，不进「保持现值」分支——
+    # driver 在 draft §2.2 里明确不可 clear，也没有「无驱动」状态，故它不属于 PATCH 面。
+    #
+    # ⚠️ 为了让「省略」真的可表达，签名默认值必须是 `None`（不是 `DriverType.TSP.value`）：
+    # 写成 `driver: str = "tsp"` 时，更新分支无法区分「调用方没传」与「调用方传了 tsp」，
+    # 结果是「只改 model 的一次 PATCH」会把 driver 从 native 悄悄改回 tsp。
+    # 新建分支仍需落到 tsp，由下面 `existing is None` 那条补。
+    driver_supplied = driver is not None
+    driver_type = DriverType.value_of(driver or DriverType.TSP.value)
     if driver_type is None:
         return {"success": False, "message": "成员 driver 只允许 native、claude_sdk 或 tsp。"}
 
@@ -609,15 +807,26 @@ async def save_agent(
     if error_msg is not None:
         return {"success": False, "message": error_msg}
 
-    role_template = await gtRoleTemplateManager.get_role_template_by_name(normalized_role_template_name)
-    if role_template is None:
-        return {"success": False, "message": f"未找到角色模板: {normalized_role_template_name}"}
+    clear_names, clear_error = _normalize_clear_fields(
+        clear_fields, ALLOWED_AGENT_CLEAR_FIELDS, "save_agent"
+    )
+    if clear_error is not None:
+        return clear_error
+    clearing = set(clear_names)
+    conflict = _clear_field_conflict(
+        clearing,
+        {"model": model, "allow_tools": allow_tools, "allow_skills": allow_skills},
+        "save_agent",
+    )
+    if conflict is not None:
+        return conflict
 
     if agent_id is not None:
         existing = await gtAgentManager.get_agent_by_id(agent_id)
         if existing is None or existing.team_id != team_id:
             return {"success": False, "message": f"未找到 ID 为 {agent_id} 的成员。"}
     else:
+        # 无 agent_id 时 name 就是定位键，上面已确保它存在。
         existing = await gtAgentManager.get_agent(team_id, normalized_name, status=None)
         if existing is not None and overwrite_existing is False:
             return {
@@ -628,24 +837,85 @@ async def save_agent(
     if existing is not None and existing.team_id == -1:
         return {"success": False, "message": f"保留成员 {existing.name} 不允许通过工具创建或修改。"}
 
+    # PATCH 语义：只给 agent_id 时 name 省略 = 不改名。回显/日志/改名判定都要有名字，
+    # 故这里补上现值（与 `save_dept` / `save_room` 同口径）——否则返回体是
+    # 「已更新成员 None」，脏文案会经 console 直达模型。
+    if existing is not None and normalized_name is None:
+        normalized_name = existing.name
+
+    if existing is None and normalized_name is None:
+        return {
+            "success": False,
+            "message": "新建成员必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+
+    # 新建时的必填项在运行时补齐（schema 层已放开，见 docstring 上方说明）。
+    if existing is None and normalized_role_template_name is None:
+        return {
+            "success": False,
+            "message": "新建成员时必须指定 role_template_name（角色模板名称）。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+
+    role_template = None
+    if normalized_role_template_name is not None:
+        role_template = await gtRoleTemplateManager.get_role_template_by_name(normalized_role_template_name)
+        if role_template is None:
+            return {"success": False, "message": f"未找到角色模板: {normalized_role_template_name}"}
+
     old_name = existing.name if existing is not None else ""
     agent = existing or GtAgent(
         team_id=team_id,
         name=normalized_name,
         employ_status=EmployStatus.OFF_BOARD,
     )
-    agent.name = normalized_name
-    agent.role_template_id = role_template.id
-    agent.model = model or ""
-    agent.driver = driver_type
-    agent.allow_tools = allow_tools
-    agent.allow_skills = allow_skills
-    agent.i18n = i18n or {}
+    # 更新分支的 PATCH 语义：省略（None）= 保持现值；显式列入 clear_fields = 恢复默认。
+    # 新建分支没有「现值」可保持，省略即取默认，与改造前一致。
+    if normalized_name is not None:
+        agent.name = normalized_name
+    if role_template is not None:
+        agent.role_template_id = role_template.id
+    if "model" in clearing:
+        # 模型覆盖没有独立列，「清除」的落库形态就是空串（等价于「未覆盖」）。
+        agent.model = ""
+    elif model is not None:
+        agent.model = model
+    elif existing is None:
+        agent.model = ""
+    if driver_supplied:
+        agent.driver = driver_type
+    elif existing is None:
+        agent.driver = driver_type
+    if "allow_tools" in clearing:
+        agent.allow_tools = None
+    elif allow_tools is not None:
+        agent.allow_tools = allow_tools
+    elif existing is None:
+        agent.allow_tools = allow_tools
+    if "allow_skills" in clearing:
+        agent.allow_skills = None
+    elif allow_skills is not None:
+        agent.allow_skills = allow_skills
+    elif existing is None:
+        agent.allow_skills = allow_skills
+    if i18n is not None:
+        agent.i18n = i18n
+    elif existing is None:
+        agent.i18n = {}
 
     # 改名时同步迁移私有目录；写库失败则把目录改回去
     from service.agentService.core import rename_agent_workdir, switch_agent_to_host
     moved_dirs: list[tuple[str, str]] = []
-    if existing is not None and old_name != normalized_name:
+    # ⚠️ `normalized_name is not None` 这个前置条件不能省：更新时省略 name 就是
+    # `normalized_name = None`，若只判 `old_name != normalized_name`，"alice" != None
+    # 恒成立 ⇒ 每次「只改 model」的 PATCH 都会被当成改名为空，触发目录迁移/删容器。
+    renaming = (
+        existing is not None
+        and normalized_name is not None
+        and old_name != normalized_name
+    )
+    if renaming:
         # 容器的 bind mount 固化了旧目录的绝对路径，必须在移动目录前清掉旧容器（§7）。
         await switch_agent_to_host(existing.id)
         await containerService.delete_agent_containers_safely(existing.id)
@@ -665,7 +935,14 @@ async def save_agent(
     payload = saved.to_json()
     payload["driver"] = saved.driver.value
     payload["employ_status"] = saved.employ_status.name
-    payload["role_template_name"] = role_template.name
+    # PATCH 语义下 role_template 可能没给（更新时省略 = 保持现有绑定），此时
+    # `role_template` 是 None —— 直接取 `.name` 会 AttributeError。用落库后的
+    # role_template_id 反查名字，保证「省略」路径的返回体与给值路径同形。
+    template_name = role_template.name if role_template is not None else None
+    if template_name is None and saved.role_template_id is not None:
+        saved_template = await gtRoleTemplateManager.get_role_template_by_id(saved.role_template_id)
+        template_name = saved_template.name if saved_template is not None else None
+    payload["role_template_name"] = template_name
     return {
         "success": True,
         "message": f"已{action}成员 {normalized_name}。配置已保存，需要 reload_team 后生效。",
@@ -684,63 +961,62 @@ def _collect_descendant_ids(node: GtDept) -> set[int]:
 
 
 async def save_dept(
-    name: str,
-    responsibility: str,
-    manager_name: str,
-    member_names: list[str],
+    name: Optional[str] = None,
+    responsibility: Optional[str] = None,
+    manager_name: Optional[str] = None,
+    member_names: Optional[list[str]] = None,
     parent_name: str | None = None,
     i18n: dict | None = None,
     overwrite_existing: bool = False,
     dept_id: int | None = None,
+    clear_fields: Optional[list[DeptClearField]] = None,
     _context: ToolCallContext = None,
 ) -> dict:
     """创建或更新组织（部门）。
 
+    ⚠️ **更新已有组织时，省略某个字段 = 保持该字段现值**（不是重置）。这是 #196 的行为
+    变更，理由与 `save_agent` 同：省略与「没打算改」在调用方视角下无法区分。
+
     Args:
-        name: 组织名称，团队内唯一标识，建议使用小写字母和下划线。
-        responsibility: 组织职责描述。
-        manager_name: 负责人成员名；不在 member_names 中会自动加入。
-        member_names: 成员名称列表，全量替换而非追加。
-        parent_name: 父组织名称，新建时必须指定；不能是自身或自身子组织；更新根组织时可省略或传 null 以保持根节点。
-        i18n: 多语言数据，如 {"dept_name": {"zh-CN": "研发部", "en": "R&D"}, "responsibility": {"zh-CN": "负责研发"}}。
+        name: 组织名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 dept_id 定位）。
+        responsibility: 组织职责描述。新建时必须给；更新时省略表示保持现值。
+        manager_name: 负责人成员名；不在 member_names 中会自动加入。新建时必须给；更新时省略表示保持现值。
+        member_names: 成员名称列表，全量替换而非追加。新建时必须给；更新时省略表示保持现值（不是清空成员）。
+        parent_name: 父组织名称，新建时必须指定；不能是自身或自身子组织。更新时省略表示**保持现有父组织**；要把组织变成根节点须显式 clear_fields=["parent_name"]（仅当它已是根组织时才允许，否则报错——创建/删除根组织属管理员通过组织树编辑器的操作）。
+        i18n: 多语言数据，如 {"dept_name": {"zh-CN": "研发部", "en": "R&D"}, "responsibility": {"zh-CN": "负责研发"}}。更新时省略表示保持现值。
         overwrite_existing: 同名组织已存在时需设为 true 才会覆盖更新，默认 false；传入 dept_id 时本参数不生效。
         dept_id: 组织 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
+        clear_fields: 要清除的字段名列表，当前仅 "parent_name"。clear_fields=["parent_name"] 表示把组织设为根节点（须已是根，否则报错）。传空数组 [] 视为「未提供」。与 parent_name 给值同时出现报 ambiguous_clear_field。白名单之外返回 invalid_clear_field。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
-    normalized_name = name.strip()
-    if not normalized_name:
-        return {"success": False, "message": "组织名称不能为空。"}
+    if dept_id is None and name is None:
+        return {
+            "success": False,
+            "message": "请用 dept_id 或 name 指定组织；新建组织必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
-    # 解析 manager
-    normalized_manager = manager_name.strip()
-    if not normalized_manager:
-        return {"success": False, "message": "负责人名称不能为空。"}
+    normalized_name: str | None = None
+    if name is not None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            return {"success": False, "message": "组织名称不能为空。"}
+
+    clear_names, clear_error = _normalize_clear_fields(
+        clear_fields, ALLOWED_DEPT_CLEAR_FIELDS, "save_dept"
+    )
+    if clear_error is not None:
+        return clear_error
+    clearing = set(clear_names)
+    conflict = _clear_field_conflict(clearing, {"parent_name": parent_name}, "save_dept")
+    if conflict is not None:
+        return conflict
 
     from dal.db import gtDeptManager
     from service import deptService
-
-    all_agents = await gtAgentManager.get_team_all_agents(team_id)
-    name_to_agent: dict[str, Any] = {a.name: a for a in all_agents}
-
-    manager_agent = name_to_agent.get(normalized_manager)
-    if manager_agent is None:
-        return {"success": False, "message": f"未找到成员: {normalized_manager}"}
-
-    # 解析 member_names → agent_ids，遇到找不到的立即报错
-    resolved_ids: list[int] = []
-    for mname in member_names:
-        mname = mname.strip()
-        agent = name_to_agent.get(mname)
-        if agent is None:
-            return {"success": False, "message": f"未找到成员: {mname}"}
-        resolved_ids.append(agent.id)
-
-    # 负责人自动加入成员列表
-    if manager_agent.id not in resolved_ids:
-        resolved_ids.insert(0, manager_agent.id)
 
     # 按 ID 或名称定位已有组织
     if dept_id is not None:
@@ -755,9 +1031,98 @@ async def save_dept(
                 "message": f"组织 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
             }
 
+    # 新建时的必填项在运行时补齐（schema 层已放开，见上方说明）。
+    if existing is None:
+        missing = [
+            field
+            for field, given in (
+                ("name", normalized_name),
+                ("responsibility", responsibility),
+                ("manager_name", manager_name),
+                ("member_names", member_names),
+            )
+            if given is None
+        ]
+        if missing:
+            return {
+                "success": False,
+                "message": f"新建组织时必须提供 {'、'.join(missing)}。",
+                "error_code": toolResult.INVALID_TOOL_ARGS,
+            }
+
+    all_agents = await gtAgentManager.get_team_all_agents(team_id)
+    name_to_agent: dict[str, Any] = {a.name: a for a in all_agents}
+    id_to_name: dict[int, str] = {a.id: a.name for a in all_agents}
+
+    # ---- PATCH：省略的字段取现值（更新分支）----
+    if existing is not None and normalized_name is None:
+        normalized_name = existing.name
+    effective_responsibility = responsibility
+    if effective_responsibility is None and existing is not None:
+        effective_responsibility = existing.responsibility
+
+    # 负责人：省略 ⇒ 保持现负责人（反查名字）
+    normalized_manager: str | None = None
+    if manager_name is not None:
+        normalized_manager = manager_name.strip()
+        if not normalized_manager:
+            return {"success": False, "message": "负责人名称不能为空。"}
+    elif existing is not None:
+        normalized_manager = id_to_name.get(existing.manager_id)
+        if normalized_manager is None:
+            return {
+                "success": False,
+                "message": (
+                    f"组织 {existing.name} 的现负责人（id={existing.manager_id}）不在当前团队名册中，"
+                    "无法保持现值；请显式指定 manager_name。"
+                ),
+            }
+
+    # 成员：省略 ⇒ 保持现成员集合
+    if member_names is not None:
+        source_member_names = member_names
+    elif existing is not None:
+        missing_ids = [aid for aid in (existing.agent_ids or []) if aid not in id_to_name]
+        if missing_ids:
+            return {
+                "success": False,
+                "message": (
+                    f"组织 {existing.name} 的现有成员 {missing_ids} 不在当前团队名册中，"
+                    "无法保持现值；请显式指定 member_names。"
+                ),
+            }
+        source_member_names = [id_to_name[aid] for aid in (existing.agent_ids or [])]
+    else:
+        source_member_names = []
+
+    manager_agent = name_to_agent.get(normalized_manager) if normalized_manager is not None else None
+    if manager_agent is None:
+        return {"success": False, "message": f"未找到成员: {normalized_manager}"}
+
+    # 解析 member_names → agent_ids，遇到找不到的立即报错
+    resolved_ids: list[int] = []
+    for mname in source_member_names:
+        mname = mname.strip()
+        agent = name_to_agent.get(mname)
+        if agent is None:
+            return {"success": False, "message": f"未找到成员: {mname}"}
+        resolved_ids.append(agent.id)
+
+    # 负责人自动加入成员列表
+    if manager_agent.id not in resolved_ids:
+        resolved_ids.insert(0, manager_agent.id)
+
     # 解析 parent_name → parent_id，并校验循环引用
     parent_id: int | None = None
-    if parent_name is not None:
+    if "parent_name" in clearing:
+        # 显式清除 = 要求该组织成为根节点。只有已经是根才允许（与改造前
+        # `parent_name=None` 的校验同一口径），否则报错而不是静默改结构。
+        if existing is None:
+            return {"success": False, "message": "新建组织必须指定父组织（parent_name），不能用 clear_fields 清除。"}
+        if existing.parent_id is not None:
+            return {"success": False, "message": f"组织 {existing.name} 当前不是根组织，不能将父组织设为空。"}
+        parent_id = None
+    elif parent_name is not None:
         normalized_parent = parent_name.strip()
         parent_dept = await gtDeptManager.get_dept_by_name(team_id, normalized_parent)
         if parent_dept is None:
@@ -774,25 +1139,23 @@ async def save_dept(
                 if parent_dept.id in descendant_ids:
                     return {"success": False, "message": f"父组织 {normalized_parent} 是当前组织的子组织，不能形成循环引用。"}
         parent_id = parent_dept.id
+    elif existing is None:
+        return {"success": False, "message": "新建组织时必须指定父组织（parent_name）。如需创建根组织，请联系管理员通过组织树编辑器操作。"}
     else:
-        # parent_name=None：仅允许更新已是根节点的现有组织；新建时必须指定父组织
-        if existing is None:
-            return {"success": False, "message": "新建组织时必须指定父组织（parent_name）。如需创建根组织，请联系管理员通过组织树编辑器操作。"}
-        if existing.parent_id is not None:
-            return {"success": False, "message": f"组织 {normalized_name} 当前不是根组织，不能将父组织设为空。"}
+        # 省略且非清除 ⇒ 保持现有父组织（PATCH 语义；改造前这里会报错或落成根）
+        parent_id = existing.parent_id
 
     saved = await deptService.upsert_dept(
         team_id=team_id,
         name=normalized_name,
-        responsibility=responsibility,
+        responsibility=effective_responsibility,
         manager_id=manager_agent.id,
         agent_ids=resolved_ids,
         parent_id=parent_id,
         dept_id=existing.id if existing is not None else None,
-        i18n=i18n,
+        i18n=i18n if i18n is not None else (existing.i18n if existing is not None else None),
     )
 
-    id_to_name = {a.id: a.name for a in all_agents}
     action = "更新" if existing is not None else "创建"
     return {
         "success": True,
@@ -802,65 +1165,61 @@ async def save_dept(
 
 
 async def save_room(
-    name: str,
-    member_names: list[str],
-    initial_topic: str = "",
+    name: Optional[str] = None,
+    member_names: Optional[list[str]] = None,
+    initial_topic: str | None = None,
     max_rounds: int | None = None,
     overwrite_existing: bool = False,
     room_id: int | None = None,
+    clear_fields: Optional[list[RoomClearField]] = None,
     _context: ToolCallContext = None,
 ) -> dict:
     """创建或更新房间；成员 2 人为单聊，3 人及以上为群聊。
 
+    ⚠️ **更新已有房间时，省略某个字段 = 保持该字段现值**（不是重置）。这是 #196 的行为
+    变更，理由与 `save_agent` 同。
+
     Args:
-        name: 房间名称，团队内唯一标识，建议使用小写字母和下划线。
-        member_names: 成员名称列表，至少 2 人，全量替换。
-        initial_topic: 房间初始话题，可选。
-        max_rounds: 最大轮次，省略用系统默认；<=0 表示不限轮次。
+        name: 房间名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 room_id 定位）。
+        member_names: 成员名称列表，至少 2 人，全量替换。新建时必须给；更新时省略表示保持现成员集合。
+        initial_topic: 房间初始话题。新建时省略 = 空话题（单聊会自动生成话题）；更新时省略 = 保持现值。清空用 clear_fields=["initial_topic"]。
+        max_rounds: 最大轮次；<=0 表示不限轮次。新建时省略 = 用系统默认；更新时省略 = 保持现值。重置为系统默认用 clear_fields=["max_rounds"]。
         overwrite_existing: 同名房间已存在时需设为 true 才会覆盖更新，默认 false；传入 room_id 时本参数不生效。
         room_id: 房间 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
+        clear_fields: 要清除（恢复默认）的字段名列表，可选 "initial_topic"、"max_rounds"。initial_topic 清空后：群聊为空话题；单聊仍会自动生成默认话题（沿用 `upsert_room` 既有行为，不是本次引入）。max_rounds 清除 = 回到系统默认（NULL）。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
-    normalized_name = name.strip()
-    if not normalized_name:
-        return {"success": False, "message": "房间名称不能为空。"}
+    if room_id is None and name is None:
+        return {
+            "success": False,
+            "message": "请用 room_id 或 name 指定房间；新建房间必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
-    if len(member_names) < 2:
-        return {"success": False, "message": f"房间成员不足 2 人（当前 {len(member_names)} 人）。"}
+    normalized_name: str | None = None
+    if name is not None:
+        normalized_name = name.strip()
+        if not normalized_name:
+            return {"success": False, "message": "房间名称不能为空。"}
+
+    clear_names, clear_error = _normalize_clear_fields(
+        clear_fields, ALLOWED_ROOM_CLEAR_FIELDS, "save_room"
+    )
+    if clear_error is not None:
+        return clear_error
+    clearing = set(clear_names)
+    conflict = _clear_field_conflict(
+        clearing, {"initial_topic": initial_topic, "max_rounds": max_rounds}, "save_room"
+    )
+    if conflict is not None:
+        return conflict
 
     all_agents = await gtAgentManager.get_team_all_agents(team_id)
     name_to_agent: dict[str, Any] = {a.name: a for a in all_agents}
-
-    resolved_ids: list[int] = []
-    for mname in member_names:
-        mname = mname.strip()
-        agent = name_to_agent.get(mname)
-        if agent is None:
-            return {"success": False, "message": f"未找到成员: {mname}"}
-        resolved_ids.append(agent.id)
-
-    # 按解析后的 ID 判重（名称数量拦不住 `["alice","alice"]`），与
-    # `roomService._assert_room_agents_valid` 同口径直接报错，不静默去重。
-    duplicate_ids: list[int] = []
-    seen_ids: set[int] = set()
-    for aid in resolved_ids:
-        if aid in seen_ids and aid not in duplicate_ids:
-            duplicate_ids.append(aid)
-        seen_ids.add(aid)
-    if duplicate_ids:
-        id_to_name = {a.id: a.name for a in all_agents}
-        duplicate_names = [id_to_name.get(aid, str(aid)) for aid in duplicate_ids]
-        return {
-            "success": False,
-            "message": (
-                f"房间成员重复: {duplicate_names}（给了 {len(resolved_ids)} 个成员，"
-                f"去重后只有 {len(seen_ids)} 人）；请去掉重复成员后重试。"
-            ),
-            "error_code": "duplicate_agent_ids",
-        }
+    id_to_name: dict[int, str] = {a.id: a.name for a in all_agents}
 
     # 按 ID 或名称定位已有房间
     if room_id is not None:
@@ -875,19 +1234,93 @@ async def save_room(
                 "message": f"房间 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
             }
 
+    # ---- PATCH：省略的字段取现值（更新分支）----
+    if existing is not None and normalized_name is None:
+        normalized_name = existing.name
+
+    if member_names is not None:
+        source_member_names = member_names
+    elif existing is not None:
+        missing_ids = [aid for aid in (existing.agent_ids or []) if aid not in id_to_name]
+        if missing_ids:
+            return {
+                "success": False,
+                "message": (
+                    f"房间 {existing.name} 的现有成员 {missing_ids} 不在当前团队名册中，"
+                    "无法保持现值；请显式指定 member_names。"
+                ),
+            }
+        source_member_names = [id_to_name[aid] for aid in (existing.agent_ids or [])]
+    else:
+        return {
+            "success": False,
+            "message": "新建房间时必须提供 member_names。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+
+    resolved_ids: list[int] = []
+    for mname in source_member_names:
+        mname = mname.strip()
+        agent = name_to_agent.get(mname)
+        if agent is None:
+            return {"success": False, "message": f"未找到成员: {mname}"}
+        resolved_ids.append(agent.id)
+
+    if len(resolved_ids) < 2:
+        return {"success": False, "message": f"房间成员不足 2 人（当前 {len(resolved_ids)} 人）。"}
+
+    # 按解析后的 ID 判重（名称数量拦不住 `["alice","alice"]`），与
+    # `roomService._assert_room_agents_valid` 同口径直接报错，不静默去重。
+    duplicate_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for aid in resolved_ids:
+        if aid in seen_ids and aid not in duplicate_ids:
+            duplicate_ids.append(aid)
+        seen_ids.add(aid)
+    if duplicate_ids:
+        duplicate_names = [id_to_name.get(aid, str(aid)) for aid in duplicate_ids]
+        return {
+            "success": False,
+            "message": (
+                f"房间成员重复: {duplicate_names}（给了 {len(resolved_ids)} 个成员，"
+                f"去重后只有 {len(seen_ids)} 人）；请去掉重复成员后重试。"
+            ),
+            "error_code": "duplicate_agent_ids",
+        }
+
+    # initial_topic / max_rounds：省略取现值、clear 取默认值。
+    # 这里显式算出最终值再交给 `upsert_room`，因为该服务函数按「实参即最终值」写入
+    # （它没有「未传」这一状态），PATCH 语义必须在工具层算完。
+    if "initial_topic" in clearing:
+        effective_topic = ""
+    elif initial_topic is not None:
+        effective_topic = initial_topic
+    elif existing is not None:
+        effective_topic = existing.initial_topic or ""
+    else:
+        effective_topic = ""
+
+    if "max_rounds" in clearing:
+        effective_max_rounds: int | None = None
+    elif max_rounds is not None:
+        effective_max_rounds = max_rounds
+    elif existing is not None:
+        effective_max_rounds = existing.max_rounds
+    else:
+        effective_max_rounds = None
+
     try:
         saved = await roomService.upsert_room(
             team_id=team_id,
             name=normalized_name,
             agent_ids=resolved_ids,
-            initial_topic=initial_topic,
-            max_rounds=max_rounds,
+            initial_topic=effective_topic,
+            max_rounds=effective_max_rounds,
             room_id=existing.id if existing is not None else None,
         )
     except Exception as exc:
         return _tool_error_result(exc)
 
-    id_to_name = {a.id: a.name for a in all_agents}
     action = "更新" if existing is not None else "创建"
     room_type_label = "单聊" if len(resolved_ids) == 2 else "群聊"
     return {
@@ -905,55 +1338,74 @@ async def save_room(
 
 
 async def delete_room(
-    name: str,
-    room_id: int | None = None,
+    name: Optional[str] = None,
+    room_id: Optional[int] = None,
+    dry_run: bool = False,
     _context: ToolCallContext = None,
 ) -> dict:
     """删除当前团队中的指定房间。DEPT 房间不允许删除；运行中的房间不允许删除。
 
     Args:
-        name: 要删除的房间名称。
-        room_id: 可选房间 ID。传入后按 ID 精确定位，此时 name 仅用于确认提示。
+        name: 要删除的房间名称；与 room_id 二选一（至少给一个），同时给出时以 room_id 为准。
+        room_id: 房间 ID。
+        dry_run: 是否只预演不执行。true 时同样执行全部校验（含 DEPT / 运行中保护），只返回将要删除的清单，**不改动任何数据**。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
+    normalized_name = None if name is None else name.strip()
+    if room_id is None and not normalized_name:
+        return {
+            "success": False,
+            "message": "请用 room_id 或 name 指定要删除的房间。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+
     if room_id is not None:
         target = await gtRoomManager.get_room_by_id(room_id)
         if target is None or target.team_id != team_id:
-            return {"success": False, "message": f"未找到 ID 为 {room_id} 的房间。"}
+            return {"success": False, "message": f"未找到房间: {_locator_label(room_id, normalized_name)}"}
     else:
-        normalized_name = name.strip()
-        if not normalized_name:
-            return {"success": False, "message": "房间名称不能为空。"}
         target = await gtRoomManager.get_room_by_team_and_name(team_id, normalized_name)
         if target is None:
-            return {"success": False, "message": f"未找到房间: {normalized_name}"}
+            return {"success": False, "message": f"未找到房间: {_locator_label(None, normalized_name)}"}
 
     try:
-        await roomService.delete_managed_room(team_id, target.id)
+        await roomService.delete_managed_room(team_id, target.id, dry_run=dry_run)
     except Exception as exc:
         return _tool_error_result(exc)
 
+    doomed = [{"id": target.id, "name": target.name}]
+    if dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "would_delete": doomed,
+            "message": f"dry run：将删除 1 个房间 {target.name}，未执行。",
+        }
     return {
         "success": True,
+        "dry_run": False,
+        "deleted": doomed,
         "message": f"已删除房间 {target.name}。配置已保存，需要 reload_team 后生效。",
     }
 
 
 async def delete_dept(
-    name: str,
-    dept_id: int | None = None,
+    name: Optional[str] = None,
+    dept_id: Optional[int] = None,
     recursive: bool = False,
+    dry_run: bool = False,
     _context: ToolCallContext = None,
 ) -> dict:
     """删除当前团队中的指定组织（部门）。
 
     Args:
-        name: 要删除的组织名称。
-        dept_id: 可选组织 ID。传入后按 ID 精确定位组织，此时 name 仅用于确认提示。
+        name: 要删除的组织名称；与 dept_id 二选一（至少给一个），同时给出时以 dept_id 为准。
+        dept_id: 组织 ID。
         recursive: 是否递归删除子组织。默认 false；为 true 时会一并删除所有子孙组织。
+        dry_run: 是否只预演不执行。true 时同样执行全部校验（含根组织保护、有子组织未加 recursive 的阻断），只返回将要删除的清单，**不改动任何数据**。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -962,26 +1414,46 @@ async def delete_dept(
     from dal.db import gtDeptManager
     from service import deptService
 
+    normalized_name = None if name is None else name.strip()
+    if dept_id is None and not normalized_name:
+        return {
+            "success": False,
+            "message": "请用 dept_id 或 name 指定要删除的组织。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+
     if dept_id is not None:
         target = await gtDeptManager.get_dept_by_id(dept_id)
         if target is None or target.team_id != team_id:
-            return {"success": False, "message": f"未找到 ID 为 {dept_id} 的组织。"}
+            return {"success": False, "message": f"未找到组织: {_locator_label(dept_id, normalized_name)}"}
     else:
-        normalized_name = name.strip()
-        if not normalized_name:
-            return {"success": False, "message": "组织名称不能为空。"}
         target = await gtDeptManager.get_dept_by_name(team_id, normalized_name)
         if target is None:
-            return {"success": False, "message": f"未找到组织: {normalized_name}"}
+            return {"success": False, "message": f"未找到组织: {_locator_label(None, normalized_name)}"}
 
     try:
-        await deptService.delete_dept(team_id, target.id, recursive=recursive)
+        doomed = await deptService.delete_dept(
+            team_id, target.id, recursive=recursive, dry_run=dry_run
+        )
     except Exception as exc:
         return _tool_error_result(exc)
 
+    # 回显用「将要/已删除」的完整清单（含子孙）：只回一句「已删除 X」时，用户无从核对
+    # 递归到底带走了哪些子组织。
+    entries = [{"id": row.id, "name": row.name} for row in doomed]
+    suffix = "（含子组织）" if recursive else ""
+    if dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "would_delete": entries,
+            "message": f"dry run：将删除 {len(entries)} 个组织{suffix}，未执行。",
+        }
     return {
         "success": True,
-        "message": f"已删除组织 {target.name}{'（含子组织）' if recursive else ''}。配置已保存，需要 reload_team 后生效。",
+        "dry_run": False,
+        "deleted": entries,
+        "message": f"已删除组织 {target.name}{suffix}（共 {len(entries)} 个）。配置已保存，需要 reload_team 后生效。",
     }
 
 

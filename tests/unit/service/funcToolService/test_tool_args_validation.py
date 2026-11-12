@@ -68,10 +68,60 @@ def _ctx(tool_name: str) -> ToolCallContext:
     return ToolCallContext(agent_id=1, team_id=1, tool_name=tool_name)
 
 
+#: schema 层拒绝文案的固定前缀（`toolArgsValidation.validate_tool_args` 里那一条）。
+#:
+#: #196 起 `error_code == "invalid_tool_args"` 有**两个**产出层：
+#: - schema 层（`toolArgsValidation`）：文案 `参数校验失败（tool=<name>）：…`
+#: - 运行时层（`tools.py` 的函数体内，locator / 新建必填缺失）：文案点名参数
+#:   （如 `请用 agent_id 或 name 指定成员…`）。两者同码是**有意**的（小马哥 12:02
+#:   硬条件 1「与 schema 层同码」，让调用方一个码就能判「补参数重试」）。
+#:
+#: ⇒ 凡是要测「**schema 层**放不放行 null」的判据，不能只看 `error_code`
+#: （会把运行时拒绝误认成 schema 拒绝 ⇒ P1 注入表出现 27 处假红）；必须同时匹配层文案。
+#: 只看层文案不判码则更糟：schema 层一旦丢码，判据仍绿。两者一起判。
+#:
+#: ⚠️ 单一来源（小马哥 23:08 第②件）：直接取源码常量，本文件不再硬编码。
+#: 与 `test_tool_schema_nullable.py` 共用同一个来源，文案变更只需改
+#: `toolArgsValidation.py` 一处（并有 meta 断言钉住它没漂）。
+SCHEMA_LAYER_MARK = toolArgsValidation.SCHEMA_LAYER_MARK
+
+
+def _rejected_by_schema(result: dict) -> bool:
+    """该返回体是否由 **schema 层**（而非运行时必填校验）拒绝。"""
+    return (
+        result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS
+        and SCHEMA_LAYER_MARK in result.get("message", "")
+    )
+
+
 def _schema_of(func: Any) -> dict:
     from service.funcToolService.funcToolType import get_function_metadata
 
     return get_function_metadata("x", func)["parameters"]
+
+
+def _declared_types(prop: dict) -> set[str]:
+    """取某个属性 schema 声明的 `type` 集合（`type` 可能是字符串或字符串数组）。
+
+    #195 之后 `Optional[T]` 产 `{"type": ["string", "null"]}`，`type` 不再是单值字符串；
+    沿用 `prop.get("type") == "array"` 这种写法会让**所有** array/object 型参数从扫描
+    结果里静默消失（判据变成空转还全绿）。所以这里统一归一成集合，调用方必须显式写清
+    自己认哪些类型（例如 `"array" in _declared_types(prop)`）。
+    """
+
+    declared = prop.get("type")
+    if isinstance(declared, str):
+        return {declared}
+    if isinstance(declared, list):
+        return {item for item in declared if isinstance(item, str)}
+    return set()
+
+
+def _non_null_type(prop: dict) -> str | None:
+    """取非 `null` 的那个类型名（造合法值 / 造非法值都按它来）。"""
+
+    types = _declared_types(prop) - {"null"}
+    return next(iter(types)) if len(types) == 1 else None
 
 
 def _invalid_args_for(schema: dict) -> Any:
@@ -83,6 +133,9 @@ def _invalid_args_for(schema: dict) -> Any:
 
     这样每组工具（含零参工具）都能拿到一条真实非法参数，不必为了「有东西可喂」而给
     零参工具编造参数。
+
+    #195：`type` 可能已是 `["string", "null"]`，按**非 null 分支**造错值（喂 `null`
+    对可空参数是合法的，那不叫非法参数）。
     """
 
     required = schema.get("required") or []
@@ -92,7 +145,7 @@ def _invalid_args_for(schema: dict) -> Any:
     for name, prop in (schema.get("properties") or {}).items():
         if "enum" in prop:
             return {name: "__value_not_in_enum__"}
-        declared = prop.get("type")
+        declared = _non_null_type(prop)
         replacement = {
             "string": 12345,
             "integer": "not-an-integer",
@@ -621,7 +674,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
 
     为什么遍历而不是只测 `depends_on`：H2 是「`path` 长度 ≥2 一律豁免」的**整类**
     缺陷，只钉一个参数不足以证明整类被堵住。这里按 schema 现扫出全部 array 参数，
-    逐个断言，并断言扫描计数 == 10（少扫一个就说明判据退化了）。
+    逐个断言，并断言扫描计数 == 13（少扫一个就说明判据退化了）。
     """
 
     from service.funcToolService.funcToolType import get_function_metadata
@@ -638,10 +691,10 @@ async def test_element_null_rejected_for_all_array_params() -> None:
         except Exception:  # noqa: BLE001 —— schema 不可用的工具不参与本判据
             continue
         for param_name, prop in (parameters.get("properties") or {}).items():
-            if prop.get("type") == "array":
+            if "array" in _declared_types(prop):
                 array_params.append((name, param_name))
 
-    assert len(array_params) == 10, array_params
+    assert len(array_params) == 13, array_params
 
     blocked = 0
     for name, param_name in array_params:
@@ -657,7 +710,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
         assert _LEGACY_MESSAGE_MARK not in result["message"], (name, param_name, result)
         blocked += 1
 
-    assert blocked == 10
+    assert blocked == 13
 
 
 @pytest.mark.asyncio
@@ -727,9 +780,12 @@ def _build_valid_args(parameters: dict) -> dict:
 def _sample_value(prop: dict) -> Any:
     """按单个属性的 schema 造一个合法值。"""
 
+def _sample_value(prop: dict) -> Any:
+    """按单个属性的 schema 造一个合法值（按**非 null 分支**造，`type` 可能是数组）。"""
+
     if "enum" in prop:
         return prop["enum"][0]
-    type_name = prop.get("type")
+    type_name = _non_null_type(prop)
     if type_name == "string":
         return "x"
     if type_name == "integer":
@@ -743,6 +799,18 @@ def _sample_value(prop: dict) -> Any:
     if type_name == "object":
         return {}
     return "x"
+
+
+def _allows_null(prop: dict) -> bool:
+    """该属性 schema **是否声明允许 null**（#195 之后唯一正确的判定依据）。
+
+    改造前判据只能按「是否必填」猜 nullability；现在 schema 自己说了算：
+    `Optional[T]` ⇒ `{"type": [T, "null"]}` 或 `{"anyOf": [..., {"type": "null"}]}`。
+    """
+    if "null" in _declared_types(prop):
+        return True
+    any_of = prop.get("anyOf")
+    return isinstance(any_of, list) and {"type": "null"} in any_of
 
 
 def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
@@ -771,14 +839,16 @@ def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
         base.pop(name, None)  # 注入位置本身先摘掉，避免"必填缺失"与"注入 null"混为一谈
         args = {**base}
         args[name] = None
-        # 必填 ⇒ 应拦；非必填 ⇒ 应放行（Optional[T] 被剥成 T，null 合法性在 schema 外）
-        points.append((f"P1:{name}", json.dumps(args), name not in required))
+        # 必填 ⇒ 应拦；非必填 ⇒ **由 schema 自己说**能不能 null（#195）。
+        # #195 之前这里是「非必填 ⇒ 放行」——那条线是按默认值切的，而 nullability 该按
+        # 注解切；两条线不重合的 19 个字段（非必填、注解不含 None）就是本单的缺陷面。
+        points.append((f"P1:{name}", json.dumps(args), _allows_null(prop)))
 
         # P2：数组元素（每个 array 取「第 2 个元素」注入 null，保留 1 个合法元素；
-        # 本单 10 个 array 的 items 类型各自统一，同一 array 内元素类型不异构，
+        # 本单 13 个 array 的 items 类型各自统一，同一 array 内元素类型不异构，
         # 故单点注入足以覆盖整类。`items` 缺 `type` 但有 `enum` 的 2 个
         # （update_task.clear_fields / list_tasks.status）由 `_sample_value` 取首枚举值。）
-        if prop.get("type") == "array":
+        if "array" in _declared_types(prop):
             items = prop.get("items") or {}
             element = _sample_value(items)
             args2 = _build_valid_args(parameters)
@@ -786,7 +856,7 @@ def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
             points.append((f"P2:{name}[1]", json.dumps(args2), False))
 
         # P3：嵌套 object 内部 key —— 只有 schema 真的给了 `properties` 才可枚举
-        if prop.get("type") == "object":
+        if "object" in _declared_types(prop):
             inner_props = prop.get("properties") or {}
             inner_required = set(prop.get("required") or [])
             for inner_name in inner_props:
@@ -851,7 +921,7 @@ async def test_null_injection_exhaustive_table() -> None:
                 p3_enumerable += 1
 
             result = await funcCore.run_tool_call(raw_args, _ctx(name))
-            rejected = result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS
+            rejected = _rejected_by_schema(result)
 
             ok = rejected != should_pass  # 应拦 ⇒ rejected True；应放行 ⇒ rejected False
             if not ok:
@@ -866,21 +936,30 @@ async def test_null_injection_exhaustive_table() -> None:
 
         p3_fields += sum(
             1 for prop in (parameters.get("properties") or {}).values()
-            if prop.get("type") == "object" and not (prop.get("properties") or {})
+            if "object" in _declared_types(prop) and not (prop.get("properties") or {})
         )
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 100 = 36 required + 64 optional（#189 时为 99 = 35+64；webfetch.url 为必填 ⇒ +1）
-    assert p1_required + p1_optional == 100, (p1_required, p1_optional)
-    assert p2 == 10, f"P2={p2}"
+    # 108 = 45 + 63。**这里必须拆开看两个口径**（否则「总数对」会掩盖反向变动）：
+    #   · `p1_required` 数的是「P1 注入后**应被拦**的字段」，不是 `required` 列表长度：
+    #     26 个 required + 19 个「有默认值但注解不含 None」= 45
+    #     （#196 前：36 required + 19 = 55；构成本身也变了，见
+    #      `test_tool_schema_nullable.NON_OPTIONAL_BUT_DEFAULTED` 注释）
+    #   · `p1_optional` = 108 - 45 = 63（#196 前 100 - 55 = 45）
+    # 108 = 全部参数数（38 工具，含容器组）。#196 前为 100。
+    assert p1_required + p1_optional == 108, (p1_required, p1_optional)
+    assert p1_required == 45, p1_required
+    assert p1_optional == 63, p1_optional
+    assert p2 == 13, f"P2={p2}"
     assert p3_fields == 4, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    # 148 = 38 + 36 + 64 + 10 + 0（#189 时为 146 = 37 + 35 + 64 + 10 + 0）
-    assert total == 148, total
+    # 159 = 38 + 45 + 63 + 13 + 0
+    # （#196 前 148 = 38 + 55 + 45 + 10 + 0；#189 时 146 = 37 + 35 + 64 + 10 + 0）
+    assert total == 159, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 
