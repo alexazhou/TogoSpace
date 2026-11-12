@@ -217,3 +217,29 @@ class TestCompatibilityGuard:
             "不改项命中数下降，疑似误伤（运行实例会读不到数据 / 容器 label 失配 / env 失效）：\n  "
             + "\n  ".join(violations)
         )
+
+    def test_readme_clone_dir_matches_clone_url(self) -> None:
+        """README 的源码安装步骤：`git clone <url>/X.git` 之后必须 `cd X`。
+
+        这是被人肉评审漏掉、又被反向对账抓出来的一处真实误伤：改名批次里把
+        `cd TogoSpace` 顺手改成了 `cd Togobot`，但 clone URL 指向的仓库仍叫
+        `TogoSpace`（仓库名本轮不改）⇒ 用户照抄命令会 `No such file or directory`。
+
+        判据不写死目录名，只校验「两者一致」：仓库将来真改名时这条会自动跟着变绿。
+        """
+        pattern = re.compile(
+            r"git clone\s+(\S+?)(?:\.git)?\s*\n\s*cd\s+(\S+)",
+        )
+        checked = 0
+        for rel in ("README.md", "README_EN.md"):
+            text = _read(rel)
+            for url, directory in pattern.findall(text):
+                expected = url.rstrip("/").rsplit("/", 1)[-1]
+                if expected.endswith(".git"):
+                    expected = expected[:-4]
+                assert directory == expected, (
+                    f"{rel}: `git clone {url}` 得到的目录是 `{expected}`，"
+                    f"但下一行写的是 `cd {directory}` ⇒ 用户照抄会失败"
+                )
+                checked += 1
+        assert checked >= 2, f"只匹配到 {checked} 处 clone 片段，锚点口径失效"

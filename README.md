@@ -141,7 +141,7 @@ docker run -d \
 
 ```bash
 git clone https://github.com/alexazhou/TogoSpace.git
-cd Togobot
+cd TogoSpace
 
 # 创建虚拟环境并安装依赖
 python3 -m venv .venv
