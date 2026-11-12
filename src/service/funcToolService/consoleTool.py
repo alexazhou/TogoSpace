@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import Any, Callable, NoReturn, Optional
+from typing import Any, Callable, Mapping, NoReturn, Optional, Sequence
 
 from constants import ALLOWED_CLEAR_FIELDS
 from exception import ForwardToolCall
@@ -69,11 +69,15 @@ def _visible_command_specs() -> list[cc.CommandSpec]:
     return [spec for spec in cc.COMMAND_SPECS if cc.command_console_visible(spec)]
 
 
-def _build_help_summary(specs: Optional[list[cc.CommandSpec]] = None) -> str:
+def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str:
     """一行一个资源，操作按命令表顺序拼接（摘要里**不出现**参数清单）。
 
     `specs` 为空时用完整命令表（模块级 `HELP_SUMMARY` 的静态形态，供结构测试使用）；
     `help` 输出则在运行时传入可见命令子集，避免把 D2 开关状态烘焙进 import 期常量。
+
+    形参类型是 `Sequence` 而不是 `list`：命令表本身是 `tuple`，用 `list` 会让
+    「默认取整张表」这一支与形参声明冲突（#205 修的 mypy error）。这里只遍历、
+    不修改，`Sequence` 已足够表达所需能力。
     """
     specs = cc.COMMAND_SPECS if specs is None else specs
     grouped: dict[str, list[cc.CommandSpec]] = {}
@@ -623,7 +627,12 @@ def _handle_direct(parsed: ParsedCommand, _payload: dict[str, Any] | None = None
     _forward(parsed, **args)
 
 
-_VERB_HANDLERS: dict[str, Callable[[ParsedCommand, dict[str, Any] | None], NoReturn]] = {
+#: verb → 处理器。声明成 `Mapping`（读多态）而不是 `dict`：`dict` 的值类型不变，
+#: 而各处理器的第二参数一个叫 `payload`、其余叫 `_payload`，带形参名的 callable
+#: 与不带名的 `Callable[[A, B], R]` 只能单向兼容，双向检查就会失败（#205 修的
+#: mypy error）。这里只 `.get()` 取用、从不改写，`Mapping` 已足够表达所需能力，
+#: 运行时仍是同一个 dict。
+_VERB_HANDLERS: Mapping[str, Callable[[ParsedCommand, dict[str, Any] | None], NoReturn]] = {
     "LIST": _handle_list,
     "GET": _handle_get,
     "SAVE": _handle_save,
