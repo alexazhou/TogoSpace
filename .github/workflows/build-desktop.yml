@@ -203,7 +203,7 @@ jobs:
     # 命令没报错，产物到底是哪个架构只有 file/lipo 能证明。所以在这里当场判。
     #
     # 判据：
-    #   1) 主二进制 + 内嵌后端 TogoSpace-backend + 其余全部 Mach-O（86 个 .so/.dylib 等）
+    #   1) 主二进制 + 内嵌后端 Togobot-backend + 其余全部 Mach-O（86 个 .so/.dylib 等）
     #      都要等于 TARGET_ARCH（beta2 实测每份 88 个 Mach-O）；
     #   2) assets/execute/gtsp/ 下按设计同时带 darwin-amd64 与 darwin-arm64 两份，
     #      两份 DMG 里逐字节相同 —— 这是既存现状，不算架构违例，但缺了说明打包漏资产。
@@ -230,7 +230,7 @@ jobs:
         [ -n "${APP}" ] || { echo "::error::DMG 内没有 .app"; exit 1; }
         EXE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${APP}/Contents/Info.plist")
         MAIN="${APP}/Contents/MacOS/${EXE}"
-        BACKEND="${APP}/Contents/Resources/backend/TogoSpace-backend"
+        BACKEND="${APP}/Contents/Resources/backend/Togobot-backend"
         MULTI="assets/execute/gtsp"
 
         fail=0

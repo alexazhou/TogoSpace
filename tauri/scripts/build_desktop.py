@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TogoSpace 桌面应用构建脚本（Tauri 外壳 + PyInstaller 后端）。
+"""Togobot 桌面应用构建脚本（Tauri 外壳 + PyInstaller 后端）。
 
 可用 action（逗号分隔，按顺序执行）：
   frontend  — 构建前端并同步到 assets/frontend（哈希校验双份一致）
@@ -133,8 +133,8 @@ def target_triple(arch: str) -> str:
 def app_bundle_path(arch: str) -> str:
     triple = target_triple(arch)
     candidates = [
-        os.path.join(TARGET_ROOT, triple, "release", "bundle", "macos", "TogoSpace.app"),
-        os.path.join(TARGET_ROOT, "release", "bundle", "macos", "TogoSpace.app"),
+        os.path.join(TARGET_ROOT, triple, "release", "bundle", "macos", "Togobot.app"),
+        os.path.join(TARGET_ROOT, "release", "bundle", "macos", "Togobot.app"),
     ]
     for candidate in candidates:
         if os.path.isdir(candidate):
@@ -143,7 +143,7 @@ def app_bundle_path(arch: str) -> str:
 
 
 def dmg_path(arch: str) -> str:
-    return os.path.join(ARTIFACT_DIR, f"TogoSpace_{read_version()}_{arch}.dmg")
+    return os.path.join(ARTIFACT_DIR, f"Togobot_{read_version()}_{arch}.dmg")
 
 
 # ── frontend ─────────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ def build_app(arch: str) -> None:
                 "APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH"):
         env.pop(key, None)
     backend_executable = os.path.join(
-        BACKEND_DIR, "TogoSpace-backend.exe" if os.name == "nt" else "TogoSpace-backend")
+        BACKEND_DIR, "Togobot-backend.exe" if os.name == "nt" else "Togobot-backend")
     if os.path.isfile(backend_executable):
         # beforeBuildCommand 里会再调一次 build_backend.py，已构建则跳过
         env["TOGOSPACE_SKIP_BACKEND_BUILD"] = "1"
@@ -281,7 +281,7 @@ def sign_app(arch: str) -> None:
     for path in nested:
         _codesign(path, identity, ENTITLEMENTS)
 
-    main_executable = os.path.join(contents, "MacOS", "TogoSpace")
+    main_executable = os.path.join(contents, "MacOS", "Togobot")
     _codesign(main_executable, identity, ENTITLEMENTS)
     _codesign(app_path, identity, ENTITLEMENTS)
 
@@ -307,14 +307,14 @@ def build_dmg(arch: str) -> None:
 
     staging = tempfile.mkdtemp(prefix="togospace-dmg-")
     try:
-        shutil.copytree(app_path, os.path.join(staging, "TogoSpace.app"), symlinks=True)
+        shutil.copytree(app_path, os.path.join(staging, "Togobot.app"), symlinks=True)
         os.symlink("/Applications", os.path.join(staging, "Applications"))
         # GitHub macOS runner 上 hdiutil 偶发 Resource busy（刚落盘的文件仍被系统占用），
         # 先 sync 等写入完成，失败后清理残留并退避重试。
         run_command(["sync"])
         create_command = [
             "hdiutil", "create",
-            "-volname", "TogoSpace",
+            "-volname", "Togobot",
             "-srcfolder", staging,
             "-ov", "-format", "UDZO",
             "-nospotlight",
@@ -588,7 +588,7 @@ def parse_actions(raw: str | None) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="构建 TogoSpace 桌面应用")
+    parser = argparse.ArgumentParser(description="构建 Togobot 桌面应用")
     parser.add_argument("--arch", choices=["arm64", "x86_64"], default=host_arch())
     parser.add_argument("--action", default=None,
                         help=f"逗号分隔，默认全流程: {','.join(PIPELINE_ACTIONS)}")

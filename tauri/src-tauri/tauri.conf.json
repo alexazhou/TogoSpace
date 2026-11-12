@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TogoSpace",
+  "productName": "Togobot",
   "version": "0.5.2-beta1",
   "identifier": "com.togospace.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "splashscreen",
-        "title": "TogoSpace",
+        "title": "Togobot",
         "url": "splash.html",
         "width": 500,
         "height": 340,

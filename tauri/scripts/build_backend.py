@@ -2,7 +2,7 @@
 """构建桌面形态的 Python 后端并放入 Tauri 资源目录。
 
 流程：
-1. PyInstaller onedir 打包 `scripts/togo_desktop.spec` → `build/TogoSpace-backend/`
+1. PyInstaller onedir 打包 `scripts/togo_desktop.spec` → `build/Togobot-backend/`
 2. 整棵目录树复制到 `tauri/build/backend/`，供 tauri.conf.json 的 bundle.resources 引用
 
 用法：
@@ -27,7 +27,7 @@ REPO_ROOT = os.path.dirname(TAURI_DIR)
 SPEC_FILE = os.path.join(REPO_ROOT, "scripts", "togo_desktop.spec")
 # 本地构建产物统一放根目录 build/（PyInstaller 中间文件与 onedir 产物同处）
 BUILD_DIR = os.path.join(REPO_ROOT, "build")
-DIST_BACKEND = os.path.join(BUILD_DIR, "TogoSpace-backend")
+DIST_BACKEND = os.path.join(BUILD_DIR, "Togobot-backend")
 TARGET_DIR = os.path.join(TAURI_DIR, "build", "backend")
 
 
@@ -49,7 +49,7 @@ def _run(command: list[str], env: dict[str, str]) -> None:
 
 def _backend_executable() -> str:
     suffix = ".exe" if os.name == "nt" else ""
-    return os.path.join(TARGET_DIR, f"TogoSpace-backend{suffix}")
+    return os.path.join(TARGET_DIR, f"Togobot-backend{suffix}")
 
 
 def build_backend(python: str, arch: str) -> None:
