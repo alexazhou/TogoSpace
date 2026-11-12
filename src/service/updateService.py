@@ -91,7 +91,7 @@ async def _fetch_github_release() -> dict[str, Any]:
             method="GET",
             headers={
                 "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "TogoSpace-UpdateChecker",
+                "User-Agent": "Togobot-UpdateChecker",
             },
             request_timeout=10,
         )
