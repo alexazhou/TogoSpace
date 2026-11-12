@@ -40,8 +40,9 @@ WARNING_KEYWORD = "已跳过校验"
 #: 工具总数（`python scripts/tool_schema_snapshot.py` 口径）。写死是为了让「少遍历一组」
 #: 或「抽样」立刻变红——动态用 `len()` 自证会随实现一起漂移，等于没断言。
 #: 32 → 33：webfetch（#191）进默认工具组，故默认组 33、合计 33+5=38。
+#: 5 → 6：容器组加 `update_container_note`（#203），合计 33+6=39。
 DEFAULT_TOOL_COUNT = 33
-CONTAINER_TOOL_COUNT = 5
+CONTAINER_TOOL_COUNT = 6
 
 
 # --------------------------------------------------------------------------- #
@@ -944,26 +945,28 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 108 = 43 + 65。**这里必须拆开看两个口径**（否则「总数对」会掩盖反向变动）：
+    # 111 = 43 + 68。**这里必须拆开看两个口径**（否则「总数对」会掩盖反向变动）：
     #   · `p1_required` 数的是「P1 注入后**应被拦**的字段」，不是 `required` 列表长度：
     #     24 个 required + 19 个「有默认值但注解不含 None」= 43
     #     （`save_role_template.type/soul` 改为 Optional 后 required 少了 2；
     #      #196 前：36 required + 19 = 55，见
     #      `test_tool_schema_nullable.NON_OPTIONAL_BUT_DEFAULTED` 注释）
-    #   · `p1_optional` = 108 - 43 = 65（#196 前 100 - 55 = 45）
-    # 108 = 全部参数数（38 工具，含容器组）。#196 前为 100。
-    assert p1_required + p1_optional == 108, (p1_required, p1_optional)
+    #   · `p1_optional` = 111 - 43 = 68（#196 前 100 - 55 = 45）
+    # 111 = 全部参数数（39 工具，含容器组）。#196 前为 100；#203 加
+    # `update_container_note`（3 个 Optional 参数，全落在 p1_optional）。
+    assert p1_required + p1_optional == 111, (p1_required, p1_optional)
     assert p1_required == 43, p1_required
-    assert p1_optional == 65, p1_optional
+    assert p1_optional == 68, p1_optional
     assert p2 == 13, f"P2={p2}"
     assert p3_fields == 4, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    # 159 = 38 + 43 + 65 + 13 + 0
+    # 163 = 39 + 43 + 68 + 13 + 0（`update_container_note` 的 `record_id` 是 integer，
+    # 不进 P2 的数组元素枚举，故 P2 仍 13）
     # （#196 前 148 = 38 + 55 + 45 + 10 + 0；#189 时 146 = 37 + 35 + 64 + 10 + 0）
-    assert total == 159, total
+    assert total == 163, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

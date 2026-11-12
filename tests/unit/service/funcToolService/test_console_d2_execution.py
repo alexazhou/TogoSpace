@@ -37,7 +37,7 @@ from service.funcToolService import core as func_tool_core
 from util import llmApiUtil
 
 
-#: 去重后的**全部**转发目标（含 #187 新接进来的 task 三工具）。
+#: 去重后的**全部**转发目标（含 #187 新接进来的 task 三工具、#203 的 container note）。
 FORWARD_TARGETS: tuple[str, ...] = tuple(
     sorted({s.legacy_tool for s in cc.COMMAND_SPECS if s.legacy_tool})
 )
@@ -47,9 +47,19 @@ FORWARD_COMMANDS: tuple[str, ...] = tuple(s.key for s in cc.COMMAND_SPECS if s.l
 CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
     t for t in FORWARD_TARGETS if t in cc.LEGACY_CONVERGED_TOOLS
 )
-#: **不**在隐藏清单内的转发目标（#187：task 三工具）—— 隐藏模式下仍是 `BOTH`。
+#: **基准可见性**就是 `CONSOLE_ONLY` 的转发目标（与 D2 开关无关）。
+#:
+#: `update_container_note`（#203）是第一批：容器工具组不在 `_func_tools` 里，
+#: `_declared_visibility` 对它不生效，基准可见性由
+#: `funcToolService.core._CONTAINER_TOOL_VISIBILITY` 显式声明。所以它**任何模式
+#: 下都不进模型暴露面** —— 与 D2 那种「开关决定是否隐藏」是两回事，判据不能混。
+CONSOLE_ONLY_FORWARD_TARGETS: tuple[str, ...] = ("update_container_note",)
+#: **不**在隐藏清单、也不在 `CONSOLE_ONLY` 基准里的转发目标（#187：task 三工具）。
+#: 隐藏模式下仍是 `BOTH`。
 NON_CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
-    t for t in FORWARD_TARGETS if t not in cc.LEGACY_CONVERGED_TOOLS
+    t
+    for t in FORWARD_TARGETS
+    if t not in cc.LEGACY_CONVERGED_TOOLS and t not in CONSOLE_ONLY_FORWARD_TARGETS
 )
 
 
@@ -65,11 +75,16 @@ def _build_registry() -> toolRegistry.AgentToolRegistry:
     """按 Driver 的方式构建注册表：`get_all_tools()` 全量注册（#166-A）。
 
     顺序要紧：先 `load_func_tools()` 填 `_func_tools`，再 `get_all_tools()`。
+
+    `include_container_tools=True` 是**照抄 `TspAgentDriver`**（唯一会执行容器工具的
+    驱动，`tspDriver.py` 用的就是这个参数）：`container note` 的第 2 跳要落到
+    `update_container_note` 上，注册表里没有它就只能报「未知工具」。若这里不传，
+    测的就不是生产注册面。
     """
     func_tool_core.load_func_tools()
     func_tool_core.load_container_func_tools()
     registry = toolRegistry.AgentToolRegistry()
-    for tool in func_tool_core.get_all_tools():
+    for tool in func_tool_core.get_all_tools(include_container_tools=True):
         registry.register(tool, func_tool_core.run_tool_call)
     return registry
 
@@ -124,18 +139,24 @@ def test_forward_targets_are_exactly_the_converged_set():
         f"有收敛清单成员没有任何命令转发它：{set(cc.LEGACY_CONVERGED_TOOLS) - set(CONVERGED_FORWARD_TARGETS)}"
     )
     assert set(FORWARD_TARGETS) == (
-        set(cc.LEGACY_CONVERGED_TOOLS) | set(NON_CONVERGED_FORWARD_TARGETS)
+        set(cc.LEGACY_CONVERGED_TOOLS)
+        | set(NON_CONVERGED_FORWARD_TARGETS)
+        | set(CONSOLE_ONLY_FORWARD_TARGETS)
     )
     assert set(NON_CONVERGED_FORWARD_TARGETS) == {
         "list_tasks", "get_task_detail", "update_task",
     }, f"未收敛的转发目标集合变了：{set(NON_CONVERGED_FORWARD_TARGETS)}"
+    assert set(CONSOLE_ONLY_FORWARD_TARGETS) == {"update_container_note"}, (
+        "基准 CONSOLE_ONLY 的转发目标集合变了："
+        f"{set(CONSOLE_ONLY_FORWARD_TARGETS)}（#203 只加 container note 一条）"
+    )
 
 
 def test_forward_command_count():
     """报总数：全部命令、带转发目标的命令、去重目标数。"""
-    assert len(cc.COMMAND_SPECS) == 26, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条），请复核本条"
-    assert len(FORWARD_COMMANDS) == 26
-    assert len(FORWARD_TARGETS) == 19
+    assert len(cc.COMMAND_SPECS) == 27, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条），请复核本条"
+    assert len(FORWARD_COMMANDS) == 27
+    assert len(FORWARD_TARGETS) == 20
     assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "收敛清单必须仍是 16 项（#187 裁定②：本单不动）"
     assert cc.HELP_SPEC.legacy_tool == ""
 

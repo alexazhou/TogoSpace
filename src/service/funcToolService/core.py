@@ -51,6 +51,7 @@ from .tools import (
     save_role_template,
     save_room,
     send_chat_msg,
+    update_container_note,
     update_task,
     wake_up_agent,
     web_search,
@@ -172,7 +173,23 @@ CONTAINER_TOOL_NAMES = (
     "exit_to_host",
     "list_containers",
     "delete_container",
+    "update_container_note",
 )
+
+#: 容器工具组的**基准可见性**（不在此表里的一律 `TOOL_ONLY`，即随容器工具组整体
+#: 暴露给 TspAgentDriver 的模型面）。
+#:
+#: `update_container_note` 是 `CONSOLE_ONLY`（Operator 2026-11-13 需求）：它由
+#: `container note` 子命令转发执行，模型不该直接看见 —— 修改容器说明是**人**在
+#: 控制台做的整理动作，让模型自己也去改，等于给它一个随时能篡改自己「用途说明」
+#: 的口子（说明是给人看的历史信息，不是模型可自选的标签）。
+#:
+#: 显式声明而不是靠 `_declared_visibility`：后者只对 `_func_tools` 生效，容器工具组
+#: 走的是另一条装配路径，靠上去会静默退回 `TOOL_ONLY`（即模型可见），与本需求正好
+#: 相反 —— 这种「安全默认值恰好是最危险值」的地方必须显式写出来。
+_CONTAINER_TOOL_VISIBILITY: dict[str, ToolVisibility] = {
+    "update_container_note": ToolVisibility.CONSOLE_ONLY,
+}
 
 _container_func_tools: dict[str, FuncTool] = {}
 
@@ -181,7 +198,12 @@ def load_container_func_tools() -> dict[str, FuncTool]:
     """加载容器工具（`startup` 时一并构建，避免每次 `get_tools` 现造）。"""
     global _container_func_tools
     _container_func_tools = {
-        name: FuncTool(name, globals()[name]) for name in CONTAINER_TOOL_NAMES
+        name: FuncTool(
+            name,
+            globals()[name],
+            visibility=_CONTAINER_TOOL_VISIBILITY.get(name, ToolVisibility.TOOL_ONLY),
+        )
+        for name in CONTAINER_TOOL_NAMES
     }
     return _container_func_tools
 

@@ -3,7 +3,7 @@
     "description": "团队/组织/成员/房间/角色模板的管理控制台，用命令行完成管理操作。",
     "parameters": {
       "command": {
-        "description": "要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令；任意命令加 --help / -h 可看该命令的参数清单。",
+        "description": "要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务) / container(容器)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'、'container note a1b2c3d4e5f6 \"跑前端构建\"'。输入 'help' 查看全部命令；任意命令加 --help / -h 可看该命令的参数清单。",
         "schema": {
           "type": "string"
         }
@@ -35,7 +35,7 @@
         }
       },
       "note": {
-        "description": "这个容器的用途说明，例如「跑前端构建」「临时验证 python 脚本」。 创建后不能修改，可以用 list_containers 看到。最多 200 个字符， 超长会直接报错而不是截断；省略表示不写说明。",
+        "description": "这个容器的用途说明，例如「跑前端构建」「临时验证 python 脚本」。 可以用 list_containers 看到；创建后如需修改，由人在管理控制台用 `container note` 命令调整。最多 200 个字符，超长会直接报错而不是截断； 省略表示不写说明。",
         "schema": {
           "type": [
             "string",
@@ -1094,6 +1094,39 @@
     "required": [
       "agent_name"
     ]
+  },
+  "update_container_note": {
+    "description": "修改一个你自己创建的容器的说明（note）。仅控制台可用，模型无法直接调用。",
+    "parameters": {
+      "container_id": {
+        "description": "容器的 12 位容器 ID（十六进制）。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "note": {
+        "description": "新的容器说明，例如「跑前端构建」。最多 200 个字符，超长会直接报错而不是 截断；空字符串表示清空说明。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "record_id": {
+        "description": "容器列表里的记录编号（整数），与 container_id 二选一。",
+        "schema": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "required": []
   },
   "update_task": {
     "description": "更新协作任务：流转状态、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。",

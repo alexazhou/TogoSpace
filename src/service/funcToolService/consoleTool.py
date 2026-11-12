@@ -84,9 +84,13 @@ def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str
     for spec in specs:
         grouped.setdefault(spec.resource, []).append(spec)
     lines: list[str] = []
+    # 对齐宽度按**实际资源名**算，不写死 8：`container` 是 9 个字符，写死 8 会把它和
+    # 操作名粘成 `containernote`（#203 实测），而粘上之后结构测试按 token 切词就取不到
+    # 这一行。动态算也让以后加更长的资源词不必回来改这里。
+    width = max((len(resource) for resource in grouped), default=0) + 2
     for resource, resource_specs in grouped.items():
         actions = "|".join(spec.action for spec in resource_specs if spec.action)
-        lines.append(f"{resource:<8}{actions}".rstrip())
+        lines.append(f"{resource:<{width}}{actions}".rstrip())
     lines.append("用法：<资源> <操作> [位置参数] [--选项 ...]")
     lines.append("create/update 的配置输入（可选）：'<json>' 或 --from payload（payload 字段传 JSON object），也可只用 --选项")
     lines.append("详情：help <资源> 或 help <资源> <操作>；任意命令加 --help / -h 亦可")
@@ -187,7 +191,13 @@ def _usage_line(spec: cc.CommandSpec) -> str:
     """由命令表拼出用法行（参数清单不在这里，见 `_help_detail`）。"""
     parts = [spec.key] if spec.key else ["<资源> <操作>"]
     if spec.needs_target or spec.min_args:
-        parts.append(_USAGE_TARGET_LABEL.get(spec.locator_kind, "<target>"))
+        # 多个位置参数的命令（`container note <id> <text>`）逐个占位，占位名取 schema
+        # 里对应位置的参数名 —— 否则用法行会把「2 个位置参数」写成 1 个，照着 help
+        # 敲必然被 arity 拒。
+        if not spec.needs_target and spec.min_args > 1:
+            parts.extend(f"<{name}>" for name in spec.param_names[: spec.min_args])
+        else:
+            parts.append(_USAGE_TARGET_LABEL.get(spec.locator_kind, "<target>"))
     if spec.accepts_input:
         # 配置输入是可选的（也可以只用 --选项），用法行如实反映。
         parts.append("['<json>' | --from payload]")
@@ -609,13 +619,19 @@ def _handle_save(parsed: ParsedCommand, payload: dict[str, Any] | None = None) -
 
 
 def _handle_direct(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
-    """DIRECT：位置参数就是工具参数（`agent wake bob` / `agent dm bob` / `reload`）。"""
+    """DIRECT：位置参数**按 schema 声明顺序**逐个映射成工具参数。
+
+    也就是 `positional[i] → param_names[i]`（`container note <id> <text>` 两个位置
+    参数分别落到 `container_id` / `note`）。参数名不手抄，取的是 schema 的声明顺序：
+    工具改了参数名、或调整了前两个参数的顺序，命令行自动跟随。
+
+    只做这一件映射：选项（`--x`）仍由 `_option_args` 处理，位置参数个数仍由
+    `_check_arity` 按 `min_args` / `max_args` 判定，verb 分发不变。存量命令全部
+    `max_args <= 1`，只走 `i == 0` 这一路，行为与「只映射第一个」完全一致。
+    """
     spec = parsed.spec
     args = _option_args(spec, parsed)
     if parsed.positional:
-        # 唯一的位置参数名由 schema 的第一个参数给出：`wake_up_agent(agent_name)` /
-        # `start_chat(agent_name)`。写在这里而不是手抄 `agent_name`，是为了让「工具
-        # 改了参数名」自动跟随。
         names = spec.param_names
         if not names:
             raise ConsoleError(
@@ -623,7 +639,16 @@ def _handle_direct(parsed: ParsedCommand, _payload: dict[str, Any] | None = None
                 f"`{spec.key}` 的转发目标 {spec.legacy_tool!r} 没有可用的参数定义，"
                 "属实现缺陷（命令表的 legacy_tool 填错？）。",
             )
-        args[names[0]] = parsed.target or ""
+        if len(parsed.positional) > len(names):
+            # arity 已按 max_args 拦过一次；能走到这里说明命令表的 max_args 比
+            # schema 参数还多 —— 那是命令表写错了，不是用户输入错。
+            raise ConsoleError(
+                "invalid_argument_count",
+                f"`{spec.key}` 的位置参数比 {spec.legacy_tool} 的参数还多"
+                f"（{len(parsed.positional)} > {len(names)}），属实现缺陷。",
+            )
+        for index, value in enumerate(parsed.positional):
+            args[names[index]] = value
     _forward(parsed, **args)
 
 
@@ -665,7 +690,7 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
     """团队/组织/成员/房间/角色模板的管理控制台，用命令行完成管理操作。
 
     Args:
-        command: 要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令；任意命令加 --help / -h 可看该命令的参数清单。
+        command: 要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务) / container(容器)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'、'container note a1b2c3d4e5f6 "跑前端构建"'。输入 'help' 查看全部命令；任意命令加 --help / -h 可看该命令的参数清单。
         payload: 仅当 command 使用 --from payload 时提供，作为 create/update 的 JSON 配置对象；其他命令不得提供。
     """
     try:

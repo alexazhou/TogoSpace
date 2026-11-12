@@ -851,6 +851,95 @@ def _label_matches(inspect_data: dict, record_id: int) -> bool:
     return str(labels.get(CONTAINER_LABEL_RECORD_ID, "")) == str(record_id)
 
 
+async def _resolve_owned_record(
+    agent_id: int,
+    *,
+    container_id: str | None,
+    record_id: int | None,
+) -> GtAgentContainer:
+    """按「二选一定位 + 归属校验」取一条活跃记录（`update_container_note` 用）。
+
+    与 `delete_container` 的前半段同一套口径，抽出来是因为两者只在这一段完全相同、
+    后半段完全不同（一个动 docker、一个只改 DB 字段）。**归属规则必须逐字一致**：
+    别人的记录一律当作不存在（`ERROR_CONTAINER_NOT_FOUND`），不泄露存在性，
+    也不给出「存在但不属于你」这种可用于探测他人容器的差异化文案。
+
+    Raises:
+        TogoException: 二选一冲突 / container_id 形态非法 / record_id 非正 /
+            记录不存在 / 记录属于其他 Agent
+    """
+    if (container_id is None) == (record_id is None):
+        raise TogoException(
+            "container_id 与 record_id 必须二选一", ERROR_CONTAINER_INVALID_PARAMS
+        )
+
+    if container_id is not None:
+        if not is_short_id(container_id):
+            raise TogoException(
+                "container_id 必须是 12 位十六进制容器短 ID",
+                ERROR_CONTAINER_INVALID_PARAMS,
+            )
+        record = await gtAgentContainerManager.get_active_by_container_id(agent_id, container_id)
+    else:
+        assert record_id is not None
+        if record_id <= 0:
+            raise TogoException(
+                "record_id 必须是正整数", ERROR_CONTAINER_INVALID_PARAMS
+            )
+        record = await gtAgentContainerManager.get_active_by_id(record_id)
+        # 归属校验：别人的记录一律当作不存在（不泄露存在性）
+        if record is not None and record.agent_id != agent_id:
+            record = None
+
+    if record is None:
+        raise TogoException("容器记录不存在或不属于当前 Agent", ERROR_CONTAINER_NOT_FOUND)
+    return record
+
+
+async def update_container_note(
+    agent_id: int,
+    *,
+    container_id: str | None = None,
+    record_id: int | None = None,
+    note: str | None = None,
+) -> GtAgentContainer:
+    """修改自建容器的说明（`note`），只改 DB 字段，不碰 docker。
+
+    与 `create_container` 的 note 口径**完全一致**（同一个 `normalize_container_note`）：
+    上限 `MAX_CONTAINER_NOTE_LENGTH` 字符、超长报错不截断、空串/纯空白归一成 `None`
+    （即「清空说明」）。两者共用同一个归一函数，避免「创建时能写 200 字、修改时
+    只认 100 字」这类只在修改路径上出现的契约漂移。
+
+    **未传 `note`（`None`）与传空串是同一件事：清空。** 这与 `save_*` 那类 PATCH
+    接口「省略即保持现值」的语义不同，是有意的：本工具只有一个可变字段，
+    引入「省略=不改」会让「改了个寂寞」也能返回成功，模型无法分辨到底有没有写进去。
+
+    Args:
+        agent_id: 发起方 Agent（归属校验）
+        container_id: 12 位短 ID
+        record_id: `agent_containers.id`（预记录、还没有短 ID 的容器只能用这个）
+        note: 新说明；`None` / 空串 = 清空
+
+    Raises:
+        TogoException: 参数非法 / 记录不存在或不属于当前 Agent / note 超长
+
+    Returns:
+        已更新的记录（带新的 `note`）
+    """
+    record = await _resolve_owned_record(
+        agent_id, container_id=container_id, record_id=record_id
+    )
+    # 校验放在任何副作用之前：超长要让调用方看到明确错误，而不是写进去半个说明。
+    normalized = normalize_container_note(note)
+    await gtAgentContainerManager.set_note(record, normalized)
+    logger.info(
+        "容器说明已更新: agent_id=%s, record_id=%s, container_id=%s, note_len=%s",
+        agent_id, record.id, record.container_id,
+        len(normalized) if normalized else 0,
+    )
+    return record
+
+
 async def delete_container(
     agent_id: int,
     *,
@@ -879,31 +968,11 @@ async def delete_container(
     Returns:
         已标记 `deleted = 1` 的记录（调用方取 `container_id` 作为 `deleted_container_id`）
     """
-    if (container_id is None) == (record_id is None):
-        raise TogoException(
-            "container_id 与 record_id 必须二选一", ERROR_CONTAINER_INVALID_PARAMS
-        )
-
-    if container_id is not None:
-        if not is_short_id(container_id):
-            raise TogoException(
-                "container_id 必须是 12 位十六进制容器短 ID",
-                ERROR_CONTAINER_INVALID_PARAMS,
-            )
-        record = await gtAgentContainerManager.get_active_by_container_id(agent_id, container_id)
-    else:
-        assert record_id is not None
-        if record_id <= 0:
-            raise TogoException(
-                "record_id 必须是正整数", ERROR_CONTAINER_INVALID_PARAMS
-            )
-        record = await gtAgentContainerManager.get_active_by_id(record_id)
-        # 归属校验：别人的记录一律当作不存在（不泄露存在性）
-        if record is not None and record.agent_id != agent_id:
-            record = None
-
-    if record is None:
-        raise TogoException("容器记录不存在或不属于当前 Agent", ERROR_CONTAINER_NOT_FOUND)
+    record = await _resolve_owned_record(
+        agent_id,
+        container_id=container_id,
+        record_id=record_id,
+    )
 
     if record.container_id is not None and record.container_id == current_container_id:
         raise TogoException(

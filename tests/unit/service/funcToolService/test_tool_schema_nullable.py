@@ -158,6 +158,12 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("memory_update", "summary"),
     ("memory_update", "tags"),
     ("memory_update", "title"),
+    # #203：`container note` 的转发目标，3 个参数都是 Optional + None 默认。
+    # `note=None` 与空串在 service 层是同一个意思（清空），所以 null 在这里必须
+    # 被放行 —— 拦掉它会把「清空」这条合法用法一起打死。
+    ("update_container_note", "container_id"),
+    ("update_container_note", "note"),
+    ("update_container_note", "record_id"),
     ("save_agent", "agent_id"),
     ("save_agent", "allow_skills"),
     ("save_agent", "allow_tools"),
@@ -499,7 +505,7 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 19
-    assert len(OPTIONAL_WITH_DEFAULT) == 65
+    assert len(OPTIONAL_WITH_DEFAULT) == 68
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -698,7 +704,7 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 变为 `["name"]`；同时 `type` / `soul` 的参数说明改写为「新建必填 / 更新时省略
 #: 保持现值」。`save_agent.name` 的说明补充「同名多行 ⇒ ambiguous_target」。
 #: 工具数与参数数不变（38 / 108）。
-BASELINE_TEXT_DIGEST = "a0dc4b192c33d05582d8fc0deb6d7776b99f9e754c2a92936b29e167a77228cf"
+BASELINE_TEXT_DIGEST = "eec676b35fcb0e77648f2e5ede1136a8432b9aefc4b4c6fe6a5139e67ccc622e"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -739,8 +745,8 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
     digest, tools, params = _text_digest()
 
-    assert tools == 38, tools
-    assert params == 108, params
+    assert tools == 39, tools
+    assert params == 111, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

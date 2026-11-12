@@ -2054,8 +2054,9 @@ async def create_container(
         image: 容器镜像名称，例如 "ubuntu:24.04"、"python:3.11"。必须是本地已存在的
             Linux 镜像，系统不会自动拉取；省略时使用默认镜像。
         note: 这个容器的用途说明，例如「跑前端构建」「临时验证 python 脚本」。
-            创建后不能修改，可以用 list_containers 看到。最多 200 个字符，
-            超长会直接报错而不是截断；省略表示不写说明。
+            可以用 list_containers 看到；创建后如需修改，由人在管理控制台用
+            `container note` 命令调整。最多 200 个字符，超长会直接报错而不是截断；
+            省略表示不写说明。
     """
     try:
         _container_agent(_context)
@@ -2189,6 +2190,56 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("list_containers 失败: %s", exc, exc_info=True)
         return {"success": False, "message": f"查询容器列表失败: {exc}", "error_code": containerService.ERROR_CONTAINER_ENTER_FAILED}
+
+
+async def update_container_note(
+    container_id: Optional[str] = None,
+    note: Optional[str] = None,
+    record_id: Optional[int] = None,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """修改一个你自己创建的容器的说明（note）。仅控制台可用，模型无法直接调用。
+
+    参数声明顺序是契约的一部分：`container note <id> <text>` 的两个位置参数按
+    schema 顺序映射（`container_id` → `note`），`record_id` 因此必须排在最后。
+
+    Args:
+        container_id: 容器的 12 位容器 ID（十六进制）。
+        note: 新的容器说明，例如「跑前端构建」。最多 200 个字符，超长会直接报错而不是
+            截断；空字符串表示清空说明。
+        record_id: 容器列表里的记录编号（整数），与 container_id 二选一。
+    """
+    try:
+        _container_agent(_context)
+        assert _context is not None
+        # 两个标识原样下传：都给了由 service 按 `delete_container` 那套「必须二选一」报错。
+        # 不在工具层挑一个用 —— 静默择优会让调用方以为自己指定的那个生效了。
+        record = await containerService.update_container_note(
+            _context.agent_id,
+            container_id=container_id,
+            record_id=record_id,
+            note=note,
+        )
+        return {
+            "success": True,
+            "record_id": record.id,
+            "container_id": record.container_id,
+            "note": record.note,
+            "message": (
+                f"容器说明已更新（记录编号 {record.id}"
+                + (f"，容器 {record.container_id}" if record.container_id else "")
+                + ("）：已清空。" if record.note is None else f"）：「{record.note}」。")
+            ),
+        }
+    except TogoException as exc:
+        return _tool_error_result(exc)
+    except Exception as exc:
+        logger.warning("update_container_note 失败: %s", exc, exc_info=True)
+        return {
+            "success": False,
+            "message": f"更新容器说明失败: {exc}",
+            "error_code": containerService.ERROR_CONTAINER_INVALID_PARAMS,
+        }
 
 
 async def delete_container(

@@ -59,6 +59,17 @@ async def set_container_id(container: GtAgentContainer, container_id: str) -> Gt
     return container
 
 
+async def set_note(container: GtAgentContainer, note: str | None) -> GtAgentContainer:
+    """改写容器说明（`note`）。
+
+    校验（长度上限、空白归一成 `None`）在 `containerService.update_container_note`
+    里完成，本模块只负责写入 —— 与 `create` 的分工一致：DAL 落盘，service 定契约。
+    """
+    container.note = note
+    await container.aio_save(only=[GtAgentContainer.note, GtAgentContainer.updated_at])
+    return container
+
+
 async def hard_delete(container: GtAgentContainer) -> None:
     """物理删除记录：仅用于创建流程失败后的清理，不留下残留数据。"""
     if container.id is None:

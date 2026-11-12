@@ -66,16 +66,27 @@ def test_default_tools_exclude_container_tools():
     assert not (names & set(funcToolService.CONTAINER_TOOL_NAMES))
 
 
-def test_include_container_tools_adds_exactly_the_five():
-    """`include_container_tools=True` 精确增加 5 个容器工具，不多不少。"""
+def test_include_container_tools_adds_exactly_the_model_visible_ones():
+    """`include_container_tools=True` 精确增加容器组里**模型可见**的那几个。
+
+    容器组本身是 6 个（#203 起含 `update_container_note`），但模型暴露面只多 5 个：
+    `update_container_note` 的基准可见性是 `CONSOLE_ONLY`（仅 `container note` 可达）。
+    这里同时钉住两件事 —— 组大小与「模型面 = 组 - CONSOLE_ONLY 成员」，任何一边漂了
+    都红。
+    """
     base = {tool.function.name for tool in funcToolService.get_tools()}
     with_containers = {
         tool.function.name
         for tool in funcToolService.get_tools(include_container_tools=True)
     }
 
-    assert with_containers - base == set(funcToolService.CONTAINER_TOOL_NAMES)
-    assert len(funcToolService.CONTAINER_TOOL_NAMES) == 5
+    assert len(funcToolService.CONTAINER_TOOL_NAMES) == 6
+    assert with_containers - base == set(funcToolService.CONTAINER_TOOL_NAMES) - {
+        "update_container_note"
+    }
+    assert "update_container_note" not in with_containers, (
+        "update_container_note 必须是 CONSOLE_ONLY：出现在模型工具列表就等于模型能直改容器说明"
+    )
 
 
 async def test_container_tool_executes_through_run_tool_call(monkeypatch, container_agent):
@@ -493,6 +504,99 @@ async def test_delete_container_maps_in_use_error(monkeypatch, container_agent):
     result = await tools_module.delete_container(container_id="c0ffee123456", _context=_ctx())
 
     assert result["error_code"] == "container_in_use"
+
+
+# ---------------------------------------------------------------------------
+# update_container_note（#203）
+# ---------------------------------------------------------------------------
+
+
+async def test_update_container_note_returns_new_value(monkeypatch, container_agent):
+    """返回体带新的 `note` 与记录编号，消息里能直接读到改成了什么。"""
+    from service import containerService
+
+    record = MagicMock(id=7, container_id="c0ffee123456", note="跑前端构建")
+    mocked = AsyncMock(return_value=record)
+    monkeypatch.setattr(containerService, "update_container_note", mocked)
+
+    result = await tools_module.update_container_note(
+        container_id="c0ffee123456", note="跑前端构建", _context=_ctx()
+    )
+
+    assert result["success"] is True
+    assert result["record_id"] == 7
+    assert result["note"] == "跑前端构建"
+    assert "跑前端构建" in result["message"]
+    # agent_id 必须来自上下文，不能是调用方传的（否则能改别人的容器）
+    assert mocked.await_args.args[0] == 1
+
+
+async def test_update_container_note_passes_both_identifiers_through(monkeypatch, container_agent):
+    """两个标识原样下传，由 service 判「必须二选一」。
+
+    工具层**不做**择优：静默挑一个会让调用方以为自己指定的那个生效了，
+    而实际改的是另一个容器 —— 这类失败在返回体里看不出来。
+    """
+    from service import containerService
+
+    mocked = AsyncMock(return_value=MagicMock(id=7, container_id="c0ffee123456", note="x"))
+    monkeypatch.setattr(containerService, "update_container_note", mocked)
+
+    await tools_module.update_container_note(
+        container_id="c0ffee123456", record_id=7, note="x", _context=_ctx()
+    )
+
+    kwargs = mocked.await_args.kwargs
+    assert kwargs["container_id"] == "c0ffee123456"
+    assert kwargs["record_id"] == 7
+
+
+async def test_update_container_note_cleared_message_says_cleared(monkeypatch, container_agent):
+    """清空后 `note` 为 null，消息要说明是「已清空」而不是显示 `None`。"""
+    from service import containerService
+
+    monkeypatch.setattr(
+        containerService, "update_container_note",
+        AsyncMock(return_value=MagicMock(id=7, container_id="c0ffee123456", note=None)),
+    )
+
+    result = await tools_module.update_container_note(
+        container_id="c0ffee123456", note="", _context=_ctx()
+    )
+
+    assert result["note"] is None
+    assert "已清空" in result["message"]
+
+
+async def test_update_container_note_maps_note_too_long(monkeypatch, container_agent):
+    """`container_note_too_long` 必须透传，不能用笼统错误码盖掉。
+
+    超长与「ID 传参错」是两类完全不同的修法：前者缩短文本，后者改参数。
+    合成一个错误码，调用方只能靠读文案猜。
+    """
+    from service import containerService
+
+    monkeypatch.setattr(
+        containerService, "update_container_note",
+        AsyncMock(side_effect=TogoException("note 超长", "container_note_too_long")),
+    )
+
+    result = await tools_module.update_container_note(
+        container_id="c0ffee123456", note="a" * 201, _context=_ctx()
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "container_note_too_long"
+
+
+async def test_update_container_note_rejects_missing_context():
+    """没有上下文时不许调用（无法确定归属）。"""
+    result = await tools_module.update_container_note(
+        container_id="c0ffee123456", note="x", _context=None
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "container_invalid_params"
 
 
 # ---------------------------------------------------------------------------

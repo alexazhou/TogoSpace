@@ -124,6 +124,11 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "exit_to_host": [],
     "list_containers": [],
     "delete_container": ["container_id", "record_id"],
+    # #203：`container note <id> <text>` 的两个位置参数按这个顺序映射
+    # （`_handle_direct` 的 `positional[i] → param_names[i]`），所以 `note` **必须**在
+    # `record_id` 之前：调换会让第二个位置参数（说明文本）落到记录编号上。
+    # 这条顺序是命令行的对外契约，不是内部风格，动它等于改命令语法。
+    "update_container_note": ["container_id", "note", "record_id"],
 }
 
 

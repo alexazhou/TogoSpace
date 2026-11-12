@@ -55,6 +55,11 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "exit_to_host": ToolCategory.EXECUTE,
     "list_containers": ToolCategory.EXECUTE,
     "delete_container": ToolCategory.EXECUTE,
+    # 改容器说明（#203）：由 `container note` 转发，模型面不可见（CONSOLE_ONLY）。
+    # 分类照旧是执行类 —— 它改的是自己名下容器的元数据，落在同一权限域里；
+    # 真正的「模型不可见」由 `funcToolService.core._CONTAINER_TOOL_VISIBILITY` 表达，
+    # 这里只回答「要不要 Admin」。
+    "update_container_note": ToolCategory.EXECUTE,
     "reload_team": ToolCategory.ADMIN,
     "list_role_templates": ToolCategory.ADMIN,
     "get_role_template": ToolCategory.ADMIN,
