@@ -193,6 +193,32 @@ class ToolCategory(EnhanceEnum):
         return cls.value_of(category_name)
 
 
+class ToolVisibility(EnhanceEnum):
+    """工具在「独立 Function Tool」与「Console 子命令」两个入口上的可见性（2×2=4）。
+
+    与权限面 `enabled` 正交：`enabled` 回答「这个 Agent 有没有权限」，本枚举回答
+    「这个工具从哪个入口对模型可见」。两者都通过才可用。
+
+    - `TOOL_ONLY`：只作为独立工具暴露（如 `send_chat_msg` / `console` 自身）；
+    - `CONSOLE_ONLY`：只通过 console 子命令暴露（D2 隐藏模式下的管理工具）；
+    - `BOTH`：两个入口都可用（双轨过渡，或 `task ls|get|update` 的转发目标）；
+    - `NONE`：两个入口都不可见（临时下线）。
+    """
+
+    NONE = auto()
+    TOOL_ONLY = auto()
+    CONSOLE_ONLY = auto()
+    BOTH = auto()
+
+    @property
+    def tool_visible(self) -> bool:
+        return self in (ToolVisibility.TOOL_ONLY, ToolVisibility.BOTH)
+
+    @property
+    def console_visible(self) -> bool:
+        return self in (ToolVisibility.CONSOLE_ONLY, ToolVisibility.BOTH)
+
+
 class ThirdPartyServiceName(EnhanceEnum):
     """三方搜索服务名称枚举。"""
     DEEPSEEK = "deepseek"

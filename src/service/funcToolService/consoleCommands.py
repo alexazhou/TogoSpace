@@ -31,8 +31,9 @@ from typing import Literal, Optional
 # 两种暴露面，环境变量能让同一次构建跑两个配置。默认值 = 保留，切换主干暴露面
 # 由 Operator 决定，不在 #154 范围。
 #
-# 注意它只影响 `get_tools()` 的**暴露列表**，不影响 `console` 子命令的路由能力
-# —— 停用原工具后 console 仍要能调到底层函数（这是收敛的前提，不是漏洞）。
+# 开关现在只影响**模型暴露面**：已收敛工具的动态可见性在 `BOTH` 与 `CONSOLE_ONLY`
+# 之间切换。三个 Driver 用 `get_all_tools()` 全量注册，console 的第 2 跳因此始终
+# 找得到转发目标（#166-A 已修）；`help` 与路由也按 `console_visible` 运行时过滤。
 # ---------------------------------------------------------------------------
 ENV_KEEP_LEGACY_TOOLS = "TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS"
 
@@ -91,20 +92,18 @@ class Locator:
             不做 id 定位。
         name_param: 「非数字形态的 target」落到哪个工具参数（`str`）。空表示这条
             命令不做名称定位。
-        ambiguous_by_name: 按名定位时是否需要在本地做同名消歧（`ambiguous_target`）。
-            目前只有 `agent update` 置真：`save_agent` 在 tools 层按名取运行时首个，
-            同名两人时会静默改错人。`agent get` 不置真——纯查询，按名取首个是既有
-            行为（`get_agent_info` 的语义），P2 不在这里引入新的歧义判定。
 
-    三者组合出的三种定位形态：
+    两者组合出的三种定位形态：
         - `id` + `name` 都填 = **双定位**（按 target 形态二选一，D8 兼容方案）；
         - 只有 `id_param` = **纯 id 定位**（target 必须是正整数，如 `task get 187`）；
         - 只有 `name_param` = **纯名定位**（target 原样作为名字，如 `role get tester`）。
+
+    同名消歧不在本层做：`save_agent` / `get_agent_info` 各自的按名语义由工具层负责
+    （`save_agent` 已下沉「同名多行 ⇒ ambiguous_target」的保护）。
     """
 
     id_param: Optional[str] = None
     name_param: Optional[str] = None
-    ambiguous_by_name: bool = False
 
     @property
     def kind(self) -> str:
@@ -120,10 +119,8 @@ class Locator:
 def _loc(
     id_param: Optional[str] = None,
     name_param: Optional[str] = None,
-    *,
-    ambiguous_by_name: bool = False,
 ) -> Locator:
-    return Locator(id_param=id_param, name_param=name_param, ambiguous_by_name=ambiguous_by_name)
+    return Locator(id_param=id_param, name_param=name_param)
 
 
 #: 选项别名 → 工具真名（#196 P2）。
@@ -159,21 +156,13 @@ class CommandSpec:
             由统一入口在第 2 跳做，所以它必须非空；只有 `help` 这种纯本地命令可以留空。
         verb: 动作语义（见 `Verb`）。决定交给哪个通用处理器，也决定 help 里这一行
             归到哪一类。
-        accepts_input: 是否接受配置输入（内联 JSON / `--from`）。
+        accepts_input: 是否接受配置输入（内联 JSON / `--from`）。配置输入始终可选：
+            命令也可以只给 `--选项`；两者全无时由 SAVE 处理器按 create / update
+            分别报 `missing_input_source` / `no_update_action`（#198）。
         needs_target: 是否需要位置参数 target。
-        input_optional: `accepts_input` 为真时，「没有配置输入」是否合法（#187）。
-            默认 False ⇒ 沿用 create/update 的老语义：没输入就报 `missing_input_source`。
-            只有 `task update` 置 True：它的配置输入和 `--remove-field` 都是可选的，
-            两者都没有时才由路由层显式报 `no_update_action`。
-            —— 为什么不用「先判断 options 再决定要不要输入」的做法：那样把「这条命令
-            能不能没有输入」这件事藏进路由的 if 分支里，命令表就不再是唯一事实源了。
         self_interrupt: 执行时会不会自中断当前 turn（#154 D6）。目前只有 `reload`。
         min_args / max_args: 位置参数个数约束。
         locator: 位置参数 target 落到哪个工具参数（见 `Locator`）。无 target 的命令留空。
-        needs_padding: SAVE 命令是否需要在本地补齐必填参数。只有 `role update` 置真：
-            `save_role_template` 的 name/type/soul 三者必填，且**没有**「省略即保持现值」
-            的语义（P1 只给 save_dept / save_agent / save_room 做了 PATCH），所以
-            `role update tester '{"soul":"s2"}'` 必须先把 name/type 读出来填进去。
         patch_by_name: 该命令的**语义就是更新**，所以在只能按名字定位时要替调用方补
             `overwrite_existing=True`。
 
@@ -185,9 +174,8 @@ class CommandSpec:
             必须显式表达「这是更新」。这里用命令表声明，而不是恢复读库：是否更新是
             **命令的语义**，不是要去查的事实。
 
-            `agent update` 也置真：它按名字定位时已经先查出 id（同名歧义保护），
-            查不到才会按名字落到 create 分支，那时 overwrite 不影响结果；
-            置真是为了「查得到 id 那条路断掉时」仍有更新语义。
+            `agent update` 也置真：按名字定位且唯一时仍要以「更新」语义落到原工具；
+            同名多行由 `save_agent` 直接返回 `ambiguous_target`（工具层保护）。
         input_defaults: 配置输入里**没出现**的字段用这里的值补上（只补「键不存在」，
             显式给 `null` 不覆盖）。
 
@@ -196,9 +184,9 @@ class CommandSpec:
               工具签名里它是 `None`，而 `None` 在更新分支上有另一层含义（PATCH 保持
               现值）—— 两者不是同一件事，推不出来。旧实现靠手抄 `_pick(data,
               "member_names", [])` 表达，P2 收敛成纯转发后必须重新声明。
-            - `role create` 的 `type: "USER"`：`save_role_template` 的 `type` 是必填
-              且 `value_of(None)` 返回 None ⇒ 不补就报「只允许 SYSTEM 或 USER」。
-              旧 console 默认 USER（help 也这么写），保持不变。
+
+            `role create` 的 `type: "USER"` 已删除：`save_role_template` 现在自己
+            把省略的 type 默认成 USER（PATCH 语义下沉后，默认值属于工具契约）。
 
             ⚠️ 只能挂在 create 上：`dept update` 若也补 `member_names`，一次只改
             responsibility 的 PATCH 会把成员清空。
@@ -214,12 +202,10 @@ class CommandSpec:
     verb: Verb = "DIRECT"
     accepts_input: bool = False
     needs_target: bool = False
-    input_optional: bool = False
     self_interrupt: bool = False
     min_args: int = 0
     max_args: int = 0
     locator: Optional[Locator] = None
-    needs_padding: bool = False
     patch_by_name: bool = False
     input_defaults: tuple[tuple[str, object], ...] = ()
 
@@ -301,12 +287,10 @@ def _spec(
     verb: Verb,
     accepts_input: bool = False,
     needs_target: bool = False,
-    input_optional: bool = False,
     self_interrupt: bool = False,
     min_args: int = 0,
     max_args: int = 0,
     locator: Optional[Locator] = None,
-    needs_padding: bool = False,
     patch_by_name: bool = False,
     input_defaults: tuple[tuple[str, object], ...] = (),
 ) -> CommandSpec:
@@ -317,12 +301,10 @@ def _spec(
         verb=verb,
         accepts_input=accepts_input,
         needs_target=needs_target,
-        input_optional=input_optional,
         self_interrupt=self_interrupt,
         min_args=min_args,
         max_args=max_args,
         locator=locator,
-        needs_padding=needs_padding,
         patch_by_name=patch_by_name,
         input_defaults=input_defaults,
     )
@@ -365,9 +347,9 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     _spec(
         "agent", "update", "save_agent", verb="SAVE",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
-        # 只有这里要本地同名消歧：`save_agent` 按名取运行时首个，同名两人时会静默
-        # 改错人。`agent get` 按名取首个是 `get_agent_info` 的既有语义，不在此列。
-        locator=_loc("agent_id", "name", ambiguous_by_name=True),
+        # 同名消歧已下沉到 `save_agent`：按名定位且匹配多行时工具直接返回
+        # ambiguous_target。console 只按 target 形态翻译成 name / agent_id。
+        locator=_loc("agent_id", "name"),
         patch_by_name=True,
     ),
     # `wake` / `dm` 没有定位与补丁语义：位置参数原样就是工具参数（agent_name）。
@@ -399,19 +381,15 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         needs_target=True, min_args=1, max_args=1,
         locator=_loc(name_param="role_name"),
     ),
-    _spec(
-        "role", "create", "save_role_template", verb="SAVE", accepts_input=True,
-        # `save_role_template` 的 type 必填且没有默认；旧 console 默认 USER。
-        input_defaults=(("type", "USER"),),
-    ),
+    _spec("role", "create", "save_role_template", verb="SAVE", accepts_input=True),
     _spec(
         "role", "update", "save_role_template", verb="SAVE",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
         # `save_role_template` 的定位参数真名叫 `name`；对外统一叫 `role_name`
-        # （别名见 `_OPTION_ALIASES`）。注意它 **没有 PATCH 语义**：name/type/soul
-        # 三者必填，所以 `role update` 必须先在本地读出原值补齐（见 consoleTool）。
+        # （别名见 `_OPTION_ALIASES`）。PATCH 语义已下沉到工具：省略 type/soul/i18n
+        # = 保持现值，所以这里只需按更新语义补 overwrite_existing。
         locator=_loc(name_param="name"),
-        needs_padding=True,
+        patch_by_name=True,
     ),
     _spec(
         "role", "rm", "delete_role_template", verb="DELETE",
@@ -437,9 +415,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "task", "update", "update_task", verb="SAVE",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
         # 任务 id 是必填位置参数；配置输入与 `--remove-field` 都可省略 —— 单独给
-        # `task update 187 --remove-field reviewer_id` 是合法调用（撤销验收人），
-        # 它没有配置输入。详见 `CommandSpec.input_optional`。
-        input_optional=True,
+        # `task update 187 --remove-field reviewer_id` 是合法调用（撤销验收人）。
         locator=_loc(id_param="task_id"),
     ),
     # 其他
@@ -470,10 +446,6 @@ TOP_LEVEL_COMMANDS: tuple[str, ...] = ("help", "reload")
 
 #: `--from` 支持的来源前缀。v1 只放开 `payload`（#154 D1），其余**显式拒绝**。
 SUPPORTED_FROM_SOURCES: tuple[str, ...] = ("payload",)
-UNSUPPORTED_FROM_SOURCES: dict[str, str] = {
-    "local": "v1 暂不支持 local:<path> 文件来源（D1）",
-    "heredoc": "v1 暂不支持 heredoc 多行输入（D1）",
-}
 
 
 def resolve_command_spec(tokens: list[str]) -> tuple[CommandSpec | None, str | None]:
@@ -491,9 +463,8 @@ def resolve_command_spec(tokens: list[str]) -> tuple[CommandSpec | None, str | N
         return HELP_SPEC, None
 
     if head == "reload":
-        if len(tokens) == 1:
-            return COMMAND_INDEX["reload"], None
-        # `reload` 不接受任何位置参数（也不接受选项，见 #165 删 confirm 闸门）
+        # `reload` 不接受任何位置参数（也不接受选项，见 #165 删 confirm 闸门）。
+        # 多余 token 的合法性由后续 `_parse_options` / `_check_arity` 报错。
         return COMMAND_INDEX["reload"], None
 
     spec = COMMAND_INDEX.get(f"{head} {tokens[1].lower()}" if len(tokens) > 1 else "")
@@ -508,3 +479,23 @@ def resolve_command_spec(tokens: list[str]) -> tuple[CommandSpec | None, str | N
         f"未知命令：'{head} {tokens[1] if len(tokens) > 1 else ''}'。"
         f"可用操作：{' | '.join(ACTIONS_BY_RESOURCE[head])}"
     )
+
+
+def command_console_visible(spec: CommandSpec) -> bool:
+    """该命令当前是否可通过 console 使用（由转发目标的可见性决定）。
+
+    运行时判定，不在 import 期固化：D2 开关可能在同一进程内被切换（测试就依赖
+    这一点）。延迟 import `core` 避免 `consoleCommands` → `core` → `consoleTool` →
+    `consoleCommands` 的模块级循环。
+    """
+    if not spec.legacy_tool:
+        return True
+    from constants import ToolVisibility
+
+    from .core import get_func_tool, resolve_effective_visibility
+
+    func_tool = get_func_tool(spec.legacy_tool)
+    # 工具尚未 `load_func_tools()`（部分单测直接调 console / 判定器）时按命令表声明
+    # 的基准 BOTH 判定：不能因为「还没加载」把 reload 之类的命令误判成不可用。
+    declared = func_tool.visibility if func_tool is not None else ToolVisibility.BOTH
+    return resolve_effective_visibility(spec.legacy_tool, declared).console_visible

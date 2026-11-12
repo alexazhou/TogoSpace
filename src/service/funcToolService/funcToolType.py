@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, get_type_hints
 
 from pydantic import TypeAdapter
 
+from constants import ToolVisibility
 from util import llmApiUtil
 
 logger = logging.getLogger(__name__)
@@ -320,11 +321,15 @@ def get_function_metadata(func_name: str, func: Callable[..., Any]) -> Dict[str,
 class FuncTool:
     name: str
     callable: Callable[..., Any]
+    #: 静态基准可见性（`ToolVisibility`）。受 D2 开关控制的工具在 core 层按
+    #: `resolve_effective_visibility()` 动态解析，这里只声明「设计上的基准」。
+    visibility: ToolVisibility = ToolVisibility.TOOL_ONLY
 
     def to_openai_tool(self) -> llmApiUtil.OpenAITool:
         """将当前工具转换为 OpenAI 工具格式。"""
         metadata = get_function_metadata(self.name, self.callable)
         return llmApiUtil.OpenAITool(
+            visibility=self.visibility,
             function=llmApiUtil.OpenAIFunction(
                 name=metadata["name"],
                 description=metadata["description"],

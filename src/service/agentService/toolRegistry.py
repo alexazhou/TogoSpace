@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Iterable
 
-from constants import ToolCategory
+from constants import ToolCategory, ToolVisibility
 from exception import ForwardToolCall
 from toolResult import error_result
 from service.roomService import ToolCallContext
@@ -13,7 +12,7 @@ from util import llmApiUtil, jsonUtil
 
 logger = logging.getLogger(__name__)
 
-ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
+ToolHandler = Callable[[str | dict[str, Any], ToolCallContext], Awaitable[dict[str, Any]]]
 
 #: 转发链最大跳数（#160）。第 1 跳是入口工具 `console`，第 2 跳是它等价的原工具。
 #: 写死 2 而不是可配：转发只允许「入口 → 原工具」这一段；更长的链说明实现已跑偏
@@ -168,6 +167,20 @@ class RegisteredTool:
     #: 还不知道模型会传什么参数。判定器接收本次 tool_call，返回是否需要自中断。
     self_interrupt_predicate: Callable[[Any], bool] | None = None
     enabled: bool = True
+    #: 静态基准可见性（`ToolVisibility`）。实际可见性按 D2 开关动态解析，见
+    #: `effective_visibility`。
+    visibility: ToolVisibility = ToolVisibility.TOOL_ONLY
+
+    @property
+    def effective_visibility(self) -> ToolVisibility:
+        """当前环境下的实际可见性（动态读取 D2 开关）。
+
+        延迟 import 避免 `toolRegistry` ↔ `funcToolService.core` 的模块级循环：
+        本模块被 core 的调用方（Driver）使用，但 core 自己也 import console 等模块。
+        """
+        from service.funcToolService.core import resolve_effective_visibility
+
+        return resolve_effective_visibility(self.tool.function.name, self.visibility)
 
     def triggers_self_interrupt(self, tool_call: Any) -> bool:
         """本次调用是否需要自中断（静态标志优先，其次看动态判定器）。"""
@@ -206,16 +219,29 @@ class AgentToolRegistry:
             marks_turn_finish=marks_turn_finish,
             self_interrupt=self_interrupt,
             self_interrupt_predicate=self_interrupt_predicate,
+            visibility=tool.visibility,
         )
 
     def export_openai_tools(self) -> list[llmApiUtil.OpenAITool]:
-        return [item.tool for item in self._tools_by_name.values() if item.enabled]
+        """模型暴露面：`enabled` 且 `tool_visible`（D2 隐藏模式下收敛工具不出现）。"""
+        return [
+            item.tool for item in self._tools_by_name.values()
+            if item.enabled and item.effective_visibility.tool_visible
+        ]
 
     def get_registered_tool(self, tool_name: str) -> RegisteredTool | None:
         return self._tools_by_name.get(tool_name)
 
     def list_enabled_tool_names(self) -> list[str]:
+        """权限面：`enabled` 的工具名（不按可见性过滤）。"""
         return [name for name, item in self._tools_by_name.items() if item.enabled]
+
+    def list_exposed_tool_names(self) -> list[str]:
+        """模型暴露面：`enabled` 且 `tool_visible` 的工具名（Claude SDK MCP 用）。"""
+        return [
+            name for name, item in self._tools_by_name.items()
+            if item.enabled and item.effective_visibility.tool_visible
+        ]
 
     def list_registered_tool_names(self) -> list[str]:
         return list(self._tools_by_name)
@@ -294,6 +320,26 @@ class AgentToolRegistry:
                     tool_call_id, {"success": False, "message": f"工具无权限使用: {function_name}"}
                 )
 
+            # 可见性按跳数校验（与 `enabled` 正交）：第 1 跳是模型直接发起，要求该工具
+            # 出现在模型暴露面；第 2 跳是 console 转发，要求目标工具对 console 可见。
+            # 隐藏模式下已收敛工具是 CONSOLE_ONLY：模型直调被拒，console 转发仍可达。
+            visibility = registered.effective_visibility
+            if hop == 0 and not visibility.tool_visible:
+                return _execution_result(
+                    tool_call_id,
+                    {
+                        "success": False,
+                        "message": (
+                            f"工具不能直接调用，请通过 console 命令使用: {function_name}"
+                        ),
+                    },
+                )
+            if hop > 0 and not visibility.console_visible:
+                return _execution_result(
+                    tool_call_id,
+                    {"success": False, "message": f"工具不支持通过 console 调用: {function_name}"},
+                )
+
             try:
                 enriched_context = replace(context, tool_name=function_name)
                 result = await registered.handler(function_args, enriched_context)
@@ -334,8 +380,9 @@ class AgentToolRegistry:
                     post_processors.append(forward.post_process)
                 function_name = forward.tool_name
                 # 参数字典由转发方给出（**不含** `_context`：它由 run_tool_call 按当前
-                # 上下文注入），这里统一序列化成与模型侧同形的 JSON 字符串。
-                function_args = json.dumps(forward.tool_args, ensure_ascii=False)
+                # 上下文注入）。直接以 dict 交给下一跳，省掉一次 `json.dumps` →
+                # `json.loads` 往返；handler 契约是 `str | dict`，模型侧仍传 str。
+                function_args = forward.tool_args
                 continue
             except Exception as e:
                 # 这是 handler 之外的兜底（`run_tool_call` 已把自身异常转成返回体，能到这里的

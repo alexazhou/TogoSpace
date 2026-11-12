@@ -19,7 +19,8 @@ class NativeAgentDriver(AgentDriver):
     async def startup(self) -> None:
         await super().startup()
         self.host.tool_registry.clear()
-        tools = funcToolService.get_tools()
+        # 注册面用全量工具（#166-A）：暴露面由 registry 按 `tool_visible` 过滤。
+        tools = funcToolService.get_all_tools()
         for tool in tools:
             function_name = tool.function.name
             self.host.tool_registry.register(

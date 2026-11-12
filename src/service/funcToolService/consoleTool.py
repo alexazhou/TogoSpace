@@ -24,11 +24,9 @@
 | DELETE | 定位 + 转发 | `dept rm root --recursive` |
 | DIRECT | 位置参数就是工具参数 | `agent wake bob`、`reload` |
 
-**PATCH 语义现在在原工具里**（#196 P1 已下沉到 `save_dept` / `save_agent` /
-`save_room`）：省略字段 = 保持现值。所以 console 侧不再读库拼补丁，直接把
-「出现了哪些键」原样转过去。唯一的例外是 `role update` —— `save_role_template`
-没有 PATCH 语义（name/type/soul 三者必填），必须先读出现值补齐
-（命令表里 `needs_padding=True`）。
+**PATCH 语义在原工具里**（已下沉到 `save_dept` / `save_agent` / `save_room` /
+`save_role_template`）：省略字段 = 保持现值。所以 console 侧不再读库拼补丁，直接
+把「出现了哪些键」原样转过去；`console*` 四个模块不再依赖 `dal`。
 
 ## help 也是派生的
 
@@ -66,14 +64,27 @@ from .consoleParsing import ConsoleError, ParsedCommand
 # ---------------------------------------------------------------------------
 
 
-def _build_help_summary() -> str:
-    """一行一个资源，操作按命令表顺序拼接（摘要里**不出现**参数清单）。"""
+def _visible_command_specs() -> list[cc.CommandSpec]:
+    """当前可通过 console 使用的命令（运行时按 `console_visible` 过滤）。"""
+    return [spec for spec in cc.COMMAND_SPECS if cc.command_console_visible(spec)]
+
+
+def _build_help_summary(specs: Optional[list[cc.CommandSpec]] = None) -> str:
+    """一行一个资源，操作按命令表顺序拼接（摘要里**不出现**参数清单）。
+
+    `specs` 为空时用完整命令表（模块级 `HELP_SUMMARY` 的静态形态，供结构测试使用）；
+    `help` 输出则在运行时传入可见命令子集，避免把 D2 开关状态烘焙进 import 期常量。
+    """
+    specs = cc.COMMAND_SPECS if specs is None else specs
+    grouped: dict[str, list[cc.CommandSpec]] = {}
+    for spec in specs:
+        grouped.setdefault(spec.resource, []).append(spec)
     lines: list[str] = []
-    for resource, specs in cc.SPECS_BY_RESOURCE.items():
-        actions = "|".join(spec.action for spec in specs if spec.action)
+    for resource, resource_specs in grouped.items():
+        actions = "|".join(spec.action for spec in resource_specs if spec.action)
         lines.append(f"{resource:<8}{actions}".rstrip())
     lines.append("用法：<资源> <操作> [位置参数] [--选项 ...]")
-    lines.append("create/update 的配置输入：'<json>' 或 --from payload（payload 字段传 JSON object）")
+    lines.append("create/update 的配置输入（可选）：'<json>' 或 --from payload（payload 字段传 JSON object），也可只用 --选项")
     lines.append("详情：help <资源> 或 help <资源> <操作>；任意命令加 --help / -h 亦可")
     return "\n".join(lines)
 
@@ -139,8 +150,7 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     "room update": ("PATCH 语义：只改出现的字段。",),
     "room rm": ("DEPT 房间与运行中的房间不允许删除。",),
     "role update": (
-        "PATCH 语义（由 console 补齐）：save_role_template 的 name/type/soul 三必填且没有"
-        "「省略即保持」的语义，所以这条命令会先读出现值再合并；目标模板必须已存在。",
+        "PATCH 语义：只改出现的字段（type/soul/i18n 省略即保持现值）；目标模板必须已存在。",
     ),
     "role create": ("只能创建 USER 类型；SYSTEM 内置模板只读。",),
     "role rm": ("只能删除 USER 类型且当前未被任何成员使用的模板。",),
@@ -175,7 +185,8 @@ def _usage_line(spec: cc.CommandSpec) -> str:
     if spec.needs_target or spec.min_args:
         parts.append(_USAGE_TARGET_LABEL.get(spec.locator_kind, "<target>"))
     if spec.accepts_input:
-        parts.append("'<json>' | --from payload")
+        # 配置输入是可选的（也可以只用 --选项），用法行如实反映。
+        parts.append("['<json>' | --from payload]")
     if spec.params:
         parts.append("[--选项 ...]")
     return " ".join(parts)
@@ -236,15 +247,21 @@ def _render_help(text: str) -> str:
 
 
 def _help_text(tokens: list[str]) -> dict[str, Any]:
+    visible = _visible_command_specs()
+    visible_keys = {spec.key for spec in visible}
     if len(tokens) <= 1:
-        return {"success": True, "help": _render_help(HELP_SUMMARY)}
+        return {"success": True, "help": _render_help(_build_help_summary(visible))}
     resource = tokens[1].lower()
     action = tokens[2].lower() if len(tokens) > 2 else ""
     key = f"{resource} {action}".strip()
-    detail = _help_detail().get(key)
-    if detail is not None:
-        return {"success": True, "help": _render_help(detail)}
-    available = [spec.action for spec in cc.SPECS_BY_RESOURCE.get(resource, ()) if spec.action]
+    if key in visible_keys:
+        detail = _help_detail().get(key)
+        if detail is not None:
+            return {"success": True, "help": _render_help(detail)}
+    available = [
+        spec.action for spec in visible
+        if spec.resource == resource and spec.action
+    ]
     if available:
         return {"success": True, "help": f"{resource} 的可用操作：" + " | ".join(available)}
     raise ConsoleError(
@@ -319,7 +336,9 @@ def _split_csv(raw: Any) -> list[str]:
 def _convert_option(raw: Any, *, kind: str, name: str, command: str) -> Any:
     """按 schema 声明的类型把选项值转成工具要的形态。"""
     if kind == "boolean":
-        return True
+        if isinstance(raw, bool):
+            return raw
+        return cp.parse_boolean_value(str(raw), name=name, command=command)
     if kind == "integer":
         return _require_positive_int(raw, what=f"--{name}", command=command)
     if kind == "array":
@@ -364,19 +383,12 @@ def _option_args(spec: cc.CommandSpec, parsed: ParsedCommand) -> dict[str, Any]:
     return args
 
 
-def _input_args(spec: cc.CommandSpec, parsed: ParsedCommand, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """配置输入（内联 JSON / `--from payload`）→ 转发参数。
+def _validate_input_keys(spec: cc.CommandSpec, data: dict[str, Any]) -> None:
+    """配置输入的键必须是该工具真有的参数（`spec.param_names` 从 schema 派生）。
 
-    **键名必须是该工具真有的参数**（`spec.param_names` 从 schema 派生）：旧实现按
-    每条命令手抄要取哪些键，写错的键被静默丢弃 —— 模型以为配置生效了，实际没改，
-    然后报告「已改好」。现在未知键直接报错并列出可用键。
-
-    缺省的字段按 `spec.input_defaults` 补值（`dept create` 的 `member_names: []`、
-    `role create` 的 `type: "USER"`）—— 那是**命令层契约**，不是工具签名的默认值。
+    旧实现按每条命令手抄要取哪些键，写错的键被静默丢弃 —— 模型以为配置生效了，
+    实际没改，然后报告「已改好」。现在未知键直接报错并列出可用键。
     """
-    data = dict(cp._input_payload_for(parsed, payload))
-    if not data and not spec.input_defaults:
-        return {}
     allowed = spec.param_names
     if not allowed:
         # 转发目标缺失（命令表 `legacy_tool` 为空 ⇒ fail-closed）。这里**不做键名
@@ -384,7 +396,7 @@ def _input_args(spec: cc.CommandSpec, parsed: ParsedCommand, payload: dict[str, 
         # 在这里拦成 `invalid_payload_field` 会把「命令表填错」伪装成「调用参数错」，
         # 掩盖真正的失败原因 —— 实测踩过：`dc_replace(legacy_tool="")` 的失败关闭
         # 判据原本该看到「未知工具」，结果看到「可用字段：」（空白名单）。
-        return data
+        return
     unknown = sorted(key for key in data if key not in allowed)
     if unknown:
         raise ConsoleError(
@@ -393,6 +405,16 @@ def _input_args(spec: cc.CommandSpec, parsed: ParsedCommand, payload: dict[str, 
             f"可用字段：{' / '.join(allowed)}",
             example=f"help {spec.key}",
         )
+
+
+def _apply_input_defaults(spec: cc.CommandSpec, data: dict[str, Any]) -> dict[str, Any]:
+    """按 `spec.input_defaults` 补「键不存在」的字段（显式 `null` 不覆盖）。
+
+    必须在**冲突检测之后**应用：`dept create --member_names a,b '{...}'` 的 JSON 里
+    没有 `member_names`，补默认值后再比较就会把「选项给了 member_names」误判成
+    「两边都给了」——默认值不是调用方提供的输入来源。
+    """
+    data = dict(data)
     for name, value in spec.input_defaults:
         data.setdefault(name, value)
     return data
@@ -458,12 +480,12 @@ def _forward(
 # ---------------------------------------------------------------------------
 
 
-def _handle_list(parsed: ParsedCommand) -> NoReturn:
+def _handle_list(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
     """LIST：只转发选项（`dept ls` / `task ls --status TODO`）。"""
     _forward(parsed, **_option_args(parsed.spec, parsed))
 
 
-def _handle_get(parsed: ParsedCommand) -> NoReturn:
+def _handle_get(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
     """GET：定位 + 转发，不改库。"""
     spec = parsed.spec
     args = _option_args(spec, parsed)
@@ -471,7 +493,7 @@ def _handle_get(parsed: ParsedCommand) -> NoReturn:
     _forward(parsed, **args)
 
 
-def _handle_delete(parsed: ParsedCommand) -> NoReturn:
+def _handle_delete(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
     """DELETE：定位 + 转发。
 
     影响范围（旧实现的 `impact`）不再由 console 拼：原工具返回体里已有 `deleted` /
@@ -484,101 +506,105 @@ def _handle_delete(parsed: ParsedCommand) -> NoReturn:
     _forward(parsed, **args)
 
 
-async def _handle_save(
-    parsed: ParsedCommand,
-    payload: dict[str, Any] | None,
-    context: ToolCallContext | None,
-) -> NoReturn:
+#: 不属于「更新动作」的机制参数：只影响定位或覆盖保护，不产生字段变更。
+#: `dept update root --overwrite_existing` 若被当成「有动作」，原工具会按 PATCH
+#: 语义「无字段可改」仍返回 success=True —— 正是 #187 禁止的静默成功。
+_MECHANISM_OPTIONS = frozenset({"overwrite_existing"})
+
+
+def _effective_action_names(spec: cc.CommandSpec, values: dict[str, Any]) -> set[str]:
+    """`values` 里真正构成一次更新动作的键（排除定位与覆盖保护等机制参数）。"""
+    mechanism = set(_MECHANISM_OPTIONS)
+    locator = spec.locator
+    if locator is not None:
+        mechanism.update(name for name in (locator.id_param, locator.name_param) if name)
+    return {
+        name
+        for name, value in values.items()
+        if name not in mechanism and not _is_blank(value)
+    }
+
+
+def _handle_save(parsed: ParsedCommand, payload: dict[str, Any] | None = None) -> NoReturn:
     """SAVE：配置输入 + 选项 + 定位。
 
-    PATCH 语义由原工具负责（#196 P1）：省略的字段就是没传，原工具自己取现值。
-    例外是 `needs_padding=True` 的 `role update`（原工具没有 PATCH 语义）。
+    PATCH 语义由原工具负责（#196 P1/P2）：省略的字段就是没传，原工具自己取现值。
+
+    两种输入来源（`--选项` / 配置 JSON）的契约（#198）：
+    - 同名字段**禁止静默覆盖**：别名归一后仍与 JSON 键重名 ⇒ `ambiguous_input_source`；
+    - 目标定位参数（如 `--dept_id`）与位置参数 `<target>` 同时给也判冲突 ——
+      否则 `dept update root --dept_id 5` 会把 5 号部门改名成 root；
+    - `create` 既无有效选项、也无配置输入 ⇒ `missing_input_source`；
+    - `update` 没有有效动作（机制参数不算）⇒ `no_update_action`。
     """
     spec = parsed.spec
-    config = _option_args(spec, parsed)
-    config.update(_input_args(spec, parsed, payload))
+    option_args = _option_args(spec, parsed)
+    raw_input = dict(cp._input_payload_for(parsed, payload))
+    _validate_input_keys(spec, raw_input)
 
-    if spec.input_optional and all(_is_blank(value) for value in config.values()):
+    duplicates = sorted(set(option_args) & set(raw_input))
+    if duplicates:
+        raise ConsoleError(
+            "ambiguous_input_source",
+            f"这些参数同时出现在 --选项 与配置输入中：{' / '.join(duplicates)}。请二选一。",
+            example=f"help {spec.key}",
+        )
+
+    locator = spec.locator
+    locator_keys = (
+        {name for name in (locator.id_param, locator.name_param) if name}
+        if locator is not None
+        else set()
+    )
+    overlap = sorted(locator_keys & (set(option_args) | set(raw_input)))
+    if overlap:
+        raise ConsoleError(
+            "ambiguous_input_source",
+            f"目标定位参数 {' / '.join(overlap)} 不能与位置参数 <target> 重复提供；"
+            "请二选一。",
+            example=f"help {spec.key}",
+        )
+
+    # 冲突检测必须在默认值之前：默认值不是调用方给的输入来源（见 `_apply_input_defaults`）。
+    config = _apply_input_defaults(spec, raw_input)
+    config.update(option_args)
+
+    effective = _effective_action_names(spec, config)
+    if spec.needs_target:
         # 「什么都没有」必须显式报错，**不许静默成功**（#187 裁定①的附加硬要求）：
         # 一个什么都没做的 update 返回 success=True，模型会当成已改好继续往下走，
         # 比直接报错贵得多。判定看**有没有真的产生变更**，不看参数个数：
         # `note=''` / `note='   '` 这类空值不写任何事件（服务层要求非空 note），
         # 所以按「全部为空」判。
-        #
-        # ⚠️ 必须只看**配置部分**（`config`），不能看合并了定位参数之后的 `args`：
-        # `task_id` 永远在，`args` 恒非空 ⇒ 判据恒假、静默成功（本单实测踩过）。
+        if not effective:
+            raise ConsoleError(
+                "no_update_action",
+                f"`{spec.key} {parsed.target}` 没有可执行的动作：请至少给出一个配置字段，"
+                "或用 --remove-field 指定要清除的字段。",
+                example=f"help {spec.key}",
+            )
+    elif not raw_input and not effective:
+        # create 允许「只给 --选项」，但两者全无时连工具都调不起来：
+        # 保留原有的 `missing_input_source` 错误码（既有用例对外契约）。
         raise ConsoleError(
-            "no_update_action",
-            f"`{spec.key} {parsed.target}` 没有可执行的动作：请至少给出一个配置字段，"
-            "或用 --remove-field 指定要清除的字段。",
-            example=f"help {spec.key}",
+            "missing_input_source",
+            "create 需要配置输入：内联 JSON、--from payload，或至少一个 --选项。",
+            example=f"{spec.key} ...",
         )
 
     args = dict(config)
-    args.update(await _save_locator_args(spec, parsed.target or "", context))
+    args.update(_locator_args(spec, parsed.target or "", require_positive_id=False))
 
     if spec.patch_by_name and args.get("overwrite_existing") is None:
         # `update` 的语义就是更新：按名字定位时原工具会把「同名已存在」判成冲突
         # （`overwrite_existing` 默认 False，那是给 create 用的保护）。不表达更新意图
         # 就改不了自己的目标 —— 详见 `CommandSpec.patch_by_name`。
-        # 调用方显式给了 `--overwrite_existing` 就尊重它（包括显式 false）。
         args["overwrite_existing"] = True
-
-    if spec.needs_padding:
-        await _pad_missing_required(spec, args)
 
     _forward(parsed, **args)
 
 
-async def _save_locator_args(
-    spec: cc.CommandSpec, target: str, context: ToolCallContext | None
-) -> dict[str, Any]:
-    """update 的定位参数。
-
-    `ambiguous_by_name`（只有 `agent update`）要先按名字查一次：`save_agent` 在工具层
-    按名字取运行时首个，同名两人时会**静默改错人**。查到了就用 id 定位，顺带避开
-    「按名字 PATCH 却又把名字撞成已存在」的歧义。查不到就把名字原样传下去，让工具层
-    自己报「未找到 / 新建缺必填」——这里不抄一遍它的文案，否则同一句错误有两个来源。
-    """
-    locator = spec.locator
-    if locator is None or locator.kind == "id":
-        return _locator_args(spec, target, require_positive_id=True)
-    args = _locator_args(spec, target, require_positive_id=False)
-    if locator.id_param is None or not locator.ambiguous_by_name:
-        return args
-    team_id = getattr(context, "team_id", None)
-    if team_id is None:
-        return args
-    row = await cp._resolve_agent_by_target(team_id, target)
-    if row is not None:
-        return {locator.id_param: row.id}
-    return args
-
-
-async def _pad_missing_required(spec: cc.CommandSpec, args: dict[str, Any]) -> None:
-    """给「必填但没有省略即保持语义」的工具补上现值（目前只有 `role update`）。
-
-    `save_role_template(name, type, soul, ...)` 三个参数都必填、且没有 PATCH 语义：
-    `role update tester '{"soul":"s2"}'` 若不补齐 name/type，工具会直接报缺参。
-    所以先按名字（或新名字）读出现值填进去 —— 这是 console 侧唯一保留的「读库补丁」，
-    因为它补的是**工具契约缺的那一块**，不是业务逻辑。
-    """
-    from dal.db import gtRoleTemplateManager
-
-    target = args.get("name")
-    if not isinstance(target, str) or not target.strip():
-        return
-    existing = await gtRoleTemplateManager.get_role_template_by_name(target.strip())
-    if existing is None:
-        # 没有现值可补：把缺的必填项问题留给工具层报（它的文案是权威）。
-        return
-    args.setdefault("type", existing.type.name)
-    args.setdefault("soul", existing.soul)
-    args.setdefault("i18n", existing.i18n or None)
-    args["overwrite_existing"] = True
-
-
-def _handle_direct(parsed: ParsedCommand) -> NoReturn:
+def _handle_direct(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
     """DIRECT：位置参数就是工具参数（`agent wake bob` / `agent dm bob` / `reload`）。"""
     spec = parsed.spec
     args = _option_args(spec, parsed)
@@ -597,30 +623,25 @@ def _handle_direct(parsed: ParsedCommand) -> NoReturn:
     _forward(parsed, **args)
 
 
-_VERB_HANDLERS: dict[str, str] = {
-    "LIST": "_handle_list",
-    "GET": "_handle_get",
-    "DELETE": "_handle_delete",
-    "DIRECT": "_handle_direct",
+_VERB_HANDLERS: dict[str, Callable[[ParsedCommand, dict[str, Any] | None], NoReturn]] = {
+    "LIST": _handle_list,
+    "GET": _handle_get,
+    "SAVE": _handle_save,
+    "DELETE": _handle_delete,
+    "DIRECT": _handle_direct,
 }
 
 
-async def _dispatch(
-    parsed: ParsedCommand,
-    payload: dict[str, Any] | None,
-    context: ToolCallContext | None,
-) -> dict[str, Any]:
+def _dispatch(parsed: ParsedCommand, payload: dict[str, Any] | None) -> NoReturn:
     """按命令表的 `verb` 分发。加命令不必动这里，除非引入了新的**动作语义**。"""
     spec = parsed.spec
-    if spec.verb == "SAVE":
-        await _handle_save(parsed, payload, context)
-    handler_name = _VERB_HANDLERS.get(spec.verb)
-    if handler_name is None:
+    handler = _VERB_HANDLERS.get(spec.verb)
+    if handler is None:
         raise ConsoleError(
             "unknown_command",
             f"`{spec.key}` 的动词 {spec.verb!r} 没有对应处理器，属实现缺陷。",
         )
-    globals()[handler_name](parsed)
+    handler(parsed, payload)
     raise ConsoleError(  # pragma: no cover —— 上面每个处理器都是 NoReturn
         "unknown_command",
         f"`{spec.key}` 的处理器没有转发也没有报错，属实现缺陷。",
@@ -668,17 +689,8 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
         }
 
     try:
-        parsed = _parse_command_tokens(spec, tokens)
-        # 不接受配置输入的命令，传了 payload 必须报错而不是静默忽略（draft §4.5）。
-        # 静默忽略的后果很隐蔽：模型以为配置生效了，实际什么都没改，它会接着
-        # 报告「已改好」——比直接报错贵得多。
-        if payload is not None and not spec.accepts_input:
-            raise ConsoleError(
-                "ambiguous_input_source",
-                f"`{spec.key}` 不接受配置输入，请去掉 payload 字段。",
-                example=spec.key,
-            )
-        return await _dispatch(parsed, payload, _context)
+        parsed = _parse_command_tokens(spec, tokens, payload)
+        return _dispatch(parsed, payload)
     except ConsoleError as exc:
         return cp._error_payload(exc)
     except ForwardToolCall:
@@ -693,15 +705,29 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
         return error_result(exc)
 
 
-def _parse_command_tokens(spec: cc.CommandSpec, tokens: list[str]) -> ParsedCommand:
-    """把 token 列表解析成 `ParsedCommand` 并校验参数个数（**唯一**解析入口）。
+def _parse_command_tokens(
+    spec: cc.CommandSpec,
+    tokens: list[str],
+    payload: dict[str, Any] | None = None,
+) -> ParsedCommand:
+    """把 token 列表解析成 `ParsedCommand`，校验参数个数与 `payload`（**唯一**解析入口）。
 
     为什么要抽出来（#165 实测教训）：`console()` 主入口和
     `console_triggers_self_interrupt` 都要做「切选项 + 校验参数个数」，一开始两处各
     抄一遍 —— 结果谓词只解析了命令名、没解析选项，于是 `reload --confirm xxx`（选项
     非法、真执行会在 `_parse_options` 失败）被判定成「会中断」，留下**假的中断标记**。
     两处口径各写一遍就一定会漂移，抽成一个函数后物理上不可能不一致。
+
+    `payload` 的合法性也收在这里（#166-A 同类：谓词漏校验会写假标记）：不接受配置
+    输入的命令传了 payload，真执行会在进入 handler 前报 `ambiguous_input_source`，
+    因而绝不会中断；判定器必须看到同一条结论。静默忽略 payload 的后果很隐蔽：模型
+    以为配置生效了，实际什么都没改，它会接着报告「已改好」——比直接报错贵得多。
     """
+    if not cc.command_console_visible(spec):
+        raise ConsoleError(
+            "unknown_command",
+            f"命令当前不可用：`{spec.key}`（对应工具已被环境开关停用）。",
+        )
     # `reload` 是顶层命令（没有资源词），其余都是 `<资源> <操作>` 两段式。
     rest = tokens[1:] if spec.resource == "reload" else tokens[2:]
     positional, options, input_source = cp._parse_options(spec, rest)
@@ -713,6 +739,12 @@ def _parse_command_tokens(spec: cc.CommandSpec, tokens: list[str]) -> ParsedComm
         raw_tokens=tokens,
     )
     _check_arity(parsed)
+    if payload is not None and not spec.accepts_input:
+        raise ConsoleError(
+            "ambiguous_input_source",
+            f"`{spec.key}` 不接受配置输入，请去掉 payload 字段。",
+            example=spec.key,
+        )
     return parsed
 
 
@@ -778,9 +810,14 @@ def console_triggers_self_interrupt(tool_call: Any) -> bool:
         spec, _err = cc.resolve_command_spec(tokens)
         if spec is None or not spec.self_interrupt:
             return False
-        # 走与 console() **完全相同**的解析链路：选项非法 / 参数个数不对的命令会在
-        # 执行前就失败，因此不能中断（否则留下假标记）。
-        _parse_command_tokens(spec, tokens)
+        payload = args.get("payload")
+        if payload is not None and not isinstance(payload, dict):
+            # `payload` 的类型校验发生在 handler 之前（json schema 校验），非法值
+            # 根本到不了 `console()` ⇒ 不可能发生自中断。判定器与真执行必须同结论。
+            return False
+        # 走与 console() **完全相同**的解析链路：选项非法 / 参数个数不对 / 不接受
+        # 输入却带了 payload 的命令都会在执行前失败，因此不能中断（否则留下假标记）。
+        _parse_command_tokens(spec, tokens, payload)
         return True
     except Exception:  # noqa: BLE001 —— 判定器绝不把异常抛进 turn runner
         return False

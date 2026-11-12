@@ -17,7 +17,7 @@ from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
 from service.funcToolService.core import (
     load_func_tools,
-    get_tools,
+    get_all_tools,
     build_tools,
 )
 from service.agentService.toolRegistry import (
@@ -65,7 +65,7 @@ class TestRoleTemplateToolMetadata(ServiceTestCase):
             "save_agent",
             "save_role_template",
             "delete_role_template",
-        } <= {t.function.name for t in get_tools()}
+        } <= {t.function.name for t in get_all_tools()}
 
     async def test_role_template_tools_build(self) -> None:
         """role template 工具应能构建为 OpenAITool 定义。"""
@@ -89,7 +89,7 @@ class TestRoleTemplateToolMetadata(ServiceTestCase):
     async def test_role_template_tool_metadata_category_via_registry(self) -> None:
         """工具分类应通过 AgentToolRegistry 补齐。"""
         registry = AgentToolRegistry()
-        for t in get_tools():
+        for t in get_all_tools():
             registry.register(t, lambda x, y: None)
         
         list_tool = registry.get_registered_tool("list_role_templates")
@@ -104,7 +104,7 @@ class TestRoleTemplateToolMetadata(ServiceTestCase):
     async def test_all_local_tools_define_category(self) -> None:
         """每个本地工具都应声明 category（get_task 废弃别名已在 #71 删除，无例外）。"""
         load_func_tools()
-        assert {t.function.name for t in get_tools()} <= set(CATEGORY_CONFIG)
+        assert {t.function.name for t in get_all_tools()} <= set(CATEGORY_CONFIG)
 
     async def test_basic_chat_tools_use_basic_category(self) -> None:
         """基础行动工具应归类到 BASIC。"""
@@ -132,7 +132,7 @@ class TestRoleTemplateToolMetadata(ServiceTestCase):
         assert ToolCategory.from_spec("category:admin") == ToolCategory.ADMIN
 
         registry = AgentToolRegistry()
-        for t in get_tools():
+        for t in get_all_tools():
             registry.register(t, lambda x, y: None)
 
         read_tools = registry.resolve_enabled_tool_names(
@@ -295,9 +295,9 @@ class TestRoleTemplateTools(ServiceTestCase):
             soul="draft docs",
             i18n={"display_name": {"zh-CN": "写手", "en": "Writer"}},
         )
+        # PATCH 语义：省略 type 必须保持 USER（不是重置，也不是升成 SYSTEM）。
         update_result = await save_role_template(
             name="writer",
-            type="SYSTEM",
             soul="draft docs carefully",
             i18n={"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}},
             overwrite_existing=True,
@@ -309,9 +309,30 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert "已更新角色模板 writer" in update_result["message"]
         detail = await gtRoleTemplateManager.get_role_template_by_name("writer")
         assert detail is not None
-        assert detail.type == RoleTemplateType.SYSTEM
+        assert detail.type == RoleTemplateType.USER
         assert detail.soul == "draft docs carefully"
         assert detail.i18n["display_name"]["zh-CN"] == "高级写手"
+
+    async def test_save_role_template_patch_keeps_omitted_fields(self) -> None:
+        """PATCH：只改 soul 时 type / i18n 必须保持现值（i18n 不得被 `or {}` 清空）。"""
+        await save_role_template(
+            name="patch_writer",
+            type="USER",
+            soul="第一版",
+            i18n={"display_name": {"zh-CN": "补丁写手", "en": "Patch Writer"}},
+        )
+
+        result = await save_role_template(
+            name="patch_writer",
+            soul="第二版",
+            overwrite_existing=True,
+        )
+
+        assert result["success"], result
+        detail = await gtRoleTemplateManager.get_role_template_by_name("patch_writer")
+        assert detail.type == RoleTemplateType.USER
+        assert detail.soul == "第二版"
+        assert detail.i18n["display_name"]["zh-CN"] == "补丁写手"
 
     async def test_save_role_template_rejects_existing_without_overwrite(self) -> None:
         """同名模板默认不覆盖，需显式打开 overwrite_existing。"""
@@ -366,6 +387,23 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert "不允许通过工具创建" in create_result["message"]
         assert not update_result["success"]
         assert "不允许通过工具修改" in update_result["message"]
+
+    async def test_save_role_template_rejects_user_to_system_promotion(self) -> None:
+        """已有的 USER 模板不得通过 `type="SYSTEM"` 升级成内置模板（否则从此只读）。"""
+        await save_role_template(name="promote_me", type="USER", soul="第一版")
+
+        result = await save_role_template(
+            name="promote_me",
+            type="SYSTEM",
+            soul="第二版",
+            overwrite_existing=True,
+        )
+
+        assert not result["success"]
+        assert "USER" in result["message"] and "SYSTEM" in result["message"]
+        detail = await gtRoleTemplateManager.get_role_template_by_name("promote_me")
+        assert detail.type == RoleTemplateType.USER
+        assert detail.soul == "第一版"
 
     async def test_save_agent_creates_and_updates(self) -> None:
         """save_agent 应在当前 team 中创建成员，并在 overwrite_existing=true 时更新。"""

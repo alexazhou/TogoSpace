@@ -6,13 +6,13 @@ from typing import Any, Iterable, Optional
 
 from pydantic import BaseModel
 
-from constants import ToolCategory
+from constants import ToolCategory, ToolVisibility
 from exception import ForwardToolCall
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from service import serviceUtil
 from util import llmApiUtil
 from service.roomService import ToolCallContext
-from .consoleCommands import ENV_KEEP_LEGACY_TOOLS, LEGACY_CONVERGED_TOOLS
+from .consoleCommands import COMMAND_SPECS, ENV_KEEP_LEGACY_TOOLS, LEGACY_CONVERGED_TOOLS
 from .toolArgsValidation import validate_tool_args
 from toolResult import error_result, invalid_json_args
 from .consoleTool import console, console_triggers_self_interrupt
@@ -71,46 +71,17 @@ _func_tools: dict[str, FuncTool] = {}
 
 
 def keep_legacy_admin_tools() -> bool:
-    """D2 单点开关：是否把被 `console` 收敛的 16 个原工具暴露给模型。
+    """D2 单点开关：被 `console` 收敛的 16 个管理工具是否仍作为独立 Tool 暴露。
 
-    **只影响暴露面** —— 这是设计意图；但 ⚠️ **当前实现下它也影响 console 的执行能力**：
+    开关只影响**模型暴露面**（`ToolVisibility.tool_visible`）；注册面与 console 的
+    转发面不受影响（#166-A 已修）：
 
-    - `get_tools()` 按本开关过滤 schema，这一点符合设计。
-    - 但 #160（`a1e9a502`）之后，`console` 不再是「直接调 `tools.py` 里的函数」，
-      而是抛 `ForwardToolCall` 交给 `toolRegistry.execute_tool_call` 的**第 2 跳**执行。
-      第 2 跳每跳都查 `registered`（`toolRegistry.py:285`），而
-      `tspDriver._register_host_tools`（`:477`）只注册 `get_tools()` 返回的工具。
-    - ⇒ 开关置假时 `delete_dept` / `reload_team` 等未注册 ⇒ console 转发到它们
-      一律返回「未知工具: xxx」。
-    - 实测隐藏模式下 **23/23 条带 `legacy_tool` 的命令全部失败（0 成功），且全部
-      断在第 2 跳 `未知工具: <legacy_tool>`**——前提是命令所需实体存在。实体不存在时
-      会先报「未找到部门 / 房间 / 角色」，那属**前置条件问题**（探针没建好实体就会
-      看到它），不是命令类别属性，也不属 D2。所以自测时先建实体，否则断点会漂到上游。
-
-    **所以「关掉原工具后 console 依然能干活」这句话在 #160 之后已失真**（#160 之前
-    才成立：那时 console 直接 `await legacy.delete_dept(...)`，不查注册表）。
-
-    ## ⚠️ 切换本开关前必须先修 #166-A
-
-    隐藏模式下 console 的**全部转发命令都会失败**（见
-    `tests/unit/service/funcToolService/test_console_d2_execution.py::
-    test_d2_hidden_mode_console_forwarding_is_unavailable`）。
-    **因此切换本开关前必须先修 #166-A（注册表注册面与执行面解耦），否则 console
-    会整体失效**——改环境变量不是第一步，修 A 才是。
-
-    A 未修是有意为之：当前无切换需求，且改动会触及 `execute_tool_call` 的**权限判定
-    单点**（`registered.enabled is False` 是权限判定的唯一所在）。若为「让隐藏的工具能被
-    转发到」而在第 2 跳加旁路，会产生「注册表里能查到、但模型调不到」的第三种状态——
-    这正是 #160 用 870 行消灭掉的东西。收益为零，风险是搅乱刚修好的结构。
-
-    修 A 时须同时评估 console 删除命令（`dept rm` / `room rm` / `role rm`，命令表里
-    `verb=DELETE`）在隐藏模式下的「权限判据是否还是唯一防线」这一前提——上面第 85 行
-    的实测说明它**当前不成立**，通路修好后要回来重新评估（#196 报告「只报不改」）。
-
-    **A 的修法方向已实测可行**（不必再从零设计）：把第 2 跳「`registered is None`」改为
-    回落到 `get_func_tool(function_name)`，实测隐藏模式下 `get_time` 真返回了时间、
-    `delete_dept` 进到真函数才因缺参报错 ⇒ 执行面确实被打通，且 `get_tools()` 仍照旧
-    过滤、暴露面不受影响。该变异下本开关的「不可达」判据会全红（那是拦路闸在喊人）。
+    - 三个 Driver 用 `get_all_tools()` 全量注册，`console` 的第 2 跳因此总能找到目标；
+    - `get_tools()` / `export_openai_tools()` / Claude SDK 的工具列表只保留
+      `tool_visible` 的工具；
+    - `execute_tool_call` 第 1 跳要求 `tool_visible`，第 2 跳（console 转发）要求
+      `console_visible`。隐藏模式下已收敛工具的动态可见性是 `CONSOLE_ONLY`，
+      所以「模型看不到、console 调得到」。
 
     口径用环境变量而不是模块常量：测 token 收益时要在**不改代码**的前提下对比两种
     暴露面，常量得改文件、重启才生效。默认 = 保留；任何无法识别的值也按保留处理
@@ -120,9 +91,31 @@ def keep_legacy_admin_tools() -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _hidden_tool_names() -> set[str]:
-    """按 D2 开关算出要**隐藏**的工具名；保留时返回空集。"""
-    return set() if keep_legacy_admin_tools() else set(LEGACY_CONVERGED_TOOLS)
+def resolve_effective_visibility(name: str, declared: ToolVisibility) -> ToolVisibility:
+    """把「静态基准可见性」解析成「当前环境下的实际可见性」。
+
+    D2 开关只影响已收敛工具（`LEGACY_CONVERGED_TOOLS`）：保留时它们是 `BOTH`，
+    关闭时降为 `CONSOLE_ONLY`（独立 Tool 面隐藏、console 转发面保留）。其余工具
+    原样返回。注册表与暴露层都调用本函数，保证「同一个开关只有一处解释」。
+    """
+    if (
+        declared == ToolVisibility.BOTH
+        and name in LEGACY_CONVERGED_TOOLS
+        and not keep_legacy_admin_tools()
+    ):
+        return ToolVisibility.CONSOLE_ONLY
+    return declared
+
+
+#: console 命令表声明的全部转发目标（静态集合，用于推导基准可见性）。
+_CONSOLE_FORWARD_TARGETS: frozenset[str] = frozenset(
+    spec.legacy_tool for spec in COMMAND_SPECS if spec.legacy_tool
+)
+
+
+def _declared_visibility(name: str) -> ToolVisibility:
+    """静态基准：console 会转发的工具 = BOTH，其余 = TOOL_ONLY。"""
+    return ToolVisibility.BOTH if name in _CONSOLE_FORWARD_TARGETS else ToolVisibility.TOOL_ONLY
 
 
 def load_func_tools() -> dict[str, FuncTool]:
@@ -166,7 +159,7 @@ def load_func_tools() -> dict[str, FuncTool]:
     }
     _func_tools = {}
     for name, func in _registry.items():
-        _func_tools[name] = FuncTool(name, func)
+        _func_tools[name] = FuncTool(name, func, visibility=_declared_visibility(name))
     return _func_tools
 
 
@@ -230,22 +223,40 @@ async def startup() -> None:
     load_container_func_tools()
 
 
-def get_tools(include_container_tools: bool = False) -> list[llmApiUtil.OpenAITool]:
-    """返回已初始化的工具列表。
+def get_all_tools(include_container_tools: bool = False) -> list[llmApiUtil.OpenAITool]:
+    """返回**全量注册面**：所有 `visibility != NONE` 的工具 schema。
 
-    被 `console` 收敛的原 16 个工具按 D2 开关决定是否暴露（默认暴露）；开关只作用于
-    **这里返回的 schema 列表**，`get_func_tool()` / `run_tool_call()` 仍能执行它们。
+    不受 D2 开关影响——开关只决定「模型能不能直接看到/调用」，不影响「注册表里
+    有没有这个工具」。三个 Driver 都用本函数注册，`console` 的第 2 跳因此总能找到
+    转发目标（#166-A）。模型暴露面请用 `get_tools()`。
+
+    Args:
+        include_container_tools: 是否包含容器沙箱工具。
+    """
+    tools = [tool for tool in _func_tools.values() if tool.visibility != ToolVisibility.NONE]
+    if include_container_tools:
+        tools.extend(
+            tool for tool in _container_func_tools.values()
+            if tool.visibility != ToolVisibility.NONE
+        )
+    return build_tools(tools)
+
+
+def get_tools(include_container_tools: bool = False) -> list[llmApiUtil.OpenAITool]:
+    """返回**模型暴露面**：当前 `tool_visible` 的工具列表（受 D2 开关影响）。
+
+    被 `console` 收敛的原 16 个工具在开关关闭时动态解析为 `CONSOLE_ONLY`，不再出现
+    在这里；但它们在注册表里仍然存在，console 转发的第 2 跳只要求 `console_visible`。
 
     Args:
         include_container_tools: 是否包含容器沙箱工具。默认 False——只有
             `TspAgentDriver` 需要（容器工具要切换 gtsp 执行环境），Native /
             Claude SDK 暴露出来只会误导模型（§6.1 生效范围）。
     """
-    hidden = _hidden_tool_names()
-    tools = [tool for name, tool in _func_tools.items() if name not in hidden]
-    if include_container_tools:
-        tools.extend(_container_func_tools.values())
-    return build_tools(tools)
+    return [
+        tool for tool in get_all_tools(include_container_tools=include_container_tools)
+        if resolve_effective_visibility(tool.function.name, tool.visibility).tool_visible
+    ]
 
 
 def get_tools_by_names(
@@ -261,16 +272,20 @@ def get_tools_by_names(
 
 
 async def run_tool_call(
-    function_args: str,
+    function_args: str | dict[str, Any],
     context: Optional[ToolCallContext] = None,
 ) -> dict[str, Any]:
-    """解析 function_args JSON 字符串并执行函数，返回结果字典。
+    """执行本地工具，返回结果字典。
+
+    入参 `function_args` 有两种形态：
+    - 模型侧调用传 **JSON 字符串**（`str`）；
+    - console 转发（第 2 跳）传**已组装好的 dict**，跳过 JSON 往返。
 
     这是**本地工具的唯一执行收口**（三个 driver 都把本函数注册为 handler），因此
     schema 校验与内容错误（JSON 坏、参数类型不符）都在这里统一发生一次：
 
-    1. `json.loads` 失败 ⇒ 结构化失败返回体（#189 之前是**静默 `args = {}` 继续执行**，
-       坏 JSON 会让全可选参数的工具拿默认值真的跑起来）；
+    1. `json.loads` 失败（仅 str 入参）⇒ 结构化失败返回体（#189 之前是**静默
+       `args = {}` 继续执行**，坏 JSON 会让全可选参数的工具拿默认值真的跑起来）；
     2. 参数形状/类型/枚举/必填按 `get_function_metadata()` 的 schema 校验 —— schema
        与下发给模型的是同一份产出（单一事实源），失败返回字段级错误 + `error_code`；
     3. 通过后才注入 `_context` 并调用函数。
@@ -280,13 +295,17 @@ async def run_tool_call(
         logger.error("函数执行失败: tool_name 为空")
         return {"success": False, "message": "函数执行失败: tool_name 为空"}
 
-    try:
-        args: dict = json.loads(function_args)
-    except json.JSONDecodeError as e:
-        logger.warning(
-            f"工具参数 JSON 解析失败，拒绝执行: tool={function_name}, args={function_args!r}"
-        )
-        return invalid_json_args(function_name, function_args, e)
+    if isinstance(function_args, dict):
+        # 转发路径：浅拷贝，避免下游注入 `_context` 时改到转发方的 dict。
+        args: dict = dict(function_args)
+    else:
+        try:
+            args = json.loads(function_args)
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"工具参数 JSON 解析失败，拒绝执行: tool={function_name}, args={function_args!r}"
+            )
+            return invalid_json_args(function_name, function_args, e)
 
     caller = context.agent_id if context is not None else "unknown"
     logger.info(f"use_tool: caller_id={caller}, tool={function_name}, args={args}")

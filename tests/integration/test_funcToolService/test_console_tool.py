@@ -761,6 +761,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         另外**必须带阳性对照**：如果桩根本进不到执行链路，`calls == []` 就是一条
         恒真的假判据（改坏实现也不会红）。
         """
+        from constants import ToolVisibility
         from service.funcToolService.funcToolType import FuncTool
 
         calls: list[str] = []
@@ -772,7 +773,9 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
         def _spy_get(name):
             if name == "save_agent":
-                return FuncTool("save_agent", _spy)
+                # 桩必须保留真工具的基准可见性：console 路由按 `console_visible`
+                # 过滤命令，默认 TOOL_ONLY 会让命令在解析期就被判为不可用。
+                return FuncTool("save_agent", _spy, visibility=ToolVisibility.BOTH)
             return original_get(name)
 
         monkeypatch.setattr(func_tool_core, "get_func_tool", _spy_get)
@@ -1111,6 +1114,85 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert after.i18n == before.i18n, "未出现的 i18n 必须保持原值"
 
     # ==================================================================
+    # #198 §2.3 SAVE 输入契约：配置输入可选，`--选项` 是一等公民
+    # ==================================================================
+
+    async def test_cc6_create_with_options_only(self):
+        """create 只给 `--选项`（无内联 JSON / payload）→ 正常创建。"""
+        ctx = self._ctx()
+        # 夹具里的 mgr1..mgr9 已被别的用例当部门负责人占用（一个成员只能带一个部门），
+        # 自建负责人让本用例与执行顺序无关。
+        created_agent = await self._call(
+            "agent create '{\"name\":\"cc6_mgr\",\"role_template_name\":\"test_role\","
+            "\"driver\":\"tsp\"}'",
+            _context=ctx,
+        )
+        assert created_agent["success"] is True, created_agent
+
+        result = await self._call(
+            "dept create --name cc6_dept --responsibility 'cc6 用' "
+            "--manager_name cc6_mgr --member_names cc6_mgr --parent_name root",
+            _context=ctx,
+        )
+        assert result["success"] is True, result
+        saved = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
+        assert saved is not None
+        assert saved.responsibility == "cc6 用"
+        assert saved.manager_id is not None
+
+    async def test_cc6_update_with_options_only(self):
+        """update 只给 `--选项` → 按 PATCH 语义只改该字段。"""
+        result = await self._call(
+            "dept update cc6_dept --responsibility 'cc6 改过'", _context=self._ctx()
+        )
+        assert result["success"] is True, result
+        saved = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
+        assert saved is not None
+        assert saved.responsibility == "cc6 改过"
+
+    async def test_cc6_same_field_in_option_and_json_is_ambiguous(self):
+        """同一字段同时出现在 `--选项` 与内联 JSON → ambiguous_input_source，且不写库。"""
+        result = await self._call(
+            "dept update cc6_dept --responsibility 'a' '{\"responsibility\":\"b\"}'",
+            _context=self._ctx(),
+        )
+        assert result["success"] is False
+        assert result["error_code"] == "ambiguous_input_source"
+        saved = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
+        assert saved is not None and saved.responsibility == "cc6 改过", "冲突时不能写库"
+
+    async def test_cc6_alias_conflict_uses_normalized_real_name(self):
+        """别名 `--remove-field` 与 JSON 真名 `clear_fields` 按归一后的真名判冲突。"""
+        result = await self._call(
+            "task update 1 --remove-field reviewer_id '{\"clear_fields\":[\"reviewer_id\"]}'",
+            _context=self._ctx(),
+        )
+        assert result["success"] is False
+        assert result["error_code"] == "ambiguous_input_source"
+
+    async def test_cc6_locator_in_options_is_ambiguous(self):
+        """定位参数从 `--选项` 再给一次（与 `<target>` 来源重复）→ ambiguous_input_source。"""
+        result = await self._call("dept update root --dept_id 1", _context=self._ctx())
+        assert result["success"] is False
+        assert result["error_code"] == "ambiguous_input_source"
+
+    async def test_cc6_update_with_only_mechanism_option_is_no_update_action(self):
+        """`--overwrite_existing` 只是机制参数，不构成字段变更 → no_update_action。"""
+        result = await self._call(
+            "dept update cc6_dept --overwrite_existing", _context=self._ctx()
+        )
+        assert result["success"] is False
+        assert result["error_code"] == "no_update_action"
+
+    async def test_cc6_blank_config_counts_as_no_update_action(self):
+        """配置里只有空白值 = 没有可执行动作 → no_update_action（不静默成功）。"""
+        result = await self._call(
+            "dept update cc6_dept '{\"responsibility\":\"   \"}'", _context=self._ctx()
+        )
+        assert result["success"] is False
+        assert result["error_code"] == "no_update_action"
+
+    # ==================================================================
     # D5 / 错误格式：解析只用 shlex，绝不 eval
     # ==================================================================
 
@@ -1163,8 +1245,8 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
     同名的「B」，返回体仍是 `success: True` —— 这是最贵的一类错：模型会当成成功
     继续往下做。draft §4.2 明确要求「同名冲突时提示改用 id」。
 
-    这组用例是**回归钉**：改坏 `_resolve_agent_by_target`（`agent update` 的同名
-    歧义保护），这里必须变红。
+    这组用例是**回归钉**：改坏 `save_agent` 的同名消歧（原在
+    `consoleParsing._resolve_agent_by_target`，已下沉到工具层），这里必须变红。
 
     ## 为什么 `agent get <同名>` 的保护被撤掉（P2 已拍板，不阻塞）
 
@@ -1179,7 +1261,7 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
 
     这是本单的**对外契约变更**（报告「对外契约变更」一节逐条记）：`agent get` 是
     只读命令，取错人不会改库；而 `agent update` 才是「静默改错人」的真风险，所以
-    同名保护只留在它身上（`_save_locator_args` + `locator.ambiguous_by_name`）。
+    同名保护只留在它身上（已下沉到 `save_agent` 的工具层保护）。
     """
 
     @classmethod
@@ -1404,7 +1486,7 @@ def test_p165_c_destructive_commands_resolve_target_once():
     handler = _console_tool_module._VERB_HANDLERS["DELETE"]
     node = next(
         n for n in _ast.walk(tree)
-        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name == handler
+        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name == handler.__name__
     )
     body = _ast.unparse(node)
     resolves = _re.findall(r"_resolve_\w+", body)

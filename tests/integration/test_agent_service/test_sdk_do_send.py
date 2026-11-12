@@ -279,7 +279,13 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             await driver.startup()
 
         exported_names = [tool.function.name for tool in agent.job_consumer._turn_runner.tool_registry.export_openai_tools()]
-        basic_tool_names = {name for name, cat in CATEGORY_CONFIG.items() if cat == ToolCategory.BASIC}
+        # 期望口径按 D2 暴露面收敛：隐藏模式（TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0）下
+        # 已收敛的基础工具不在模型可见范围内，仍留在 `CATEGORY_CONFIG` 里但不是期望项。
+        exposed_names = {tool.function.name for tool in get_tools()}
+        basic_tool_names = {
+            name for name, cat in CATEGORY_CONFIG.items()
+            if cat == ToolCategory.BASIC and name in exposed_names
+        }
         assert set(exported_names) == basic_tool_names
         assert captured_options["allowed_tools"] == ["Read"]
 

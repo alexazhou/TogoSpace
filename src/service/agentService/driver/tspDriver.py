@@ -70,7 +70,8 @@ class TspAgentDriver(AgentDriver):
         self._tsp_tools: dict[str, llmApiUtil.OpenAITool] = {}
         # TSP driver 是唯一暴露容器工具的驱动（§6.1）：容器工具做的就是切换
         # gtsp 的执行环境，别的驱动没有 gtsp 可切。
-        self._local_tools: list[llmApiUtil.OpenAITool] = funcToolService.get_tools(
+        # 注册面用全量工具（#166-A）：模型暴露面由 registry 按 `tool_visible` 过滤。
+        self._local_tools: list[llmApiUtil.OpenAITool] = funcToolService.get_all_tools(
             include_container_tools=True
         )
         self._connect_lock = asyncio.Lock()
@@ -518,7 +519,7 @@ class TspAgentDriver(AgentDriver):
 
     async def _execute_tsp_tool(
         self,
-        function_args: str,
+        function_args: str | dict[str, Any],
         context: roomService.ToolCallContext | None = None,
     ) -> dict[str, Any]:
 
@@ -532,10 +533,14 @@ class TspAgentDriver(AgentDriver):
 
         if not function_name:
             return {"success": False, "message": "TSP 工具调用失败: tool_name 为空"}
-        try:
-            parsed_args = json.loads(function_args)
-        except json.JSONDecodeError as e:
-            return invalid_json_args(function_name, function_args, e)
+        if isinstance(function_args, dict):
+            # 转发路径（handler 契约 `str | dict`）：已组装好，无需 JSON 解析。
+            parsed_args = function_args
+        else:
+            try:
+                parsed_args = json.loads(function_args)
+            except json.JSONDecodeError as e:
+                return invalid_json_args(function_name, function_args, e)
 
         # 远端工具的参数校验：schema 来自 `self._tsp_tools[name].function.parameters`
         # ——它与 `_load_tsp_tools()` 用 `OpenAIFunctionParameter(**tool.input_schema)`

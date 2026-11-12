@@ -170,7 +170,9 @@ async def test_all_default_tools_reject_invalid_args() -> None:
 
     from service.funcToolService.funcToolType import get_function_metadata
 
-    tools = funcCore.get_tools()
+    # 用**注册面**枚举：本判据测的是「每个工具的 schema 校验」，与 D2 暴露面无关
+    # （隐藏模式下 `get_tools()` 会少掉 16 个已收敛工具，计数断言会误红）。
+    tools = funcCore.get_all_tools()
     assert len(tools) == DEFAULT_TOOL_COUNT, [tool.function.name for tool in tools]
 
     covered = 0
@@ -470,7 +472,8 @@ def test_schema_equals_what_is_sent_to_the_model() -> None:
     `get_function_metadata` 每次现造 dict，对象同一性在这里不成立，报告里写明这一点。
     """
 
-    names = [tool.function.name for tool in funcCore.get_tools(include_container_tools=True)]
+    # 注册面枚举（与 D2 暴露面无关）：schema 同源是每个已注册工具的性质。
+    names = [tool.function.name for tool in funcCore.get_all_tools(include_container_tools=True)]
     assert len(names) == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT
 
     for name in names:
@@ -576,7 +579,7 @@ async def test_root_null_rejected_default_tools() -> None:
     `error_code` 且文案是英文原话。那样断言会**假绿**（这正是 H1 之前漏掉的原因）。
     """
 
-    tools = funcCore.get_tools()
+    tools = funcCore.get_all_tools()
     assert len(tools) == DEFAULT_TOOL_COUNT
 
     covered = 0
@@ -681,7 +684,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
 
     # 先扫出所有 array 型参数（(tool_name, param_name)）
     array_params: list[tuple[str, str]] = []
-    for tool in funcCore.get_tools(include_container_tools=True):
+    for tool in funcCore.get_all_tools(include_container_tools=True):
         name = tool.function.name
         func_tool = funcCore.get_func_tool(name)
         if func_tool is None:
@@ -883,16 +886,16 @@ async def test_null_injection_exhaustive_table() -> None:
     - `P3` 嵌套 object 字段数（内部 key 因 schema 为裸 `{"type":"object"}` 不可枚举）
 
     ## 枚举器自校验
-    `get_tools()` == 33、`get_tools(include_container_tools=True)` == 38 ——
+    `get_all_tools()` == 33、`get_all_tools(include_container_tools=True)` == 38 ——
     任一不等说明枚举器自己漏了工具（38 踩过：只拿 `_func_tools` 漏掉容器组 5 个）。
     （#189 时为 32/37；webfetch 进默认组后为 33/38。）
     """
 
     from service.funcToolService.funcToolType import get_function_metadata
 
-    # ---- 锚点自校验：枚举器不许漏工具 ----
-    default_tools = funcCore.get_tools()
-    all_tools = funcCore.get_tools(include_container_tools=True)
+    # ---- 锚点自校验：枚举器不许漏工具（用注册面，不受 D2 暴露面影响）----
+    default_tools = funcCore.get_all_tools()
+    all_tools = funcCore.get_all_tools(include_container_tools=True)
     assert len(default_tools) == DEFAULT_TOOL_COUNT, len(default_tools)
     assert len(all_tools) == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, len(all_tools)
 
@@ -941,23 +944,24 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 108 = 45 + 63。**这里必须拆开看两个口径**（否则「总数对」会掩盖反向变动）：
+    # 108 = 43 + 65。**这里必须拆开看两个口径**（否则「总数对」会掩盖反向变动）：
     #   · `p1_required` 数的是「P1 注入后**应被拦**的字段」，不是 `required` 列表长度：
-    #     26 个 required + 19 个「有默认值但注解不含 None」= 45
-    #     （#196 前：36 required + 19 = 55；构成本身也变了，见
+    #     24 个 required + 19 个「有默认值但注解不含 None」= 43
+    #     （`save_role_template.type/soul` 改为 Optional 后 required 少了 2；
+    #      #196 前：36 required + 19 = 55，见
     #      `test_tool_schema_nullable.NON_OPTIONAL_BUT_DEFAULTED` 注释）
-    #   · `p1_optional` = 108 - 45 = 63（#196 前 100 - 55 = 45）
+    #   · `p1_optional` = 108 - 43 = 65（#196 前 100 - 55 = 45）
     # 108 = 全部参数数（38 工具，含容器组）。#196 前为 100。
     assert p1_required + p1_optional == 108, (p1_required, p1_optional)
-    assert p1_required == 45, p1_required
-    assert p1_optional == 63, p1_optional
+    assert p1_required == 43, p1_required
+    assert p1_optional == 65, p1_optional
     assert p2 == 13, f"P2={p2}"
     assert p3_fields == 4, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    # 159 = 38 + 45 + 63 + 13 + 0
+    # 159 = 38 + 43 + 65 + 13 + 0
     # （#196 前 148 = 38 + 55 + 45 + 10 + 0；#189 时 146 = 37 + 35 + 64 + 10 + 0）
     assert total == 159, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
@@ -1084,14 +1088,15 @@ async def test_invalid_args_are_rejected_through_registry_entry_point() -> None:
     host = _registry_host()
     await NativeAgentDriver(host, AgentDriverConfig(driver_type="native", options={})).startup()
 
-    # `get_time` 的 timezone 是 str；喂 int 必须被拦（走 schema 的 type 约束）。
+    # 用 `get_task_detail`（不在收敛清单内，两种 D2 模式下都可直接调用）：
+    # 它的 `task_id` 是 int，喂 str 必须被拦（走 schema 的 type 约束）。
     tool_call = llmApiUtil.OpenAIToolCall(
-        id="call_1", function={"name": "get_time", "arguments": '{"timezone": 123}'}
+        id="call_1", function={"name": "get_task_detail", "arguments": '{"task_id": "not-an-int"}'}
     )
-    executed = await host.tool_registry.execute_tool_call(tool_call, _ctx("get_time"))
+    executed = await host.tool_registry.execute_tool_call(tool_call, _ctx("get_task_detail"))
 
     assert executed.success is False, executed.result
     assert executed.result["error_code"] == toolArgsValidation.INVALID_TOOL_ARGS, executed.result
     assert "参数校验失败" in executed.result["message"], executed.result
-    # 失败文案要能定位字段：`timezone` 必须出现在里面（不许退化成无字段名的旧文案）。
-    assert "timezone" in executed.result["message"], executed.result
+    # 失败文案要能定位字段：`task_id` 必须出现在里面（不许退化成无字段名的旧文案）。
+    assert "task_id" in executed.result["message"], executed.result

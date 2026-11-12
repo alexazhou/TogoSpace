@@ -31,6 +31,7 @@ from typing import Any
 import pytest
 
 from service.funcToolService import consoleCommands as cc
+from service.funcToolService import consoleParsing as cp
 from service.funcToolService import consoleSchema as cs
 from service.funcToolService import consoleTool as ct
 from service.funcToolService import core as funcCore
@@ -219,3 +220,35 @@ def _run(coro: Any) -> dict:
     import asyncio
 
     return asyncio.run(coro)
+
+
+# --------------------------------------------------------------------------- #
+# 布尔选项的显式值：`--flag` 与 `--flag=false` 都必须落到 bool
+#
+# `spec.boolean_options` 由 schema 派生，只说明「这是开关」；不能顺带假设
+# 「写了 false 也当打开」。`role update` 的 PATCH 语义依赖显式 false 能压过
+# `patch_by_name` 补的 true，所以解析层必须把文本值读进来。
+# --------------------------------------------------------------------------- #
+
+
+def test_boolean_option_bare_flag_is_true() -> None:
+    spec = cc.COMMAND_INDEX["role update"]
+    _, options, _ = cp._parse_options(spec, ["--overwrite_existing"])
+    assert options["overwrite_existing"] is True
+
+
+def test_boolean_option_explicit_false_is_preserved() -> None:
+    spec = cc.COMMAND_INDEX["role update"]
+    positional, options, source = cp._parse_options(
+        spec, ["tpl", "--overwrite_existing=false"]
+    )
+    assert positional == ["tpl"]
+    assert source is None
+    assert options["overwrite_existing"] is False
+
+
+def test_boolean_option_invalid_text_is_rejected() -> None:
+    spec = cc.COMMAND_INDEX["role update"]
+    with pytest.raises(cp.ConsoleError) as exc:
+        cp._parse_options(spec, ["--overwrite_existing=maybe"])
+    assert exc.value.code == "invalid_option_value"

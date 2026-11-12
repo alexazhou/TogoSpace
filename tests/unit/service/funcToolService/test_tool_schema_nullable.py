@@ -10,7 +10,7 @@ schema 里丢失，于是校验层用 `_is_ignorable_null` 按**「是否必填�
 ## 为什么必须**一对**判据（缺一条都会做出错实现）
 
 - `test_field_null_rejected_for_all_non_optional_params`：19 个字段传 null 必拒；
-- `test_field_null_accepted_for_all_optional_params`：63 个 `Optional` 字段传 null
+- `test_field_null_accepted_for_all_optional_params`：65 个 `Optional` 字段传 null
   必须**仍放行**。
 
 （两个数字随 #196 更新：19→19 —— 表内 `save_agent.driver` 移出（见下）+ `delete_dept` /
@@ -81,7 +81,9 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("memory_create", "star_level"),
 ]
 
-#: 任务单 §4.2 的 41 个 `Optional` 字段 + #196 新增的 21 个 = 62 个，#198 再 +1（`console.payload`）= **63** 个（同上：写死作外部锚点）。
+#: 任务单 §4.2 的 41 个 `Optional` 字段 + #196 新增的 21 个 = 62 个，#198 再 +1
+#: （`console.payload`）= 63 个，角色模板 PATCH 下沉再 +2（`save_role_template.type/soul`）
+#: = **65** 个（同上：写死作外部锚点）。
 #:
 #: #196 更新（41 → 62，+21）：本单把 save 系列的定位/必填参数改成可选（PATCH 语义要求
 #: 「未传」可达），并新增三个 `clear_fields: Optional[list[...]]`（详见报告 §「save 系列
@@ -109,7 +111,13 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
 #:   由同一个 `get_function_metadata` 产出，形态 `{"type": ["object","null"]}`）；
 #: - 另立一张表意味着两张表各自记账，长期必然分叉 —— 而「分叉」正是本单要堵的东西。
 #: - 代价只有一个：取函数的方式必须换（`console` 不在 `tools` 模块里，见
-#:   `_tool_callable`），这是一次性的、且换完之后对全部 63 条统一。
+#:   `_tool_callable`），这是一次性的、且换完之后对全部 65 条统一。
+#:
+#: ## 角色模板 PATCH 下沉（63 → 65，+2：`save_role_template.type/soul`）
+#:
+#: `save_role_template` 改成 PATCH 语义后，`type` / `soul` 的注解从必填 `str` 变为
+#: `Optional[str] = None`，schema 随之声明 nullable。新建时仍要求 soul、type 默认
+#: USER 的兜底移到工具运行时（与 `save_agent` 的「schema 放开、运行时必填」同口径）。
 #:
 #: 这张表是**外部锚点**，变化必须显式写在这里 —— 所以本单改动它是有意留痕，
 #: 不视为锚点腐化。
@@ -168,6 +176,8 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("save_dept", "parent_name"),
     ("save_dept", "responsibility"),
     ("save_role_template", "i18n"),
+    ("save_role_template", "soul"),
+    ("save_role_template", "type"),
     ("save_room", "clear_fields"),
     ("save_room", "initial_topic"),
     ("save_room", "max_rounds"),
@@ -254,8 +264,8 @@ def _registered_tool_names() -> list[str]:
     """**注册面**的全部工具名（两组都算，不受 D2 暴露面开关影响）。
 
     ⚠️ 这里**不能用 `funcCore.get_tools()`** —— 那是**暴露面**：
-    `get_tools()` 会按 D2 开关（`_hidden_tool_names()`）过滤掉被 `console` 收敛的
-    16 个原工具。实测 D2 隐藏模式（`TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0`）下
+    `get_tools()` 会按 D2 开关（`resolve_effective_visibility(...).tool_visible`）
+    过滤掉被 `console` 收敛的 16 个原工具。实测 D2 隐藏模式（`TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0`）下
     `get_tools(include_container_tools=True)` 只剩 22 个，现算会少 36 条，
     于是 `stale` 报「清单过期 36 项」—— **完全是误报，且指令是错的**
     （会让人去删正确的清单项）。
@@ -489,7 +499,7 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 19
-    assert len(OPTIONAL_WITH_DEFAULT) == 63
+    assert len(OPTIONAL_WITH_DEFAULT) == 65
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -682,7 +692,13 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 理由：P2 让 `--help` / `-h` 在任意位置可用（draft D12），这是模型必须知道的能力，
 #: 不写进工具说明等于「实现了但没人知道」。工具数与参数数不变（38 / 108），
 #: required 不变 —— 已实测快照 diff 里只有 `[console.command] 参数说明变化` 一条。
-BASELINE_TEXT_DIGEST = "7ab24aee752aa011bcec1e1b525de3605367247d432b2c74b235b82b75bd6c37"
+#:
+#: 角色模板 PATCH 下沉再次重算（`7ab24aee…` → `06ef7b7c…`）：`save_role_template`
+#: 的 `type` / `soul` 改成 Optional，工具级 required 从 `["name","type","soul"]`
+#: 变为 `["name"]`；同时 `type` / `soul` 的参数说明改写为「新建必填 / 更新时省略
+#: 保持现值」。`save_agent.name` 的说明补充「同名多行 ⇒ ambiguous_target」。
+#: 工具数与参数数不变（38 / 108）。
+BASELINE_TEXT_DIGEST = "06ef7b7cd6c7280c3091a115566828593c187605b458b23f81257ecc7141ff62"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -691,7 +707,8 @@ def _text_digest() -> tuple[str, int, int]:
     import hashlib
 
     snapshot: dict[str, Any] = {}
-    for tool in funcCore.get_tools(include_container_tools=True):
+    # 注册面枚举：description/required 是工具签名的事实，与 D2 暴露面无关。
+    for tool in funcCore.get_all_tools(include_container_tools=True):
         name = tool.function.name
         func_tool = funcCore.get_func_tool(name)
         assert func_tool is not None, name
@@ -732,10 +749,10 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 63 组的「不走端到端」守卫（小马哥 23:08 第③件；#198 起条数 62 → 63）
+# 65 组的「不走端到端」守卫（小马哥 23:08 第③件；#198 起 62 → 63，角色模板 PATCH 后 → 65）
 #
 # 判据要钉的是**调用链**（有没有间接走端到端），不是「关键字出现与否」。
-# 63 组的通道原本是 `_inject_null` → `run_tool_call` 两跳，只盯第二跳会漏掉第一跳。
+# 65 组的通道原本是 `_inject_null` → `run_tool_call` 两跳，只盯第二跳会漏掉第一跳。
 #
 # 为什么用 AST 取函数体，而不是行号 / sed / awk / 关键字 grep：
 #   - 行号：插一行就腐化（本单实测过 `source.index(f"async def {plan_name}(")` 直接崩）；

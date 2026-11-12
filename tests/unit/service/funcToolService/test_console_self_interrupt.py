@@ -85,6 +85,32 @@ class TestConsolePredicate:
         """
         assert console_triggers_self_interrupt(_call("reload")) is True
 
+    def test_reload_with_payload_does_not_interrupt(self):
+        """`reload` 不接受配置输入：带 payload 时真执行会先报 `ambiguous_input_source`。
+
+        #166-A 的另一面：判定器若只看命令名，会在这里写下一个 `SELF_INTERRUPT` 标记，
+        但实际执行根本没走到 `reload_team` —— 重启后该条目被当成「已执行过」自动判成功。
+        """
+        call = OpenAIToolCall(
+            id="c",
+            function={
+                "name": "console",
+                "arguments": json.dumps({"command": "reload", "payload": {"a": 1}}),
+            },
+        )
+        assert console_triggers_self_interrupt(call) is False
+
+    def test_reload_with_non_object_payload_does_not_interrupt(self):
+        """payload 类型非法时 schema 校验会在 handler 前拒绝，同样不会中断。"""
+        call = OpenAIToolCall(
+            id="c",
+            function={
+                "name": "console",
+                "arguments": json.dumps({"command": "reload", "payload": "not-a-dict"}),
+            },
+        )
+        assert console_triggers_self_interrupt(call) is False
+
     def test_reload_with_leftover_confirm_syntax_does_not_interrupt(self):
         """带已被删除的 `--confirm` 写法 → 解析期就报 unknown_option，判定器返回 False。
 

@@ -152,7 +152,7 @@ def mock_tsp_host() -> MagicMock:
 async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host: MagicMock) -> None:
     config = AgentDriverConfig(driver_type="tsp", options={})
     
-    with patch("service.funcToolService.get_tools", return_value=[
+    with patch("service.funcToolService.get_all_tools", return_value=[
         llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
             name="get_time",
             description="",
@@ -258,7 +258,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host: Mag
 async def test_tsp_driver_respects_local_tool_names(mock_tsp_host: MagicMock) -> None:
     config = AgentDriverConfig(driver_type="tsp", options={"local_tool_names": ["send_chat_msg", "finish_action"]})
 
-    with patch("service.funcToolService.get_tools", return_value=[
+    with patch("service.funcToolService.get_all_tools", return_value=[
         llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
             name="get_time",
             description="",

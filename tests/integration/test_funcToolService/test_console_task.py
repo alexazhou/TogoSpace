@@ -170,7 +170,7 @@ class TestConsoleTaskCommand(ServiceTestCase):
 
         这是本单最核心的一条：它同时覆盖
         - 命令注册（`COMMAND_SPECS` 里有 task update）、
-        - `input_optional`（没有配置输入也不报 `missing_input_source`）、
+        - 配置输入可选（没有配置输入也不会报 `missing_input_source`）、
         - `--remove-field` → `clear_fields` 的映射、
         - 第 2 跳权限与 `taskService` 的撤销分支、
         - 落库。

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStatus, AgentHistoryTag, ScheduleJobType, DriverType, OpenaiApiRole, RoomState, SpecialAgent, TaskStatus, TurnStepResult
+from constants import AgentHistoryStatus, AgentHistoryTag, ScheduleJobType, DriverType, OpenaiApiRole, RoomState, SpecialAgent, TaskStatus, ToolVisibility, TurnStepResult
 from exception import ForwardToolCall
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -1701,6 +1701,8 @@ def _p2_registry(counter: dict[str, int]) -> AgentToolRegistry:
 
     def _mk(name: str) -> llmApiUtil.OpenAITool:
         return llmApiUtil.OpenAITool(
+            # console → delete_room 的第 2 跳要求目标 console_visible。
+            visibility=ToolVisibility.BOTH,
             function=llmApiUtil.OpenAIFunction(
                 name=name,
                 description="",

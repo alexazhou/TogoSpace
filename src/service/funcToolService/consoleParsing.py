@@ -102,6 +102,28 @@ class ParsedCommand:
 HELP_FLAGS = ("--help", "-h")
 
 
+_TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
+_FALSE_VALUES = frozenset({"false", "0", "no", "off"})
+
+
+def parse_boolean_value(raw: str, *, name: str, command: str) -> bool:
+    """`--flag=<文本>` 的布尔解析。
+
+    裸 `--flag` 是 True；显式 `=false` 必须真的关闭（`role update` 的
+    `overwrite_existing` 依赖这一点，否则写了 false 反而被当成 true）。
+    """
+    normalized = raw.strip().lower()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ConsoleError(
+        "invalid_option_value",
+        f"--{name} 只接受 true/false（也接受 1/0、yes/no、on/off），收到 {raw!r}。",
+        example=f"{command} --{name} false",
+    )
+
+
 def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], dict[str, Any], str | None]:
     """把 token 拆成 (位置参数, 选项, 输入来源)。
 
@@ -149,7 +171,11 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
                     example=spec.key,
                 )
             if name in boolean_options:
-                options[name] = True
+                options[name] = (
+                    parse_boolean_value(inline_value, name=name, command=spec.key)
+                    if sep
+                    else True
+                )
                 idx += 1
                 continue
             if sep:
@@ -176,9 +202,17 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
 # ---------------------------------------------------------------------------
 
 def _resolve_input_payload(
-    parsed: ParsedCommand, payload: dict[str, Any] | None
+    config_tokens: list[str],
+    payload: dict[str, Any] | None,
+    *,
+    input_source: str | None,
+    command_key: str,
 ) -> dict[str, Any]:
     """按 D1 与 CC3 解析配置输入，返回最终的 JSON object。
+
+    `config_tokens` 是**已经剥掉 target** 的位置参数（create 的全部、update 的第 1 位
+    之后）；调用方负责切分，本函数不再需要构造一个临时的 `ParsedCommand` 来「跳过
+    target」——那层克隆只是把同一件事又描述了一遍。
 
     四种情形**必须严格区分**（含糊报「解析失败」等于让模型没法自查）：
     - `--from payload` + 无 payload → `missing_payload`
@@ -186,11 +220,8 @@ def _resolve_input_payload(
     - 未用 `--from` 却传了 payload → `ambiguous_input_source`
     - `--from local:...` / heredoc → `unsupported_input_source`（v1 明确不支持）
     """
-    source = parsed.input_source
-    positional = parsed.positional
-
-    if source is not None:
-        normalized = source.strip()
+    if input_source is not None:
+        normalized = input_source.strip()
         if normalized.startswith("local:"):
             raise ConsoleError(
                 "unsupported_input_source",
@@ -210,17 +241,17 @@ def _resolve_input_payload(
                 supported=list(cc.SUPPORTED_FROM_SOURCES),
             )
         # --from payload
-        if positional:
+        if config_tokens:
             raise ConsoleError(
                 "ambiguous_input_source",
                 "--from payload 与内联 JSON 不能同时使用。",
-                example=f"{parsed.key} --from payload   （配置放 payload 字段）",
+                example=f"{command_key} --from payload   （配置放 payload 字段）",
             )
         if payload is None:
             raise ConsoleError(
                 "missing_payload",
                 "使用 --from payload 时必须在 payload 字段提供配置对象。",
-                example=f"{parsed.key} --from payload",
+                example=f"{command_key} --from payload",
             )
         return _require_json_object(payload)
 
@@ -229,31 +260,21 @@ def _resolve_input_payload(
         raise ConsoleError(
             "ambiguous_input_source",
             "提供了 payload 但命令没有用 --from payload；请二选一。",
-            example=f"{parsed.key} --from payload   或   {parsed.key} '{{...}}'",
+            example=f"{command_key} --from payload   或   {command_key} '{{...}}'",
         )
 
-    if not positional:
-        # `input_optional`（#187）：少数命令的配置输入是可选的（目前只有 `task update`
-        # ——「撤销验收人」这种调用本来就没有配置对象）。此时「无输入」返回空对象，
-        # 由路由层判断「输入 + 选项全都为空」并报 `no_update_action`。
-        # **默认 False**，所以 dept/agent/room/role 的 create/update 语义零变化。
-        #
-        # 为什么不在这里顺手检查「选项也空」：那让解析层知道某条命令的选项语义，
-        # 而「没输入且没动作算不算合法」是**命令的业务语义**，归路由。解析层只回答
-        # 「这条命令允不允许没有输入」——这一条写在命令表里（`CommandSpec.input_optional`）。
-        if parsed.spec.input_optional:
-            return {}
-        raise ConsoleError(
-            "missing_input_source",
-            "create/update 需要配置输入：内联 JSON 或 --from payload。",
-            example=f"{parsed.key} '{{\"name\":\"示例\"}}'",
-        )
-    if len(positional) > 1:
+    if not config_tokens:
+        # 没有配置输入在解析层是合法的（#198）：create/update 都可以只用 `--选项`。
+        # 「create 连选项也没有」= `missing_input_source`、「update 没有动作」=
+        # `no_update_action`，都属于**命令的业务语义**，由路由层判定 —— 解析层只回答
+        # 「输入来源是否合法」，不认识某条命令需要哪些字段。
+        return {}
+    if len(config_tokens) > 1:
         raise ConsoleError(
             "ambiguous_input_source",
-            f"只能提供一个配置输入，收到 {len(positional)} 段：{positional!r}",
+            f"只能提供一个配置输入，收到 {len(config_tokens)} 段：{config_tokens!r}",
         )
-    raw = positional[0]
+    raw = config_tokens[0]
     if raw.lstrip().startswith("<<"):
         raise ConsoleError(
             "unsupported_input_source",
@@ -294,63 +315,15 @@ def _input_payload_for(parsed: ParsedCommand, payload: dict[str, Any] | None) ->
     """
     if not parsed.spec.accepts_input:
         return {}
-    if parsed.spec.needs_target:
-        config_tokens = parsed.positional[1:]
-        restored = ParsedCommand(
-            parsed.spec,
-            positional=config_tokens,
-            options=parsed.options,
-            input_source=parsed.input_source,
-            raw_tokens=parsed.raw_tokens,
-        )
-        return _resolve_input_payload(restored, payload)
-    return _resolve_input_payload(parsed, payload)
+    config_tokens = parsed.positional[1:] if parsed.spec.needs_target else parsed.positional
+    return _resolve_input_payload(
+        config_tokens,
+        payload,
+        input_source=parsed.input_source,
+        command_key=parsed.key,
+    )
 
 
-# ---------------------------------------------------------------------------
-# 目标定位辅助
-#
-# 部门/房间/角色的定位已改为由 `CommandSpec.locator` 声明、consoleTool 直接转发
-# `dept_id`/`name` 给原工具（原工具本身支持 id 或 name 两种定位），这里不再保留
-# `_resolve_dept_id` / `_resolve_room_by_target` / `_resolve_role_by_target`。
-# 成员是唯一例外：`GtAgent` 的 `(team_id, name)` 非唯一，必须在此拦同名歧义。
-# ---------------------------------------------------------------------------
-
-async def _resolve_agent_by_target(team_id: int, target: str):
-    """按 id 或名称定位成员；**同名多行时必须报错要求改用 id**（draft §4.2）。
-
-    只有成员表允许同名：`GtAgent` 的 `(team_id, name)` 是**非唯一**索引（离职成员的
-    名字可以被新成员复用，见 `gtAgent.model` 注释）。部门/房间是唯一索引，角色模板
-    `name` 本身 unique，所以「同名」这件事只发生在成员上。
-
-    为什么不能像原工具那样「取第一条」：`gtAgentManager.get_agent()` 用
-    `aio_get_or_none` → `peewee_async` 的 `aio_get` 是 `paginate(1, 1)`，**不校验唯一性**，
-    两行同名时它返回行序靠前的那一行（通常是先建的、已离职的那一个）。`update` 走这条
-    路会**静默改到离职成员**，`get` 会静默给出别人的详情 —— 都不报错，模型会当成成功。
-    draft §4.2 因此要求「同名冲突时提示改用 id」，这里按设计稿执行。
-    """
-    from dal.db import gtAgentManager
-
-    stripped = target.strip()
-    if stripped.isdigit():
-        agent = await gtAgentManager.get_agent_by_id(int(stripped))
-        if agent is not None and agent.team_id == team_id:
-            return agent
-        return None
-    # **非 id 路径必须用 status=None 取全量再自己筛**：`get_agent` 默认只查 ON_BOARD，
-    # 而新建成员在 `reload_team` 之前是 OFF_BOARD（`save_agent` 建人时就是 OFF_BOARD），
-    # 用默认值会导致「刚 create 出来的成员，同一次 turn 里 update 立刻 not_found」。
-    all_agents = await gtAgentManager.get_team_all_agents(team_id)
-    matched = [a for a in all_agents if a.name == stripped]
-    if not matched:
-        return None
-    if len(matched) > 1:
-        raise ConsoleError(
-            "ambiguous_target",
-            f"团队内有 {len(matched)} 个同名成员 {stripped}（含离职成员）；请改用 id 定位。",
-            candidates=[
-                {"id": a.id, "name": a.name, "employ_status": a.employ_status.name}
-                for a in matched
-            ],
-        )
-    return matched[0]
+# 目标定位全部由 `CommandSpec.locator` 声明、`consoleTool._locator_args` 一处翻译成
+# 工具参数；同名消歧已下沉到 `tools.save_agent`（工具层对直接调用同样生效）。
+# `console*` 四个模块自此不再 import `dal`。

@@ -37,7 +37,8 @@ class TestfuncToolServiceInit(ServiceTestCase):
 
     async def test_tool_category_is_none_before_registration(self):
         """在 funcToolService 层级，工具 category 默认为 None。"""
-        tool = next(item for item in funcToolService.get_tools() if item.function.name == "get_time")
+        # 用注册面枚举：`get_time` 在 D2 隐藏模式下不暴露，但仍是注册工具。
+        tool = next(item for item in funcToolService.get_all_tools() if item.function.name == "get_time")
         assert tool.category is None
 
     async def test_close_clears_tools(self):

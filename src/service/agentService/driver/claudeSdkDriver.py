@@ -91,7 +91,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
     async def startup(self) -> None:
         await super().startup()
         self.host.tool_registry.clear()
-        for t in funcToolService.get_tools():
+        # 注册面用全量工具（#166-A）；下方 MCP 工具列表按暴露面过滤。
+        for t in funcToolService.get_all_tools():
             fn_name = t.function.name
             self.host.tool_registry.register(
                 t,
@@ -110,7 +111,9 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 is_root_leader=bool(self.config.options.get("is_root_leader")),
             )
             self.host.tool_registry.apply_tool_allow_specs(effective_specs)
-        local_tool_names = self.host.tool_registry.list_enabled_tool_names()
+        # MCP 工具列表是模型暴露面：必须过滤 `tool_visible`，否则 CONSOLE_ONLY
+        # 工具会出现在这里，模型一调就被第 1 跳可见性校验拒绝。
+        local_tool_names = self.host.tool_registry.list_exposed_tool_names()
 
         server = create_sdk_mcp_server(
             "chat-tools",

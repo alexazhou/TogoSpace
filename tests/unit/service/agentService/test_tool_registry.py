@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from exception import ForwardToolCall
-from constants import ToolCategory
+from constants import ToolCategory, ToolVisibility
 from service.agentService.toolRegistry import (
     CATEGORY_CONFIG,
     AgentToolRegistry,
@@ -198,15 +198,18 @@ async def test_execute_tool_call_exception() -> None:
 
 
 def _register_tool(registry: AgentToolRegistry, name: str, handler) -> None:
+    # 本组用例测的是转发机制本身，不是可见性策略：两个入口都放开（BOTH），
+    # 可见性拒绝的判据由 `test_console_d2_execution.py` 单独守。
     registry.register(
         llmApiUtil.OpenAITool(
+            visibility=ToolVisibility.BOTH,
             function=llmApiUtil.OpenAIFunction(
                 name=name,
                 description="",
                 parameters=llmApiUtil.OpenAIFunctionParameter(
                     type="object", properties={}, required=[]
                 ),
-            )
+            ),
         ),
         handler,
     )
@@ -224,15 +227,20 @@ def _call(name: str, args: dict | None = None) -> llmApiUtil.OpenAIToolCall:
 
 @pytest.mark.asyncio
 async def test_forward_executes_target_tool_with_forwarded_args() -> None:
-    """第 1 跳抛 `ForwardToolCall` ⇒ 第 2 跳必须真的执行目标工具（参数原样过去）。"""
+    """第 1 跳抛 `ForwardToolCall` ⇒ 第 2 跳必须真的执行目标工具（参数原样过去）。
+
+    第 2 跳拿到的是转发方给的 **dict 本身**（handler 契约 `str | dict`），不再经过
+    `json.dumps` → `json.loads` 往返——这条断言同时钉住该优化不回退成字符串。
+    """
     registry = AgentToolRegistry()
     seen: dict = {}
 
-    async def console_like(args_str: str, context: ToolCallContext) -> dict:
+    async def console_like(args_str: str | dict, context: ToolCallContext) -> dict:
         raise ForwardToolCall("get_time", {"timezone": "UTC"})
 
-    async def target(args_str: str, context: ToolCallContext) -> dict:
-        seen["args"] = json.loads(args_str)
+    async def target(args_str: str | dict, context: ToolCallContext) -> dict:
+        assert isinstance(args_str, dict), f"转发路径应直接传 dict，实际 {type(args_str).__name__}"
+        seen["args"] = args_str
         # 上下文里的 tool_name 也必须切到目标工具：`run_tool_call` 靠它选函数。
         seen["tool_name"] = context.tool_name
         return {"success": True, "message": "utc"}

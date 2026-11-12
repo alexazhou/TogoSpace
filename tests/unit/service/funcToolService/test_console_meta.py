@@ -91,45 +91,63 @@ def test_cc6_console_schema_shape():
 
 
 # ---------------------------------------------------------------------------
-# D2：原 16 个工具的单点开关
+# D2：原 16 个工具的单点开关（`ToolVisibility` 的 4 态解析）
 # ---------------------------------------------------------------------------
+
+def _effective(name: str) -> "ToolVisibility":
+    """按当前环境解析某个已加载工具的可见性。"""
+    from constants import ToolVisibility
+
+    func_tool = func_tool_core.get_func_tool(name)
+    assert func_tool is not None, f"工具未加载: {name}"
+    return func_tool_core.resolve_effective_visibility(func_tool.name, func_tool.visibility)
+
 
 def test_d2_keep_legacy_by_default(monkeypatch):
     """默认（无环境变量）必须**保留**原 16 个工具——D2 明确要求默认值 = 保留。"""
+    from constants import ToolVisibility
+
     monkeypatch.delenv(cc.ENV_KEEP_LEGACY_TOOLS, raising=False)
+    func_tool_core.load_func_tools()
     assert func_tool_core.keep_legacy_admin_tools() is True
-    assert func_tool_core._hidden_tool_names() == set()
+    for name in cc.LEGACY_CONVERGED_TOOLS:
+        assert _effective(name) == ToolVisibility.BOTH, name
 
 
 @pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "off", " off "])
 def test_d2_switch_off_hides_exactly_the_16(monkeypatch, value):
-    """开关置假 ⇒ 恰好隐藏那 16 个，console 仍在（收敛的前提）。"""
+    """开关置假 ⇒ 那 16 个工具降为 `CONSOLE_ONLY`：模型看不到、console 仍可用。"""
+    from constants import ToolVisibility
+
     monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, value)
-    hidden = func_tool_core._hidden_tool_names()
-    assert hidden == set(cc.LEGACY_CONVERGED_TOOLS)
-    assert "console" not in hidden
+    func_tool_core.load_func_tools()
+    for name in cc.LEGACY_CONVERGED_TOOLS:
+        effective = _effective(name)
+        assert effective == ToolVisibility.CONSOLE_ONLY, name
+        assert effective.tool_visible is False
+        assert effective.console_visible is True
+    assert _effective("console") == ToolVisibility.TOOL_ONLY
+    # task 三工具不在收敛清单内，隐藏模式下仍是 BOTH（#187 裁定②的现状）。
+    for name in ("list_tasks", "get_task_detail", "update_task"):
+        assert _effective(name) == ToolVisibility.BOTH, name
 
 
 @pytest.mark.parametrize("value", ["1", "true", "", "yes", "garbage"])
 def test_d2_switch_is_fail_safe(monkeypatch, value):
     """无法识别的值按**保留**处理：少暴露工具的后果比多暴露严重得多。"""
+    from constants import ToolVisibility
+
     monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, value)
-    assert func_tool_core._hidden_tool_names() == set()
+    func_tool_core.load_func_tools()
+    for name in cc.LEGACY_CONVERGED_TOOLS:
+        assert _effective(name) == ToolVisibility.BOTH, name
 
 
 def test_d2_get_tools_respects_switch_for_exposure_only(monkeypatch):
-    """开关只改 `get_tools()` 的**暴露面**（schema 列表）。
+    """开关只改 `get_tools()` 的**暴露面**；`get_all_tools()` 注册面不受影响。
 
-    这里**只**断言暴露面，因为这是本开关唯一被验证过的效果。
-    执行路径由下面 `test_d2_hidden_mode_console_forwarding_is_unavailable` 单独守。
-
-    ⚠️ 历史教训（#166）：本用例的前身 `..._but_execution_does_not` 在暴露面之外
-    还断言了 `get_func_tool()` 非 None，并据此声称「停用原工具后 console 仍要能
-    路由到底层函数」。但 `get_func_tool()` **不是 console 的执行路径**——#160 起
-    console 抛 `ForwardToolCall`，由注册表第 2 跳执行。所以那条断言恒真、基线也绿，
-    却守着一个**假的事实**（实测隐藏模式下 console 23 条命令全部返回「未知工具」）。
-    这正是「拿代理量当结论」：按名字和 docstring 在守"能执行"，按断言只在守
-    "字典里有这个 key"。现已拆开：暴露面归本用例，执行路径归下一条。
+    注册面与暴露面分离是 #166-A 的修法：Driver 用 `get_all_tools()` 注册，
+    模型暴露面用 `get_tools()`。隐藏模式下已收敛工具仍注册，只是不再暴露。
     """
     # ⚠️ 必须**显式**清掉环境变量再测默认态：不能假定进程环境是干净的。
     # 隐藏模式全量回归是用 `TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0` 起的，
@@ -142,8 +160,12 @@ def test_d2_get_tools_respects_switch_for_exposure_only(monkeypatch):
 
     monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, "0")
     exposed_off = {t.function.name for t in func_tool_core.get_tools()}
+    all_off = {t.function.name for t in func_tool_core.get_all_tools()}
     assert "console" in exposed_off, "console 本身必须始终暴露（收敛的前提）"
     assert not (set(cc.LEGACY_CONVERGED_TOOLS) & exposed_off), "开关置假后 16 个原工具不得再暴露"
+    assert set(cc.LEGACY_CONVERGED_TOOLS) <= all_off, (
+        "注册面必须仍是全量：console 的第 2 跳要靠它找到转发目标（#166-A）"
+    )
 
 
 

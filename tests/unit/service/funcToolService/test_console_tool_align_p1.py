@@ -799,6 +799,7 @@ class TestP1eRuntimeLocatorErrorCode:
 
     def _patch_empty(self, monkeypatch) -> None:
         monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=None))
+        monkeypatch.setattr(tools.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[]))
         monkeypatch.setattr(tools.gtAgentManager, "get_agent_by_id", AsyncMock(return_value=None))
         monkeypatch.setattr(tools.gtAgentManager, "batch_save_agents", AsyncMock())
         monkeypatch.setattr(deptService.gtDeptManager, "get_dept_by_name", AsyncMock(return_value=None))
@@ -838,6 +839,9 @@ class TestP1eRuntimeLocatorErrorCode:
         self._patch_empty(monkeypatch)
         existing = _agent(11, "alice", model="old-model")
         monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=existing))
+        monkeypatch.setattr(
+            tools.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[existing])
+        )
 
         missing = await tools.save_agent(_context=_ctx())
         business = await tools.save_agent(name="alice", role_template_name="writer", _context=_ctx())

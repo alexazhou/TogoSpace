@@ -46,7 +46,7 @@ async def test_native_driver_setup_registers_tools(
     read_tool = _make_tool("get_time")
 
     run_tool_call = AsyncMock(return_value={"success": True})
-    with patch("service.funcToolService.get_tools", return_value=[send_tool, finish_tool, wake_tool, read_tool]) as get_tools, patch(
+    with patch("service.funcToolService.get_all_tools", return_value=[send_tool, finish_tool, wake_tool, read_tool]) as get_tools, patch(
         "service.funcToolService.run_tool_call",
         run_tool_call,
     ):
@@ -102,7 +102,7 @@ async def test_native_driver_ignores_local_tool_names_and_uses_basic_category(mo
         AgentDriverConfig(driver_type="native", options={"local_tool_names": ["get_time"]}),
     )
 
-    with patch("service.funcToolService.get_tools", return_value=[send_tool, finish_tool, wake_tool, read_tool]) as get_tools, patch(
+    with patch("service.funcToolService.get_all_tools", return_value=[send_tool, finish_tool, wake_tool, read_tool]) as get_tools, patch(
         "service.funcToolService.run_tool_call",
         run_tool_call,
     ):
@@ -125,7 +125,7 @@ async def test_native_driver_root_leader_gets_admin_tools(mock_host: MagicMock) 
         AgentDriverConfig(driver_type="native", options={"is_root_leader": True}),
     )
 
-    with patch("service.funcToolService.get_tools", return_value=[send_tool, finish_tool, admin_tool]):
+    with patch("service.funcToolService.get_all_tools", return_value=[send_tool, finish_tool, admin_tool]):
         await driver.startup()
 
     exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
@@ -145,7 +145,7 @@ async def test_native_driver_non_root_leader_no_admin_tools(mock_host: MagicMock
         AgentDriverConfig(driver_type="native", options={}),
     )
 
-    with patch("service.funcToolService.get_tools", return_value=[send_tool, finish_tool, admin_tool]):
+    with patch("service.funcToolService.get_all_tools", return_value=[send_tool, finish_tool, admin_tool]):
         await driver.startup()
 
     exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]

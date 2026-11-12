@@ -678,19 +678,23 @@ async def get_role_template(role_name: str, _context: ToolCallContext = None) ->
 
 async def save_role_template(
     name: str,
-    type: str,
-    soul: str,
+    type: Optional[str] = None,
+    soul: Optional[str] = None,
     i18n: dict | None = None,
     overwrite_existing: bool = False,
     _context: ToolCallContext = None,
 ) -> dict:
     """创建或更新角色模板；只能操作 USER 类型，SYSTEM 内置模板只读不可改。
 
+    ⚠️ **更新已有模板时，省略某个可选字段 = 保持该字段现值**（PATCH 语义）：
+    type / soul / i18n 都遵守。新建时 type 省略默认 USER、i18n 省略默认 {}，
+    soul 必须提供。
+
     Args:
         name: 角色模板名称，唯一标识，建议使用小写字母和下划线。
-        type: 角色模板类型，可选 SYSTEM、USER；本工具只能传 USER（SYSTEM 只读）。
-        soul: 核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。
-        i18n: 多语言名称，如 {"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}}。
+        type: 角色模板类型，只允许 USER；传 SYSTEM 会被拒绝（内置模板只读）。新建时省略默认 USER，更新时省略表示保持现值。
+        soul: 核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。新建时必填，更新时省略表示保持现值。
+        i18n: 多语言名称，如 {"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}}。新建时省略为 {}，更新时省略表示保持现值。
         overwrite_existing: 同名模板已存在时需设为 true 才会覆盖更新，默认 false。
     """
     from service import roleTemplateService
@@ -699,27 +703,53 @@ async def save_role_template(
     if not normalized_name:
         return {"success": False, "message": "角色模板名称不能为空。"}
 
-    role_type = RoleTemplateType.value_of(type)
-    if role_type is None:
-        return {"success": False, "message": "角色模板 type 只允许 SYSTEM 或 USER。"}
+    role_type = None
+    if type is not None:
+        role_type = RoleTemplateType.value_of(type)
+        if role_type is None:
+            return {"success": False, "message": "角色模板 type 只允许 SYSTEM 或 USER。"}
 
     existing = await gtRoleTemplateManager.get_role_template_by_name(normalized_name)
     if existing is None and role_type == RoleTemplateType.SYSTEM:
         return {"success": False, "message": "SYSTEM 角色模板不允许通过工具创建。"}
     if existing is not None and existing.type == RoleTemplateType.SYSTEM:
         return {"success": False, "message": f"SYSTEM 角色模板 {normalized_name} 不允许通过工具修改。"}
+    if existing is not None and role_type == RoleTemplateType.SYSTEM:
+        # 只拦「已是 SYSTEM」还不够：USER -> SYSTEM 同样是写入内置语义，
+        # 且会让模板从此不可再被本工具修改，必须一并拒绝。
+        return {
+            "success": False,
+            "message": f"不允许将角色模板 {normalized_name} 的类型从 USER 改为 SYSTEM。",
+        }
     if existing is not None and overwrite_existing is False:
         return {
             "success": False,
             "message": f"角色模板 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
         }
 
+    if existing is None:
+        if soul is None:
+            return {
+                "success": False,
+                "message": "创建角色模板时必须提供 soul。",
+                "error_code": toolResult.INVALID_TOOL_ARGS,
+            }
+        resolved_type = role_type or RoleTemplateType.USER
+        resolved_soul = soul
+        resolved_i18n = i18n if i18n is not None else {}
+    else:
+        # PATCH 语义：省略（None）= 保持现值。i18n 不能写 `i18n or {}`——
+        # 那会在「只改 soul」时把已有的多语言名称清空。
+        resolved_type = role_type if role_type is not None else existing.type
+        resolved_soul = soul if soul is not None else existing.soul
+        resolved_i18n = i18n if i18n is not None else existing.i18n
+
     saved = await roleTemplateService.save_role_template(
         GtRoleTemplate(
             name=normalized_name,
-            soul=soul,
-            type=role_type,
-            i18n=i18n or {},
+            soul=resolved_soul,
+            type=resolved_type,
+            i18n=resolved_i18n,
         )
     )
     action = "更新" if existing is not None else "创建"
@@ -751,7 +781,7 @@ async def save_agent(
     视角下无法区分，按重置处理会让一次只想改 model 的调用顺手清掉 allow_tools。
 
     Args:
-        name: 成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。新建成员时必须给；更新时可省略（用 agent_id 定位）。
+        name: 成员名称，用于定位或新建；不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。新建成员时必须给；更新时可省略（用 agent_id 定位）。按名称定位时若团队内存在多行同名记录（含离职成员），会返回 ambiguous_target，请改用 agent_id。
         role_template_name: 要绑定的角色模板名称。新建成员时必须给；更新时省略表示保持现有绑定。
         model: 可选模型覆盖；新建时省略表示不覆盖模板或系统默认模型，更新时省略表示保持现值。
         driver: 驱动类型，可选 native、claude_sdk、tsp。新建时省略 = tsp。**不可通过 clear_fields 清除**（无「无驱动」这一合法状态）。更新时省略表示保持现值。
@@ -828,11 +858,36 @@ async def save_agent(
     else:
         # 无 agent_id 时 name 就是定位键，上面已确保它存在。
         existing = await gtAgentManager.get_agent(team_id, normalized_name, status=None)
-        if existing is not None and overwrite_existing is False:
-            return {
-                "success": False,
-                "message": f"成员 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
-            }
+        if existing is not None:
+            # 同名消歧必须在这里做：`GtAgent` 的 `(team_id, name)` 是**非唯一**索引
+            # （离职成员的名字允许被复用），而 `get_agent` 底层 `aio_get` 只取第一行、
+            # 不校验唯一性。按名更新会静默改到离职成员，返回体仍是 success=True。
+            # 之前这段保护在 `consoleParsing._resolve_agent_by_target` 里，只有 console
+            # 走得到；下沉到工具层后，直接调用 `save_agent(name=...)` 也受同一保护。
+            # 只在「已存在」时查全量：新建时同名行数为 0，多查一次没有意义。
+            same_name = [
+                agent
+                for agent in await gtAgentManager.get_team_all_agents(team_id)
+                if agent.name == normalized_name
+            ]
+            if len(same_name) > 1:
+                return {
+                    "success": False,
+                    "error_code": "ambiguous_target",
+                    "message": (
+                        f"团队内有 {len(same_name)} 个同名成员 {normalized_name}（含离职成员）；"
+                        "请改用 agent_id 定位。"
+                    ),
+                    "candidates": [
+                        {"id": agent.id, "name": agent.name, "employ_status": agent.employ_status.name}
+                        for agent in same_name
+                    ],
+                }
+            if overwrite_existing is False:
+                return {
+                    "success": False,
+                    "message": f"成员 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
+                }
 
     if existing is not None and existing.team_id == -1:
         return {"success": False, "message": f"保留成员 {existing.name} 不允许通过工具创建或修改。"}

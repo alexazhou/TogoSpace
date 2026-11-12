@@ -42,8 +42,12 @@ _DESCRIPTION_MAX = 48
 
 
 @functools.lru_cache(maxsize=None)
-def tool_parameters(tool_name: str) -> Optional[dict]:
-    """取某工具的 `parameters` 子 schema；取不到返回 `None`（调用方降级，不抛异常）。
+def _tool_metadata(tool_name: str) -> Optional[dict]:
+    """某工具的完整函数元数据（`get_function_metadata` 结果）；取不到返回 `None`。
+
+    缓存放在这一层而不是分别放在 `tool_parameters` / `tool_description` 里：两者
+    本来会各自 `get_function_metadata` 一次，`help <资源> <操作>` 展一条命令就多
+    跑一遍签名反射与 docstring 解析。元数据只随代码变化，按工具名缓存是安全的。
 
     与 `/tool_args_validation.get_tool_parameters_schema` 的区别：那边是**校验用**的
     （带可调用身份缓存、带变长参数摘除），这里只读不校验，且必须能在 import 期
@@ -60,7 +64,14 @@ def tool_parameters(tool_name: str) -> Optional[dict]:
         metadata = get_function_metadata(tool_name, func)
     except Exception:  # noqa: BLE001 —— 派生失败只降级，不能把 import 弄崩
         return None
-    params = metadata.get("parameters") if isinstance(metadata, dict) else None
+    return metadata if isinstance(metadata, dict) else None
+
+
+@functools.lru_cache(maxsize=None)
+def tool_parameters(tool_name: str) -> Optional[dict]:
+    """取某工具的 `parameters` 子 schema；取不到返回 `None`（调用方降级，不抛异常）。"""
+    metadata = _tool_metadata(tool_name)
+    params = metadata.get("parameters") if metadata else None
     return params if isinstance(params, dict) else None
 
 
@@ -127,20 +138,10 @@ def tool_description(tool_name: str) -> str:
     工具 docstring 之间没有任何机械约束，改了工具说明 help 会静默过期。
     取不到就返回空串，由调用方决定怎么降级。
     """
-    params = tool_parameters(tool_name)
-    if not params:
+    if not tool_parameters(tool_name):
         return ""
-    from . import tools as legacy_tools
-    from .funcToolType import get_function_metadata
-
-    func = getattr(legacy_tools, tool_name, None)
-    if func is None:
-        return ""
-    try:
-        metadata = get_function_metadata(tool_name, func)
-    except Exception:  # noqa: BLE001 —— 与 tool_parameters 同口径：派生失败只降级
-        return ""
-    return _first_clause(metadata.get("description") if isinstance(metadata, dict) else "")
+    metadata = _tool_metadata(tool_name)
+    return _first_clause(metadata.get("description") if metadata else "")
 
 
 def boolean_params(tool_name: str) -> frozenset[str]:

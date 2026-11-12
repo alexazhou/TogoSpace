@@ -812,7 +812,7 @@
         }
       },
       "name": {
-        "description": "成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。新建成员时必须给；更新时可省略（用 agent_id 定位）。",
+        "description": "成员名称，用于定位或新建；不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。新建成员时必须给；更新时可省略（用 agent_id 定位）。按名称定位时若团队内存在多行同名记录（含离职成员），会返回 ambiguous_target，请改用 agent_id。",
         "schema": {
           "type": [
             "string",
@@ -935,7 +935,7 @@
     "description": "创建或更新角色模板；只能操作 USER 类型，SYSTEM 内置模板只读不可改。",
     "parameters": {
       "i18n": {
-        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"高级写手\", \"en\": \"Senior Writer\"}}。",
+        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"高级写手\", \"en\": \"Senior Writer\"}}。新建时省略为 {}，更新时省略表示保持现值。",
         "schema": {
           "type": [
             "object",
@@ -956,22 +956,26 @@
         }
       },
       "soul": {
-        "description": "核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。",
+        "description": "核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。新建时必填，更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": {
-        "description": "角色模板类型，可选 SYSTEM、USER；本工具只能传 USER（SYSTEM 只读）。",
+        "description": "角色模板类型，只允许 USER；传 SYSTEM 会被拒绝（内置模板只读）。新建时省略默认 USER，更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
     "required": [
-      "name",
-      "type",
-      "soul"
+      "name"
     ]
   },
   "save_room": {

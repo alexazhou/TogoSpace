@@ -2,7 +2,7 @@ import json
 from typing import Any, List, Literal, Optional, Annotated, Union
 from pydantic import BaseModel, Field, model_validator
 
-from constants import OpenaiApiRole, ToolCategory
+from constants import OpenaiApiRole, ToolCategory, ToolVisibility
 from util.commonUtil import first_not_none
 
 
@@ -179,6 +179,10 @@ class OpenAITool(BaseModel):
     type: str = Field(default="function", description="工具类型")
     function: OpenAIFunction
     category: Optional[ToolCategory] = Field(default=None, exclude=True, description="本地工具分类，仅内部使用")
+    visibility: ToolVisibility = Field(
+        default=ToolVisibility.TOOL_ONLY, exclude=True,
+        description="工具暴露面（独立 Tool / Console），仅内部使用",
+    )
 
 
 # ========== 响应侧辅助类 ==========
