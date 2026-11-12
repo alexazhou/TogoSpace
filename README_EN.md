@@ -1,8 +1,8 @@
-![TogoSpace](image/togo_agent_team.png)
+![Togobot](image/togo_agent_team.png)
 
 <div align="center">
 
-# TogoSpace 🚀
+# Togobot 🚀
 
 **Turn a group of AIs into a real team.**
 
@@ -22,10 +22,10 @@ They split up work, hold discussions, assign tasks, review each other's output �
 
 ---
 
-## 🤔 What is TogoSpace?
+## 🤔 What is Togobot?
 
 Most AI tools give you **one** assistant — you still have to break down complex tasks, babysit them, and stitch the results together yourself.
-TogoSpace takes a different approach: it gives you an **AI team**.
+Togobot takes a different approach: it gives you an **AI team**.
 
 - Tell the "Project Manager" what you need. It breaks the work down for the "Engineer", who hands the result to the "Tester" for review — all communicated through group chat.
 - No flowcharts to draw: **the team decides for itself who steps up next**.
@@ -37,7 +37,7 @@ TogoSpace takes a different approach: it gives you an **AI team**.
 
 ---
 
-## ✨ Why TogoSpace
+## ✨ Why Togobot
 
 ### 🧑‍🤝‍🧑 Collaborate like a real team, not a rigid workflow
 
@@ -115,6 +115,12 @@ Different agents can use different models: let the expensive model be the manage
 
 Grab the `.dmg` from the [Releases page](https://github.com/alexazhou/TogoSpace/releases) and open it after installing. On first launch you'll be guided through model setup, after which the default "Software R&D Team" gets to work.
 
+> ⚠️ **Upgrading from TogoSpace? Delete the old app before installing.**
+> The app is now named `Togobot`, but it **keeps the same bundle identifier `com.togospace.desktop`** (same system identity — permissions, preferences and data directory carry over).
+> Because the `.app` filename changed, macOS **will not overwrite** the old `TogoSpace.app`; the two end up side by side — two icons in Launchpad, and their single-instance logic will kick each other out.
+> Do this: **move `/Applications/TogoSpace.app` to the Trash first, then install `Togobot.app`.**
+> The data directory (`~/.togospace`) is unchanged, so deleting the old app loses no configuration, sessions or workspaces.
+
 ![Status Bar Entry](image/en/entry.png)
 
 ### Option 2: Docker
@@ -135,7 +141,7 @@ docker run -d \
 
 ```bash
 git clone https://github.com/alexazhou/TogoSpace.git
-cd TogoSpace
+cd Togobot
 
 # Create a virtual environment and install dependencies
 python3 -m venv .venv
@@ -191,7 +197,7 @@ Join our WeChat group to report issues and share how you use your AI team:
 
 ![WeChat QR Code](image/wechat.JPG)
 
-If TogoSpace helps you, please give it a ⭐ Star — it means a lot to us!
+If Togobot helps you, please give it a ⭐ Star — it means a lot to us!
 
 ---
 

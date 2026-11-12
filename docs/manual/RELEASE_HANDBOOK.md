@@ -62,6 +62,11 @@ gh release view v0.1.12
 - `Togobot_0.1.12_arm64.dmg` (CI 构建)
 - `Togobot_0.1.12_x86_64.dmg` (CI 构建)
 
+> ⚠️ **本次（TogoSpace → Togobot）改名后的首个 Release，Release Note 必须写升级注意**：
+> `.app` 名变为 `Togobot.app`，但 bundle identifier 沿用 `com.togospace.desktop`。
+> macOS 不会覆盖旧的 `TogoSpace.app`，两者会并存（Launchpad 双图标、单实例互踢）。
+> 安装前请先删除 `/Applications/TogoSpace.app`；数据目录 `~/.togospace` 未变，删旧 app 不丢数据。
+
 ## 4. 补充 Release Note
 
 Release 创建并确认产物齐全后，应补充 GitHub Release Note。

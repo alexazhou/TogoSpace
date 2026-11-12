@@ -1,4 +1,4 @@
-# TogoSpace Dockerfile
+# Togobot Dockerfile
 # 基于 Ubuntu 24.04 LTS 构建
 #
 # 构建方式：
@@ -32,8 +32,8 @@ RUN npm run build
 # ============================================
 FROM ubuntu:24.04
 
-LABEL maintainer="TogoSpace Team"
-LABEL description="TogoSpace - Multi-Agent Chat Room Framework"
+LABEL maintainer="Togobot Team"
+LABEL description="Togobot - Multi-Agent Chat Room Framework"
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
