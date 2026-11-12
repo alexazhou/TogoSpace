@@ -144,4 +144,68 @@ describe('AgentActivityItem token 增长放大', () => {
     expect(upScale).toBeGreaterThan(1);
     expect(downScale).toBeGreaterThan(1);
   });
+
+  // ---------------- #206 COMPACT「压缩中」也接放大 ----------------
+  //
+  // 背景：#206 实测确认 COMPACT 形态一（`↑ {before} ↓ {count}`）**一个 transform 节点都没有**
+  // ——`92ed419c` 引入放大时只接了 split 分支，`d2a9bde3`(#176) 补 COMPACT 时只补了补间。
+  // 下面三条是这条路径的护栏：形态一必须放大、且只放大数字（before 不放大）、形态二不放大。
+
+  /** COMPACT 活动（默认形态一：`context_tokens_before` + 估算输出量）。 */
+  function compact(metadata: Record<string, number>): AgentActivity {
+    return activity({ activity_type: 'compact', status: 'started', metadata });
+  }
+
+  it('G-A6 形态一 count 递增时数字放大，且前缀（↑ before ↓）不带 transform', async () => {
+    const wrapper = mountItem(compact({ context_tokens_before: 80000, estimated_completion_tokens: 120 }));
+
+    // 首值是直显的定值，不出放大。
+    expect(scales(wrapper).every((scale) => Number.isNaN(scale) || scale === 1)).toBe(true);
+
+    await wrapper.setProps({
+      activity: compact({ context_tokens_before: 80000, estimated_completion_tokens: 400 }),
+    });
+
+    // 恰好一个数字节点参与放大 —— 多于一个说明「整段一起放大」的偷懒实现又回来了。
+    const numberNodes = numbers(wrapper);
+    expect(numberNodes).toHaveLength(1);
+    expect(scales(wrapper)[0]).toBeGreaterThan(1);
+    // 全局只有一个节点带 transform：挡住「把 scale 挂到段/容器上，让前缀一起放大」的实现
+    // （那样箭头节点自身仍无 transform，只断箭头会放过它）。
+    expect(wrapper.findAll('[style*="transform"]')).toHaveLength(1);
+    expect((wrapper.findAll('[style*="transform"]')[0].element as HTMLElement).className)
+      .toContain('agent-activity-item__tokens-number');
+    // 前缀（`↑ 80000 ↓ `）保持固定：`before` 恒定，没有任何理由跟着放大。
+    expect(arrows(wrapper)).toHaveLength(1);
+    expect((arrows(wrapper)[0].element as HTMLElement).style.transform).toBe('');
+    // DOM 文本格式仍逐字与改造前同构（T6-a / compactTween 的一批 `.text()` 断言依赖它）。
+    // 本文件把 rAF 置空（不推进补间），所以屏幕值停在补间起点 120；
+    // 「目标文案」由 `title` 承载，一并断言，证明数字与箭头仍是同一串 `↑ {before} ↓ {count}`。
+    expect(wrapper.find('.agent-activity-item__tokens').text()).toBe('↑ 80000 ↓ 120');
+    expect(wrapper.find('.agent-activity-item__tokens').attributes('title')).toBe('↑ 80000 ↓ 400');
+  });
+
+  it('G-A7 形态一 count 不变（仅无输出量→0）不放大', async () => {
+    // `context_tokens_before` 恒定的「刚创建」形态：count 已是 0 且不再变 ⇒ 不该有放大。
+    const wrapper = mountItem(compact({ context_tokens_before: 80000 }));
+    expect(wrapper.find('.agent-activity-item__tokens').text()).toBe('↑ 80000 ↓ 0');
+    expect(scales(wrapper).every((scale) => Number.isNaN(scale) || scale === 1)).toBe(true);
+
+    // 再喂一次完全相同的值（同一个 chunk 重播 / 上层重渲染）也不该触发。
+    await wrapper.setProps({ activity: compact({ context_tokens_before: 80000 }) });
+    expect(scales(wrapper).every((scale) => Number.isNaN(scale) || scale === 1)).toBe(true);
+  });
+
+  it('G-A8 形态二（tokens A → B）不接放大：没有数字节点、没有任何 transform', async () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'compact',
+      status: 'succeeded',
+      metadata: { context_tokens_before: 80000, context_tokens_after: 4200 },
+    }));
+
+    expect(wrapper.find('.agent-activity-item__tokens').text()).toBe('tokens 80000 → 4200');
+    // 形态二是「压缩前后两个定值」，没有「在变」的量，与 split 的 `before` 同理不接放大。
+    expect(numbers(wrapper)).toHaveLength(0);
+    expect(wrapper.findAll('[style*="transform"]')).toHaveLength(0);
+  });
 });
