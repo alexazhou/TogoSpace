@@ -10,7 +10,7 @@ schema 里丢失，于是校验层用 `_is_ignorable_null` 按**「是否必填�
 ## 为什么必须**一对**判据（缺一条都会做出错实现）
 
 - `test_field_null_rejected_for_all_non_optional_params`：19 个字段传 null 必拒；
-- `test_field_null_accepted_for_all_optional_params`：62 个 `Optional` 字段传 null
+- `test_field_null_accepted_for_all_optional_params`：63 个 `Optional` 字段传 null
   必须**仍放行**。
 
 （两个数字随 #196 更新：19→19 —— 表内 `save_agent.driver` 移出（见下）+ `delete_dept` /
@@ -81,7 +81,7 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("memory_create", "star_level"),
 ]
 
-#: 任务单 §4.2 的 41 个 `Optional` 字段 + #196 新增的 21 个 = 62 个（同上：写死作外部锚点）。
+#: 任务单 §4.2 的 41 个 `Optional` 字段 + #196 新增的 21 个 = 62 个，#198 再 +1（`console.payload`）= **63** 个（同上：写死作外部锚点）。
 #:
 #: #196 更新（41 → 62，+21）：本单把 save 系列的定位/必填参数改成可选（PATCH 语义要求
 #: 「未传」可达），并新增三个 `clear_fields: Optional[list[...]]`（详见报告 §「save 系列
@@ -95,9 +95,26 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
 #: （`save_room.initial_topic` 由 `str=''` 改 `Optional[str]=None` 是**必须**的：`''` 无法
 #: 区分「未传」与「清空」，而 #195 之后 null 也不再是豁免通道。）
 #:
+#: ## #198 更新（62 → 63，+1：`console.payload`）
+#:
+#: 补的是**判据覆盖缺口**，不是功能缺陷：`console(command="help", payload=None)` 一直
+#: 是 `success=True`（行为正确），但 `payload: Optional[dict] = None` 这一条从 #195
+#: 起就没进本表。缺口的具体危害：**改动前**若有人把 `payload` 改成非 Optional，
+#: 62 组不会红（它只遍历清单，清单里没有这个字段）；**改动后**会红，且有两处独立报出
+#: —— `test_field_lists_cover_every_optional_param`（签名现算 vs 清单）与
+#: `test_console_payload_null_is_accepted`（端到端传 null 被拒）。
+#:
+#: 为什么是**并入本表**而不是另立一张：
+#: - `console` 与其他工具同源（都在 `core.get_func_tool` 注册表里，`payload` 的 schema
+#:   由同一个 `get_function_metadata` 产出，形态 `{"type": ["object","null"]}`）；
+#: - 另立一张表意味着两张表各自记账，长期必然分叉 —— 而「分叉」正是本单要堵的东西。
+#: - 代价只有一个：取函数的方式必须换（`console` 不在 `tools` 模块里，见
+#:   `_tool_callable`），这是一次性的、且换完之后对全部 63 条统一。
+#:
 #: 这张表是**外部锚点**，变化必须显式写在这里 —— 所以本单改动它是有意留痕，
 #: 不视为锚点腐化。
 OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
+    ("console", "payload"),
     ("create_container", "image"),
     ("create_container", "note"),
     ("create_task", "depends_on"),
@@ -198,6 +215,109 @@ def _parameters(tool_name: str) -> dict:
     return get_function_metadata(tool_name, func_tool.callable)["parameters"]
 
 
+def _tool_callable(tool_name: str):
+    """按名字取工具的真实可调用对象（**唯一**取函数入口）。
+
+    为什么不用 `getattr(tools, tool_name)`（#198）：`console` **不在 `tools` 模块里**，
+    它定义在 `service.funcToolService.consoleTool`（`hasattr(tools, "console")` 为 False）。
+    `getattr` 写法对 62 条里的 23 个工具恰好成立，于是「换一种取法」这件事一直没被触发 ——
+    直到要把 `console` 纳进来才炸。
+
+    为什么用注册表而不是给 `console` 开特例：开特例意味着两张清单各自记不同的取法，
+    长期必然分叉。注册表是**唯一事实源**，对全部 63 条统一。
+
+    ⚠️ **必须先 load**：未 load 时 `get_func_tool` 返回 `None`（实测）。本文件有
+    `_loaded_tools` autouse fixture 保证，这里的 `assert` 是兜底 —— 报「未加载」而不是
+    让上层 `AttributeError` 指向一个和根因无关的地方。
+    """
+    func_tool = funcCore.get_func_tool(tool_name)
+    assert func_tool is not None and func_tool.callable is not None, (
+        f"取不到工具 {tool_name!r} 的可调用对象："
+        f"「未注册」与「未 load」都会走到这里（本文件应先经 `_loaded_tools` fixture）"
+    )
+    return func_tool.callable
+
+
+#: 两组建的**代表项**：用来判定「注册表加载完整」。
+#:
+#: 为什么不用「注册表条数 > 0」：注册表是两个 dict（`_func_tools` 33 个 + 容器组 5 个），
+#: 只 load 前一组时条数仍是 33 > 0，而容器组整组缺失 —— 实测其中 4 个字段正在
+#: `OPTIONAL_WITH_DEFAULT` 里（`create_container.image/note`、
+#: `delete_container.container_id/record_id`）。条数会骗人，代表项不会。
+_LOAD_PROBES: tuple[tuple[str, str], ...] = (
+    ("console", "默认组（_func_tools）"),
+    ("create_container", "容器组（_container_func_tools）"),
+)
+
+
+def _registered_tool_names() -> list[str]:
+    """**注册面**的全部工具名（两组都算，不受 D2 暴露面开关影响）。
+
+    ⚠️ 这里**不能用 `funcCore.get_tools()`** —— 那是**暴露面**：
+    `get_tools()` 会按 D2 开关（`_hidden_tool_names()`）过滤掉被 `console` 收敛的
+    16 个原工具。实测 D2 隐藏模式（`TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0`）下
+    `get_tools(include_container_tools=True)` 只剩 22 个，现算会少 36 条，
+    于是 `stale` 报「清单过期 36 项」—— **完全是误报，且指令是错的**
+    （会让人去删正确的清单项）。
+
+    判据要的是「**注册了哪些工具**」（签名事实），与「**暴露给模型哪些**」（D2 策略）
+    是两个维度。用后者算前者，等于让一个开关决定判据结论。
+
+    ⚠️ 也**不能调 `load_func_tools()` / `load_container_func_tools()` 来取名字**：
+    那两个函数会**重建注册表**（`_func_tools = {}` 后重新填），于是「未加载」这个
+    被测状态会被自己的枚举动作抹掉 —— 自检永远绿，等于没写（本单实测：第一版
+    就是这么错的，`default_only` / `container_only` 两种状态都算出 63 条）。
+
+    所以只能**只读**私有 dict，不做任何加载。读私有在这里是必要的：判断「加载了吗」
+    不能用「能加载」的接口。`getattr(..., {})` 兜底是为了让名字改动时报空列表
+    （随后 `_LOAD_PROBES` 自检会报「未加载完整」），而不是 `AttributeError`。
+    """
+    names = list(getattr(funcCore, "_func_tools", {}))
+    names.extend(getattr(funcCore, "_container_func_tools", {}))
+    return names
+
+
+def _declared_optional_pairs() -> set[tuple[str, str]]:
+    """从**真实签名**现算「有默认值 且 注解含 None」的全部参数（同一个口径）。
+
+    这是双向闭环的「现算」一侧。口径必须与清单注释里写的一致：
+      - 跳过 `_context` 等私有参数；
+      - 必须有默认值（`p.default is not empty`）；
+      - 注解是 `Union[X, None]`（含 `Optional[X]` 与 `X | None` 两种写法）。
+
+    ⚠️ **先自检加载完整**（#198 第二版修的就是这里）：两组各断一个代表项。
+    不自检的后果实测过 —— 注册表没加载全时，现算集合偏小，`stale` 会报
+    「清单有过期项」，把人引去删正确的清单项（其中 4 条是容器工具的唯一覆盖）。
+    那比「判据不红」更糟：**判据给出错误指令**。
+    """
+    loaded = set(_registered_tool_names())
+    missing_groups = [
+        f"{name}（{label}）" for name, label in _LOAD_PROBES if name not in loaded
+    ]
+    assert not missing_groups, (
+        "注册表未加载完整，现算结果不可信（会在下面报出假的「清单过期」）：\n  "
+        + "\n  ".join(missing_groups)
+        + "\n本文件应有 `_loaded_tools` autouse fixture 先 load 两组；"
+        "若是手动跑探针，请先调 `load_func_tools()` + `load_container_func_tools()`。"
+    )
+
+    computed: set[tuple[str, str]] = set()
+    for name in sorted(loaded):
+        func = _tool_callable(name)
+        hints = get_type_hints(func)
+        for param_name, param in inspect.signature(func).parameters.items():
+            if param_name.startswith("_"):
+                continue
+            if param.default is inspect.Parameter.empty:
+                continue
+            hint = hints[param_name]
+            origin = get_origin(hint)
+            if origin in (Union, UnionType) and type(None) in get_args(hint):
+                computed.add((name, param_name))
+    return computed
+
+
+
 #: schema 层拒绝文案的固定前缀 —— **从源码 import，本文件不再抄一份**。
 #:
 #: ⚠️ **不能只看 `error_code`**：`save_agent` / `save_dept` / `save_room` / `delete_dept` /
@@ -217,14 +337,14 @@ def test_schema_layer_mark_matches_the_message_actually_emitted() -> None:
     """meta 断言（小马哥 23:08 第①件）：常量与 schema 层**真实产出**的文案同源。
 
     为什么需要这条兜底：第②件把常量收敛成单一来源后，「常量本身写错」或「文案改了但
-    常量没改」仍然不会被任何用例发现 —— 因为 62 组只是拿常量去 `in` 匹配，
+    常量没改」仍然不会被任何用例发现 —— 因为 63 组只是拿常量去 `in` 匹配，
     两边一起漂就一起绿。这里**构造一次必被 schema 层拒的调用**（`create_task` 的
     `description` 传 `null`，它非 `Optional` 且非 `str`），直接断言：
 
       1. `error_code == INVALID_TOOL_ARGS`（层码没丢）
       2. `SCHEMA_LAYER_MARK in message`（常量真的出现在真实文案里）
 
-    这条**不依赖** 62 组、19 组或任何一组的语义方向，只问「文案长什么样」。
+    这条**不依赖** 63 组、19 组或任何一组的语义方向，只问「文案长什么样」。
     """
 
     async def _run() -> dict:
@@ -273,9 +393,9 @@ async def _inject_null_schema_layer(tool_name: str, param_name: str) -> None:
 
     与 `_inject_null` 分开是结构上的隔离，不是风格偏好：
 
-    62 组的结论是「schema 声明并放行 null」。若它和 19 组共用 `_inject_null`
+    63 组的结论是「schema 声明并放行 null」。若它和 19 组共用 `_inject_null`
     （那个 helper 走 `run_tool_call` 端到端），就共用「走端到端」这个前提 ——
-    哪天有人给 `_inject_null` 加个参数或改内部，62 组会**静默回到端到端**，而 62 组
+    哪天有人给 `_inject_null` 加个参数或改内部，63 组会**静默回到端到端**，而 63 组
     自己一行代码都没动过。独立函数把这条耦合物理切断，守卫判据
     （`test_optional_group_does_not_go_through_end_to_end`）只是防止有人再合并回去。
 
@@ -344,13 +464,21 @@ def _loaded_tools():
 
 
 def test_field_lists_match_signatures() -> None:
-    """两张写死清单必须与真实签名一致（防清单腐化：改签名后判据还在验旧字段）。"""
+    """两张写死清单的每一项都必须与真实签名一致（防清单腐化：改签名后判据还在验旧字段）。
 
-    from service.funcToolService import tools
+    ⚠️ 这条是**单向**的：它只问「清单里的项，签名是否仍然合法」，**从不问**
+    「签名里合法但清单没有的项，是不是漏了」。
+
+    ⇒ 清单少一项、少十项，只要剩下的都合法，它永远绿。缺口由此而来（#198 的
+    `console.payload` 就是这么漏掉的：`payload: Optional[dict] = None` 从 #195 起
+    就合法，但没人把它加进清单）。
+
+    反向由 `test_field_lists_cover_every_optional_param` 补 —— 两条必须都在：
+    这条保证「清单不透支」，那条保证「清单不遗漏」。
+    """
 
     for tool_name, param_name in NON_OPTIONAL_BUT_DEFAULTED + OPTIONAL_WITH_DEFAULT:
-        func = getattr(tools, tool_name, None)
-        assert func is not None, tool_name
+        func = _tool_callable(tool_name)
         hints = get_type_hints(func)
         param = inspect.signature(func).parameters[param_name]
         assert param.default is not inspect.Parameter.empty, (tool_name, param_name)
@@ -361,7 +489,53 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 19
-    assert len(OPTIONAL_WITH_DEFAULT) == 62
+    assert len(OPTIONAL_WITH_DEFAULT) == 63
+
+
+def test_field_lists_cover_every_optional_param() -> None:
+    """**双向闭环**：从真实签名现算的集合，必须与两张清单的并集**逐项相等**。
+
+    这条是真正堵住缺口的一条（#198）。原来的 `test_field_lists_match_signatures`
+    只做「清单 → 签名」一个方向，清单漏项它抓不到：它遍历的是**清单**，清单里没有的
+    字段根本不会被它看到。
+
+    两个方向都要断，因为漏判的方向不同：
+      - **现算有 / 清单无** = 漏收。新加了一个 `Optional` 参数、或者把某个参数从
+        `X = <默认>` 改成 `Optional[X] = None`，而清单没跟上 ⇒ 该字段的 null 行为
+        **无人钉住**。`console.payload` 就是这一种（#198 修复对象）。
+      - **清单有 / 现算无** = 过期。某参数被改成非 Optional、或者被删掉，清单还留着
+        ⇒ 判据在验一个不存在的字段（`test_field_lists_match_signatures` 能抓这一种，
+        这里再抓一次是兜底：万一有人把那条删了，闭环仍在）。
+
+    口径说明：现算侧 `_declared_optional_pairs()` 与清单注释里写的口径逐条对齐
+    （跳过私有参数 / 必须有默认值 / `Union[X, None]` 两种写法都认）。
+    """
+    computed = _declared_optional_pairs()
+    # 两侧必须分开比，不能拿「两表并集」跟现算集合比：
+    #   - 漏收（missing）要拿**并集**比 —— 落在任何一张表里都算已登记；
+    #   - 过期（stale）只能拿 `OPTIONAL_WITH_DEFAULT` 比 —— `NON_OPTIONAL_BUT_DEFAULTED`
+    #     的定义就是「注解**不含** None」，它天然不在现算集合里，用并集比会把 19 条全判成过期。
+    listed_both = set(NON_OPTIONAL_BUT_DEFAULTED) | set(OPTIONAL_WITH_DEFAULT)
+    listed_optional = set(OPTIONAL_WITH_DEFAULT)
+
+    missing = sorted(computed - listed_both)
+    stale = sorted(listed_optional - computed)
+
+    assert not missing, (
+        "这些参数「有默认值 且 注解含 None」，但两张清单里都没有 ⇒ 它们的 null 行为无人钉住：\n"
+        + "\n".join(f"  {tool}.{param}" for tool, param in missing)
+        + "\n请加进 `OPTIONAL_WITH_DEFAULT`（这是外部锚点，改动要显式留痕）。"
+    )
+    assert not stale, (
+        "这些清单项在真实签名里已不成立（参数被删 / 改成非 Optional / 已无默认值）：\n"
+        + "\n".join(f"  {tool}.{param}" for tool, param in stale)
+        + "\n\n⚠️ 先排除「注册表没加载全」再动手：`_declared_optional_pairs()` 已在开头断过两组"
+        "\n   代表项（`console` / `create_container`），走到这里说明两组都在。若你是在"
+        "\n   子集环境下（只 load 一组、或绕开了 `_loaded_tools` fixture）看到这条，"
+        "\n   **不要删清单项** —— 那份清单是对的，缺的是加载。"
+        "\n   确认签名真的变了，才从 `OPTIONAL_WITH_DEFAULT` 里删掉。"
+    )
+
 
 
 @pytest.mark.asyncio
@@ -384,7 +558,7 @@ async def test_field_null_rejected_for_all_non_optional_params() -> None:
 
 @pytest.mark.asyncio
 async def test_field_null_accepted_for_all_optional_params() -> None:
-    """62 个 `Optional` 字段传 `null` ⇒ 全部**不得**报 `invalid_tool_args`（防「修过头」）。
+    """63 个 `Optional` 字段传 `null` ⇒ 全部**不得**报 `invalid_tool_args`（防「修过头」）。
 
     这些是现网合法用法（`{"timezone": null}` 走默认时区等）。把 null 一律拒掉会同时
     打挂它们，且没有任何现有用例会红 —— 所以这条判据不能省。
@@ -402,6 +576,36 @@ async def test_field_null_accepted_for_all_optional_params() -> None:
             failures.append(str(exc))
 
     assert not failures, "以下 Optional 字段的 null 合法性问题：\n" + "\n".join(failures)
+
+
+@pytest.mark.asyncio
+async def test_console_payload_null_is_accepted() -> None:
+    """`console.payload` 传 `null` ⇒ 必须放行（#198 补的判据覆盖缺口）。
+
+    为什么这条单独写、不并进 63 组的行为判据：63 组是**逐字段同口径**跑的
+    （`_inject_null_schema_layer` 对每个 `(tool, param)` 做同样三件事），
+    `console.payload` 并进去之后**也会被它覆盖**。这条补的是**另一层**：
+
+    - 63 组走的是 schema 层（`get_tool_parameters_schema` + `validate_tool_args`）；
+    - 这条走**端到端**（`run_tool_call`），验的是「模型真的这样调用时能不能过」。
+
+    两层都要，因为它们的失败方式不同：schema 层对、运行时把 null 当非法值处理，
+    63 组不会红而这条会。
+
+    只断言「**不是** `invalid_tool_args`」，**不断言 `success is True`** —— 参数合法
+    ≠ 业务成功（与 63 组现有口径一致）。具体到 `console(command="help", payload=None)`，
+    实测 `success=True`，但这条判据不该依赖那个事实：`help` 的输出格式若变，
+    这条会变成在测 help 而不是在测 null 通道。
+    """
+    result = await funcCore.run_tool_call(
+        json.dumps({"command": "help", "payload": None}),
+        _ctx("console"),
+    )
+
+    assert result.get("error_code") != toolArgsValidation.INVALID_TOOL_ARGS, (
+        f"`console(command='help', payload=None)` 被拒了 —— payload 是 Optional，"
+        f"null 必须等同于未传：{result}"
+    )
 
 
 @pytest.mark.asyncio
@@ -528,10 +732,10 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 62 组的「不走端到端」守卫（小马哥 23:08 第③件）
+# 63 组的「不走端到端」守卫（小马哥 23:08 第③件；#198 起条数 62 → 63）
 #
 # 判据要钉的是**调用链**（有没有间接走端到端），不是「关键字出现与否」。
-# 62 组的通道原本是 `_inject_null` → `run_tool_call` 两跳，只盯第二跳会漏掉第一跳。
+# 63 组的通道原本是 `_inject_null` → `run_tool_call` 两跳，只盯第二跳会漏掉第一跳。
 #
 # 为什么用 AST 取函数体，而不是行号 / sed / awk / 关键字 grep：
 #   - 行号：插一行就腐化（本单实测过 `source.index(f"async def {plan_name}(")` 直接崩）；
@@ -566,17 +770,17 @@ def _body_of_test_function(func_name: str) -> str:
 
 
 def test_optional_group_does_not_go_through_end_to_end() -> None:
-    """62 组必须**直连 schema 层**，不得经 `_inject_null` / `run_tool_call` 两跳。
+    """63 组必须**直连 schema 层**，不得经 `_inject_null` / `run_tool_call` 两跳。
 
     结构上的保证在 `_inject_null_schema_layer`（独立函数），这条判据只是防止有人
-    把 62 组改回共用 `_inject_null` —— 那会让「走端到端」这个前提悄悄复活：
-    62 组自己的代码一行没动，结论却已经变成了端到端结果。
+    把 63 组改回共用 `_inject_null` —— 那会让「走端到端」这个前提悄悄复活：
+    63 组自己的代码一行没动，结论却已经变成了端到端结果。
 
     `\\b` 词边界是必须的：`_inject_null_schema_layer` 里含 `_inject_null` 子串。
     """
     body = _body_of_test_function("test_field_null_accepted_for_all_optional_params")
     hits = sorted(set(re.findall(r"\b_inject_null\b|\brun_tool_call\b", body)))
     assert not hits, (
-        f"62 组必须直连 schema 层，函数体里命中了：{hits} —— "
+        f"63 组必须直连 schema 层，函数体里命中了：{hits} —— "
         "请改调 `_inject_null_schema_layer`（不要共用 `_inject_null`）"
     )
