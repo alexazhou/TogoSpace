@@ -67,9 +67,65 @@ export default defineConfig({
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         splash: fileURLToPath(new URL('./splash.html', import.meta.url)),
       },
+      output: {
+        // 分包目的有两个，都不是「让数字好看」：
+        // 1) 消除单 chunk 过大（改造前 main.js 807.70 kB / gzip 256.62 kB，触发 Vite
+        //    `>500 kB` 警告）；
+        // 2) 第三方依赖与业务代码**长效缓存隔离**：改一行业务代码不该让整包第三方库
+        //    的缓存一起失效。
+        //
+        // 判据按「运行时族」分，不按体积分：`vendor-vue` 必须收齐 `vue` / `@vue/*` /
+        // `vue-router` / `vue-i18n` / `@intlify/*` —— vue-i18n 与 @intlify 是
+        // `vue` 生态的紧耦合运行时，落进 `vendor-others` 会让「升级 vue 补丁版本」
+        // 与「升级其它库」互相拖累缓存。
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+
+          // CSS 模块 id 也会被送进 manualChunks。别把样式卷进 JS 的分包决策里：
+          // `@fortawesome/**/*.css` 既不属于 vue 族也不属于 markdown 族，会被下面的兜底
+          // 归进 `vendor-others`；而 `splash.ts` 因为 import 了 `@tauri-apps/api` 也吃这个
+          // chunk，于是 `splash.html` 会带上一条 <link> 白拉 55.27 kB FontAwesome CSS
+          // （head 里无 media ⇒ 渲染阻塞），而 splash 一个 `.fa` 类都不用。splash.html
+          // 是 tauri.conf.json 的 windows[0]，即桌面端真正的第一帧。
+          // 这里直接交出归属权，让 Vite 按「谁 import 它」决定：
+          // 主 CSS 仍进 main.css，设置页 CSS 仍跟随其动态 chunk 独立。
+          if (id.endsWith('.css')) return undefined;
+
+          if (
+            id.includes('/node_modules/vue/') ||
+            id.includes('/node_modules/@vue/') ||
+            id.includes('/node_modules/vue-router/') ||
+            id.includes('/node_modules/vue-i18n/') ||
+            id.includes('/node_modules/@intlify/')
+          ) {
+            return 'vendor-vue';
+          }
+          // Markdown 渲染链：`markdown-it` 系 + `highlight.js` 单独成块。
+          // 必须把**传递依赖**（`linkify-it` / `mdurl` / `uc.micro` / `punycode.js` /
+          // `entities`）也收进来 —— 只匹配直接包名会让这条链被劈成两半，一半留在
+          // `vendor-markdown`、一半落进 `vendor-others`，而 `vendor-others` 里同时还
+          // 装着 `@tauri-apps/api`：那样「升级 markdown-it」会连带作废 tauri 那部分缓存，
+          // 与本节「长效缓存隔离」的目的正相反。
+          if (
+            id.includes('/node_modules/highlight.js/') ||
+            id.includes('/node_modules/markdown-it/') ||
+            id.includes('/node_modules/markdown-it-task-lists/') ||
+            id.includes('/node_modules/linkify-it/') ||
+            id.includes('/node_modules/mdurl/') ||
+            id.includes('/node_modules/uc.micro/') ||
+            id.includes('/node_modules/punycode.js/') ||
+            id.includes('/node_modules/entities/')
+          ) {
+            return 'vendor-markdown';
+          }
+          return 'vendor-others';
+        },
+      },
     },
     // Tauri v2 自定义协议下需要关闭 modulePreload
     modulePreload: false,
+    // 注意：**没有**设 `chunkSizeWarningLimit`。阈值是发现问题的量具，不是问题本身；
+    // 把上限调到 1000 也能让警告消失，但那样的「消除警告」是自证式的。
   },
   server: {
     host: '0.0.0.0',
