@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue';
 import ModalDialog from '../ui/ModalDialog.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -71,13 +70,6 @@ const canSaveMember = computed(() => Boolean(props.memberName.trim() && props.se
 const memberTemplateSoul = computed(() => props.currentTemplateSoul.trim() || t('member.noSoul'));
 const selectedMemberAvatarSeed = computed(() => props.memberName.trim());
 
-// 迁移到 ModalDialog(bare) 后遮罩视觉参数的落点：原本写在本文件 `.member-editor-overlay` 里，
-// 现改为内联样式逐项保留原值，层级用 z-index prop 传原档位。本组件无 `@media` 覆盖遮罩。
-const overlayStyle: CSSProperties = {
-  padding: '28px',
-  background: 'rgba(6, 10, 16, 0.58)',
-  backdropFilter: 'blur(8px)',
-};
 </script>
 
 <template>
@@ -85,7 +77,9 @@ const overlayStyle: CSSProperties = {
     :open="open"
     bare
     :z-index="50"
-    :overlay-style="overlayStyle"
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.58)"
+    overlay-blur="blur(8px)"
     @close="emit('close')"
   >
     <section

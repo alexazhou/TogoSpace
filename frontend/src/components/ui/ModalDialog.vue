@@ -16,8 +16,13 @@ const props = withDefaults(defineProps<{
    * 面板样式留在调用方组件里原样不动，遮罩的视觉参数由 overlayStyle 逐项保留原值。
    */
   bare?: boolean;
-  /** 遮罩层额外内联样式（padding/background/backdropFilter 等），用于逐弹窗保留原有视觉参数 */
-  overlayStyle?: CSSProperties;
+  /**
+   * 遮罩视觉参数的统一契约（bare 模式用）。逐弹窗传原值即可保留迁移前外观，
+   * 调用方不写 CSS、也不传任意 style 对象——只有这三个（+ 既有的 zIndex）可配。
+   */
+  overlayPadding?: string;
+  overlayBackground?: string;
+  overlayBlur?: string;
 }>(), {
   title: '',
   eyebrow: '',
@@ -26,14 +31,22 @@ const props = withDefaults(defineProps<{
   closeLabel: '',
   scrollbar: true,
   bare: false,
-  overlayStyle: () => ({}),
+  overlayPadding: '',
+  overlayBackground: '',
+  overlayBlur: '',
 });
 
 const emit = defineEmits<{
   close: [];
 }>();
 
-const overlayStyle = computed<CSSProperties>(() => ({ ...props.overlayStyle, zIndex: props.zIndex }));
+// 只有显式传值时才写对应声明，未传就沿用 .ui-modal__overlay 自己的 CSS（= 默认路径零变化）。
+const overlayStyle = computed<CSSProperties>(() => ({
+  padding: props.overlayPadding || undefined,
+  background: props.overlayBackground || undefined,
+  backdropFilter: props.overlayBlur || undefined,
+  zIndex: props.zIndex,
+}));
 const dialogStyle = computed<CSSProperties>(
   () => ({ '--modal-width': `${props.width}px` }) as CSSProperties,
 );

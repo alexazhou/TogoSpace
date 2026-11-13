@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue';
 import ModalDialog from './ModalDialog.vue';
 import { useI18n } from 'vue-i18n';
 
@@ -19,13 +18,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-// 迁移到 ModalDialog(bare) 后遮罩视觉参数的落点：原本写在本文件 `.confirm-overlay` 里，
-// 现改为内联样式逐项保留原值，层级用 z-index prop 传原档位。本组件无 `@media` 覆盖遮罩。
-const overlayStyle: CSSProperties = {
-  padding: '28px',
-  background: 'rgba(6, 10, 16, 0.52)',
-  backdropFilter: 'blur(8px)',
-};
 </script>
 
 <template>
@@ -33,7 +25,9 @@ const overlayStyle: CSSProperties = {
     :open="open"
     bare
     :z-index="120"
-    :overlay-style="overlayStyle"
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.52)"
+    overlay-blur="blur(8px)"
     @close="emit('close')"
   >
     <section class="confirm-dialog panel">

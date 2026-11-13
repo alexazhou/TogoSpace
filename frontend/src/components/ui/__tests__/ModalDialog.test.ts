@@ -96,19 +96,29 @@ describe('ModalDialog', () => {
     expect(overlay.firstElementChild!.className).toBe('own-panel');
   });
 
-  it('bare 把 overlayStyle 落到遮罩上，且 zIndex prop 覆盖 overlayStyle 里的 zIndex', () => {
+  it('bare 把 overlay 契约（padding/背景/blur/zIndex）落到遮罩上', () => {
     mount(ModalDialog, {
       props: {
         open: true,
         bare: true,
         zIndex: 120,
-        overlayStyle: { padding: '28px', background: 'rgba(6, 10, 16, 0.52)', zIndex: 1 },
+        overlayPadding: '28px',
+        overlayBackground: 'rgba(6, 10, 16, 0.52)',
+        overlayBlur: 'blur(8px)',
       },
     });
     const overlay = queryOverlay()!;
     expect(overlay.style.padding).toBe('28px');
     expect(overlay.style.zIndex).toBe('120');
     expect(overlay.style.background).toContain('rgba(6, 10, 16, 0.52)');
+  });
+
+  it('未传 overlay 契约时不往遮罩写 padding/background/backdrop-filter（默认路径零变化）', () => {
+    mount(ModalDialog, { props: { open: true, bare: true } });
+    const ov = queryOverlay()!;
+    expect(ov.style.padding).toBe('');
+    expect(ov.style.background).toBe('');
+    expect(ov.style.backdropFilter).toBe('');
   });
 
   it('bare 仍保留「遮罩自点击关闭 / 点内容不关闭」', async () => {

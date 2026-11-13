@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { CSSProperties } from 'vue';
 import type { TeamSummary } from '../../types';
 import { useI18n } from 'vue-i18n';
 import ModalDialog from '../ui/ModalDialog.vue';
@@ -19,14 +18,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-// 迁移到 ModalDialog(bare) 后遮罩视觉参数的落点：原本写在本文件 `.team-export-overlay` 里，
-// 现改为内联样式传入，逐项与迁移前一致（padding 28px / rgba(6,10,16,.52) / blur(8px)），
-// 层级由 ModalDialog 的 zIndex prop 传入原有值 120。本组件没有 `@media` 覆盖遮罩，内联不会压掉响应式规则。
-const overlayStyle: CSSProperties = {
-  padding: '28px',
-  background: 'rgba(6, 10, 16, 0.52)',
-  backdropFilter: 'blur(8px)',
-};
 </script>
 
 <template>
@@ -34,7 +25,9 @@ const overlayStyle: CSSProperties = {
     :open="open"
     :z-index="120"
     bare
-    :overlay-style="overlayStyle"
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.52)"
+    overlay-blur="blur(8px)"
     @close="emit('close')"
   >
     <section class="team-export-dialog panel">
