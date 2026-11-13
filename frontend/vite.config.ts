@@ -81,6 +81,16 @@ export default defineConfig({
         manualChunks(id: string) {
           if (!id.includes('node_modules')) return undefined;
 
+          // CSS 模块 id 也会被送进 manualChunks。别把样式卷进 JS 的分包决策里：
+          // `@fortawesome/**/*.css` 既不属于 vue 族也不属于 markdown 族，会被下面的兜底
+          // 归进 `vendor-others`；而 `splash.ts` 因为 import 了 `@tauri-apps/api` 也吃这个
+          // chunk，于是 `splash.html` 会带上一条 <link> 白拉 55.27 kB FontAwesome CSS
+          // （head 里无 media ⇒ 渲染阻塞），而 splash 一个 `.fa` 类都不用。splash.html
+          // 是 tauri.conf.json 的 windows[0]，即桌面端真正的第一帧。
+          // 这里直接交出归属权，让 Vite 按「谁 import 它」决定：
+          // 主 CSS 仍进 main.css，设置页 CSS 仍跟随其动态 chunk 独立。
+          if (id.endsWith('.css')) return undefined;
+
           if (
             id.includes('/node_modules/vue/') ||
             id.includes('/node_modules/@vue/') ||
