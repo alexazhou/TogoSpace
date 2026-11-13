@@ -168,6 +168,18 @@ const tokenCompactCountTarget = computed<number | null>(() => {
 const animatedCompactCount = useAnimatedNumber(() => tokenCompactCountTarget.value);
 
 /**
+ * COMPACT「压缩中」摘要输出量的增长放大（#206）。
+ *
+ * 直接复用 `tokenCompactCountTarget`，不新造 computed：放大与补间盯的必须是**同一个量**，
+ * 否则会出现「数字在动但放大按另一条曲线走」的错位。`before` 恒定不参与 —— 把一个恒定值
+ * 喂给 `useGrowingScale` 只会永远得到 1，白占一个 watch。
+ *
+ * 形态二（`tokens A → B`）与 split 分支的 `before` 同理：两个都是定值，没有「在变」的量，
+ * 不接放大。`tokenCompactCountTarget` 在形态二恒 `null` ⇒ 天然不触发，无需额外判断。
+ */
+const tokenCompactScale = useGrowingScale(() => tokenCompactCountTarget.value);
+
+/**
  * 模板实际渲染的 token 视图。
  *
  * 补间只改**数字**：哪段是输入/输出、哪段是估算（浅色）全部沿用 `activityTokenDisplay`
@@ -184,12 +196,18 @@ const tokenView = computed(() => {
     // 形态二没有 `compactCount` ⇒ `tokenCompactCountTarget` 恒 `null` ⇒ `animatedCompactCount`
     // 为 `null` ⇒ 走下面的 `display.text`，不补间（也不用额外判断形态二）。
     if (display.compactBefore !== undefined && animatedCompactCount.value !== null) {
+      // #206：`count` 必须独立成节点才能单独放大。原来是整串纯文本（`{{ text }}`），
+      // 一个文本节点没法只放大后半段，于是这条分支长期没有 growth scale。
+      //
+      // 前缀 `↑ {before} ↓ ` 整体不动：`before` 恒定，没有「在变」的量。
+      // 箭头串直接复用 split 分支的同一对 i18n 键（`tokenInferenceUp` / `...DownArrow`），
+      // 与 `tokenCompactProgress` 拼出的文案逐字相同（`tokenCompactProgress` 仍作为 `title`），
+      // 好处是箭头/空格的位置只在模板里定义一次，不会出现「文本跳着看对、节点结构对不上」。
       return {
-        kind: 'text' as const,
-        text: t('agent.tokenCompactProgress', {
-          before: display.compactBefore,
-          count: animatedCompactCount.value,
-        }),
+        kind: 'compact' as const,
+        compactPrefix: `${t('agent.tokenInferenceUp', { count: display.compactBefore })}`
+          + ` ${t('agent.tokenInferenceDownArrow')} `,
+        compactNumber: String(animatedCompactCount.value),
         title: display.text,
       };
     }
@@ -224,6 +242,21 @@ const tokenView = computed(() => {
       class="agent-activity-item__tokens"
       :title="tokenView.title"
     >{{ tokenView.text }}</span>
+    <!-- #206：COMPACT「压缩中」= 恒定前缀（`↑ 180000 ↓ `）+ 可放大的数字。
+         结构与 split 分支同构（segment > arrow + number），这样 `--tokens-number` /
+         `--tokens-arrow` 的现有样式（等宽、tabular-nums、`transform-origin: left`）
+         无需为本分支新增任何规则。段上不挂 `--estimated`：COMPACT 没有估算/真值两态语义
+         （T6-a 已钉死这点）。 -->
+    <span
+      v-else-if="tokenView.kind === 'compact'"
+      class="agent-activity-item__tokens"
+      :title="tokenView.title"
+    ><span
+      class="agent-activity-item__tokens-segment"
+    ><span class="agent-activity-item__tokens-arrow">{{ tokenView.compactPrefix }}</span><span
+      class="agent-activity-item__tokens-number"
+      :style="{ transform: `scale(${tokenCompactScale})` }"
+    >{{ tokenView.compactNumber }}</span></span></span>
     <span
       v-else
       class="agent-activity-item__tokens"

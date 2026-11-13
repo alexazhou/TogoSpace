@@ -40,6 +40,14 @@ function installFakeRaf() {
   vi.stubGlobal('cancelAnimationFrame', (id: number) => {
     queue = queue.filter((entry) => entry.id !== id);
   });
+  /**
+   * #206：形态一的数字同时接了增长放大（`useGrowingScale`）。它的衰减**不读 rAF
+   * timestamp**，而是读 `performance.now()` 来算 500ms 衰减进度 —— 只推假 rAF 时钟的话，
+   * 真实 `performance.now()` 几乎不动 ⇒ 衰减帧永远算作「progress≈0」⇒ 无限排帧，
+   * 既排不空也等不到 scale 回落。把 `performance.now` 一并挂到假时钟上，
+   * 「时间」在本文件里只有一个来源。
+   */
+  vi.spyOn(performance, 'now').mockImplementation(() => time);
   vi.stubGlobal('matchMedia', (query: string) => ({
     matches: false,
     media: query,
@@ -112,6 +120,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('COMPACT 形态一 token 补间', () => {
@@ -129,7 +138,10 @@ describe('COMPACT 形态一 token 补间', () => {
       }),
     });
     // ① 目标变大 ⇒ 必须排帧（现状是 0，正因如此这条现在会红）。
-    expect(queue.length).toBe(1);
+    // ⚠️ #206 起这里不能用 `toBe(1)`：形态一的数字同时接了增长放大，它的衰减帧与补间帧
+    // 共用同一个 rAF 队列（浏览器里也是同一个），「恰好 1 帧」不再是可断言的实现细节。
+    // 本判据的意图是「排帧了 / 没排帧」，用 `> 0` 表达即可。
+    expect(queue.length).toBeGreaterThan(0);
 
     // ② 推 3 帧后必须严格介于起终点之间（避开第 1 帧 elapsed=0 的陷阱）。
     await runFrames(3);
@@ -142,7 +154,13 @@ describe('COMPACT 形态一 token 补间', () => {
     // ③ 推满 ≥250ms（20 帧 ≈ 320ms）收敛到目标。
     await runFrames(20);
     expect(tokenText(wrapper)).toBe('↑ 80000 ↓ 400');
+
+    // ④ 动画彻底排空：补间 250ms + 放大衰减 500ms（#206），再推 30 帧（≈480ms）后
+    // 必须一帧不剩，且文本不回退。用「排空」替代原先的「此刻队列为 0」：
+    // 补间收敛时放大衰减还在飞，那是正常状态，不是残留。
+    await runFrames(30);
     expect(queue.length).toBe(0);
+    expect(tokenText(wrapper)).toBe('↑ 80000 ↓ 400');
   });
 
   it('A2 before 恒定不补：逐帧采样，每一帧 ↑ 都是 80000', async () => {
@@ -157,7 +175,8 @@ describe('COMPACT 形态一 token 补间', () => {
     });
 
     // 先证明「确实在补间」：没有动画时「↑ 恒为 80000」是必然成立的假绿。
-    expect(queue.length).toBe(1);
+    // ⚠️ #206 起用 `> 0` 而不是 `toBe(1)`：放大衰减帧与补间帧共用同一个 rAF 队列。
+    expect(queue.length).toBeGreaterThan(0);
 
     // 逐帧采样，而不是只断首末：首末相同推不出中间没动。
     const upSamples: number[] = [upValue(wrapper)];
@@ -265,10 +284,15 @@ describe('COMPACT 形态一 token 补间', () => {
       }),
     });
     expect(tokenText(wrapper)).toBe('tokens 80000 → 4200');
-    expect(queue.length).toBe(0);
 
     // 再推帧也不能把旧动画的残影带回来。
+    // ⚠️ #206 起不再断「此刻队列为 0」：形态一切换到形态二时，增长放大的衰减帧可能还在飞
+    // （它写的是已卸载节点的 scale，无害）。本判据的意图是「文本不被残影改写」，靠下面这句
+    // 与「排空后仍不变」共同表达；队列排空单独验。
     await runFrames(5);
+    expect(tokenText(wrapper)).toBe('tokens 80000 → 4200');
+    await runFrames(30);
+    expect(queue.length).toBe(0);
     expect(tokenText(wrapper)).toBe('tokens 80000 → 4200');
   });
 
@@ -289,7 +313,8 @@ describe('COMPACT 形态一 token 补间', () => {
       }),
     });
     // 屏幕上已经有 `↓ 0`，所以 0 → 400 **必须补间**（不是首值直显）。
-    expect(queue.length).toBe(1);
+    // ⚠️ #206 起用 `> 0` 而不是 `toBe(1)`：放大衰减帧与补间帧共用同一个 rAF 队列。
+    expect(queue.length).toBeGreaterThan(0);
 
     // 逐帧采样 20 帧。第 1 帧只设 `startedAt`（elapsed=0）显示值仍是 0，
     // 所以「严格中间值」的帧一定出现在第 2 帧之后 —— 只推 1 帧会误判"没补间"。
@@ -307,9 +332,13 @@ describe('COMPACT 形态一 token 补间', () => {
     const monotonic = samples.every((value, index) => index === 0 || value >= samples[index - 1]);
     expect(monotonic).toBe(true);
 
-    // ③ 收敛到目标并停帧。
+    // ③ 收敛到目标。
     expect(samples[samples.length - 1]).toBe(400);
     expect(tokenText(wrapper)).toBe('↑ 80000 ↓ 400');
+
+    // ④ 排空：放大的衰减帧（500ms）比补间（250ms）长，再推 30 帧后必须一帧不剩。
+    await runFrames(30);
     expect(queue.length).toBe(0);
+    expect(tokenText(wrapper)).toBe('↑ 80000 ↓ 400');
   });
 });
