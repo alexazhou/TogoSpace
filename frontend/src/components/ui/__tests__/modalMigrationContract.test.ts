@@ -3,6 +3,7 @@ import { mount, type VueWrapper } from '@vue/test-utils';
 import i18n from '../../../i18n';
 import ConfirmDialog from '../ConfirmDialog.vue';
 import TokenDialog from '../TokenDialog.vue';
+import SkillDetailDialog from '../../settings/SkillDetailDialog.vue';
 import ClearDataChoiceDialog from '../../settings/ClearDataChoiceDialog.vue';
 import TeamPresetExportDialog from '../../settings/TeamPresetExportDialog.vue';
 import CreateRoomDialog from '../../console/CreateRoomDialog.vue';
@@ -11,7 +12,6 @@ import DepartmentEditorDialog from '../../team/DepartmentEditorDialog.vue';
 import MemberEditorDialog from '../../team/MemberEditorDialog.vue';
 
 // #213 「9 个弹窗迁移 ModalDialog」的行为矩阵（逐弹窗一行一条，不做聚合结论）。
-// 名单按验收人 S-3：SkillDetailDialog 属「未迁 4 个」对照组，不在本文件覆盖范围。
 // 迁移前后被判据咬住的 6 项：
 //   1 遮罩自点击是否关闭  2 点面板内容是否不关闭  3 结构里没有多出 .ui-modal__dialog / head
 //   4 Esc 是否关闭（迁移前全仓无「全局 Esc 关弹窗」，迁移后也不该新增）
@@ -76,6 +76,16 @@ const CASES: Case[] = [
     zIndex: '120',
     // 迁移前：token-overlay 没有 @click.self，且组件无 close 事件
     closesOnOverlayClick: false,
+  },
+  {
+    name: 'SkillDetailDialog',
+    component: SkillDetailDialog,
+    props: { open: true, skill: null },
+    padding: '28px',
+    background: 'rgba(6, 10, 16, 0.52)',
+    backdropFilter: 'blur(8px)',
+    zIndex: '120',
+    closesOnOverlayClick: true,
   },
   {
     name: 'ClearDataChoiceDialog',
