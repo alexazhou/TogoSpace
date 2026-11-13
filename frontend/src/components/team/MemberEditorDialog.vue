@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { CSSProperties } from 'vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import AgentCardBase from '../agent/AgentCardBase.vue';
@@ -68,195 +70,197 @@ const employeeNumberDisplay = computed(() => props.employeeNumber || t('member.e
 const canSaveMember = computed(() => Boolean(props.memberName.trim() && props.selectedTemplateId !== null));
 const memberTemplateSoul = computed(() => props.currentTemplateSoul.trim() || t('member.noSoul'));
 const selectedMemberAvatarSeed = computed(() => props.memberName.trim());
+
+// 迁移到 ModalDialog(bare) 后遮罩视觉参数的落点：原本写在本文件 `.member-editor-overlay` 里，
+// 现改为内联样式逐项保留原值，层级用 z-index prop 传原档位。本组件无 `@media` 覆盖遮罩。
+const overlayStyle: CSSProperties = {
+  padding: '28px',
+  background: 'rgba(6, 10, 16, 0.58)',
+  backdropFilter: 'blur(8px)',
+};
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="member-editor-overlay" @click.self="emit('close')">
-      <section
-        class="member-editor-dialog panel"
-        :class="{ 'member-editor-dialog--readonly': !editable }"
-      >
-        <div class="member-editor-head">
-          <div class="member-editor-title-row">
-            <h2 class="member-editor-title">{{ t('member.title') }}</h2>
-            <p class="section-eyebrow">{{ t('member.eyebrow') }}</p>
+  <ModalDialog
+    :open="open"
+    bare
+    :z-index="50"
+    :overlay-style="overlayStyle"
+    @close="emit('close')"
+  >
+    <section
+      class="member-editor-dialog panel"
+      :class="{ 'member-editor-dialog--readonly': !editable }"
+    >
+      <div class="member-editor-head">
+        <div class="member-editor-title-row">
+          <h2 class="member-editor-title">{{ t('member.title') }}</h2>
+          <p class="section-eyebrow">{{ t('member.eyebrow') }}</p>
+        </div>
+        <p v-if="status" class="member-editor-status">{{ status }}</p>
+      </div>
+
+      <div class="member-editor-summary">
+        <label class="member-editor-field">
+          <span>{{ t('member.employeeId') }}</span>
+          <input
+            :value="employeeNumberDisplay"
+            class="member-editor-input member-editor-input--readonly"
+            type="text"
+            readonly
+          />
+          <small class="member-editor-field-note">{{ t('member.employeeNote') }}</small>
+        </label>
+        <label class="member-editor-field">
+          <span>{{ t('member.name') }}</span>
+          <input
+            v-model="memberNameModel"
+            class="member-editor-input"
+            :class="editable ? 'member-editor-input--editable' : 'member-editor-input--readonly'"
+            type="text"
+            :placeholder="t('member.namePlaceholder')"
+            :readonly="!editable"
+          />
+          <small class="member-editor-field-note member-editor-field-note--placeholder" aria-hidden="true">{{ t('member.employeeNote') }}</small>
+        </label>
+        <label class="member-editor-field">
+          <span>{{ t('member.model') }}</span>
+          <CustomSelect
+            v-if="editable"
+            :model-value="memberModelModel"
+            :options="modelOptions"
+            @update:model-value="memberModelModel = $event"
+          />
+          <input
+            v-else
+            :value="memberModelValue"
+            class="member-editor-input member-editor-input--readonly"
+            type="text"
+            readonly
+          />
+          <small class="member-editor-field-note member-editor-field-note--placeholder" aria-hidden="true">{{ t('member.employeeNote') }}</small>
+        </label>
+        <label class="member-editor-field">
+          <span class="member-editor-field-label">
+            {{ t('member.driver') }}
+            <InfoTooltip>
+              <ul class="driver-tooltip-list">
+                <li><b>自动</b>：默认等同于使用 TSP 驱动</li>
+                <li><b>TSP</b>：功能完备的协议驱动，支持自由对话与本地文件操作（推荐首选）</li>
+                <li><b>NATIVE</b>：基于 Python 实现的原生驱动，仅支持基础交谈，无法访问本地文件</li>
+                <li><b>CLAUDE</b>：使用 Claude Code 作为 Agent 的驱动，相关能力仍在开发中（暂勿选择）</li>
+              </ul>
+            </InfoTooltip>
+          </span>
+          <CustomSelect
+            :model-value="driverModel"
+            :options="driverOptions"
+            :disabled="!editable"
+            @update:model-value="driverModel = $event"
+          />
+          <small class="member-editor-field-note member-editor-field-note--placeholder" aria-hidden="true">{{ t('member.employeeNote') }}</small>
+        </label>
+      </div>
+
+      <div class="member-editor-body">
+        <section class="member-selected-panel">
+          <div class="member-selected-head">
+            <span class="panel-label">{{ t('member.selectedRole') }}</span>
           </div>
-          <p v-if="status" class="member-editor-status">{{ status }}</p>
-        </div>
-
-        <div class="member-editor-summary">
-          <label class="member-editor-field">
-            <span>{{ t('member.employeeId') }}</span>
-            <input
-              :value="employeeNumberDisplay"
-              class="member-editor-input member-editor-input--readonly"
-              type="text"
-              readonly
+          <div class="member-selected-body">
+            <AgentCardBase
+              v-if="selectedTemplateName"
+              class="member-selected-card"
+              :title="memberNameModel"
+              :subtitle="selectedTemplateName"
+              :employee-number="employeeNumber"
+              :avatar-name="memberNameModel"
+              :avatar-seed="selectedMemberAvatarSeed"
+              :selected="false"
+              variant="graph"
             />
-            <small class="member-editor-field-note">{{ t('member.employeeNote') }}</small>
-          </label>
-          <label class="member-editor-field">
-            <span>{{ t('member.name') }}</span>
-            <input
-              v-model="memberNameModel"
-              class="member-editor-input"
-              :class="editable ? 'member-editor-input--editable' : 'member-editor-input--readonly'"
-              type="text"
-              :placeholder="t('member.namePlaceholder')"
-              :readonly="!editable"
-            />
-            <small class="member-editor-field-note member-editor-field-note--placeholder" aria-hidden="true">{{ t('member.employeeNote') }}</small>
-          </label>
-          <label class="member-editor-field">
-            <span>{{ t('member.model') }}</span>
-            <CustomSelect
-              v-if="editable"
-              :model-value="memberModelModel"
-              :options="modelOptions"
-              @update:model-value="memberModelModel = $event"
-            />
-            <input
-              v-else
-              :value="memberModelValue"
-              class="member-editor-input member-editor-input--readonly"
-              type="text"
-              readonly
-            />
-            <small class="member-editor-field-note member-editor-field-note--placeholder" aria-hidden="true">{{ t('member.employeeNote') }}</small>
-          </label>
-          <label class="member-editor-field">
-            <span class="member-editor-field-label">
-              {{ t('member.driver') }}
-              <InfoTooltip>
-                <ul class="driver-tooltip-list">
-                  <li><b>自动</b>：默认等同于使用 TSP 驱动</li>
-                  <li><b>TSP</b>：功能完备的协议驱动，支持自由对话与本地文件操作（推荐首选）</li>
-                  <li><b>NATIVE</b>：基于 Python 实现的原生驱动，仅支持基础交谈，无法访问本地文件</li>
-                  <li><b>CLAUDE</b>：使用 Claude Code 作为 Agent 的驱动，相关能力仍在开发中（暂勿选择）</li>
-                </ul>
-              </InfoTooltip>
-            </span>
-            <CustomSelect
-              :model-value="driverModel"
-              :options="driverOptions"
-              :disabled="!editable"
-              @update:model-value="driverModel = $event"
-            />
-            <small class="member-editor-field-note member-editor-field-note--placeholder" aria-hidden="true">{{ t('member.employeeNote') }}</small>
-          </label>
-        </div>
-
-        <div class="member-editor-body">
-          <section class="member-selected-panel">
-            <div class="member-selected-head">
-              <span class="panel-label">{{ t('member.selectedRole') }}</span>
-            </div>
-            <div class="member-selected-body">
-              <AgentCardBase
-                v-if="selectedTemplateName"
-                class="member-selected-card"
-                :title="memberNameModel"
-                :subtitle="selectedTemplateName"
-                :employee-number="employeeNumber"
-                :avatar-name="memberNameModel"
-                :avatar-seed="selectedMemberAvatarSeed"
-                :selected="false"
-                variant="graph"
-              />
-              <div v-else class="member-template-empty member-selected-empty">
-                {{ t('member.noTemplateSelected') }}
-              </div>
-            </div>
-          </section>
-
-          <section class="member-soul-panel">
-            <div class="member-soul-head">
-              <span class="panel-label">{{ t('member.soul') }}</span>
-            </div>
-            <textarea
-              :value="memberTemplateSoul"
-              class="member-soul-input member-editor-input member-editor-input--readonly"
-              readonly
-            />
-          </section>
-        </div>
-
-        <section v-if="editable" class="member-template-panel">
-          <div class="member-template-head">
-            <span class="panel-label">{{ t('member.availableRoles') }}</span>
-            <label class="member-template-search">
-              <input
-                v-model="keywordModel"
-                type="text"
-                :placeholder="t('member.searchRole')"
-              />
-            </label>
-          </div>
-
-          <div class="member-template-grid">
-            <div
-              v-for="item in templateOptions"
-              :key="item.id"
-              class="member-template-option"
-              :class="{ 'is-selected': selectedTemplateId === item.id }"
-              :aria-pressed="selectedTemplateId === item.id"
-            >
-              <AgentTemplateCard
-                :title="item.displayName"
-                :subtitle="item.name"
-                :avatar-name="item.name"
-                :avatar-seed="item.name"
-                :selected="selectedTemplateId === item.id"
-              />
-              <button
-                type="button"
-                class="member-template-use"
-                :aria-pressed="selectedTemplateId === item.id"
-                @click.stop="selectedTemplateModel = item.id"
-              >
-                {{ t('common.use') }}
-              </button>
-            </div>
-
-            <div v-if="!templateOptions.length" class="member-template-empty">
-              {{ t('member.noAvailableTemplates') }}
+            <div v-else class="member-template-empty member-selected-empty">
+              {{ t('member.noTemplateSelected') }}
             </div>
           </div>
         </section>
 
-        <div class="member-editor-actions">
-          <div class="member-editor-actions-main">
-            <button type="button" class="ghost-button" @click="emit('close')">
-              {{ editable ? t('common.cancel') : t('common.close') }}
-            </button>
+        <section class="member-soul-panel">
+          <div class="member-soul-head">
+            <span class="panel-label">{{ t('member.soul') }}</span>
+          </div>
+          <textarea
+            :value="memberTemplateSoul"
+            class="member-soul-input member-editor-input member-editor-input--readonly"
+            readonly
+          />
+        </section>
+      </div>
+
+      <section v-if="editable" class="member-template-panel">
+        <div class="member-template-head">
+          <span class="panel-label">{{ t('member.availableRoles') }}</span>
+          <label class="member-template-search">
+            <input
+              v-model="keywordModel"
+              type="text"
+              :placeholder="t('member.searchRole')"
+            />
+          </label>
+        </div>
+
+        <div class="member-template-grid">
+          <div
+            v-for="item in templateOptions"
+            :key="item.id"
+            class="member-template-option"
+            :class="{ 'is-selected': selectedTemplateId === item.id }"
+            :aria-pressed="selectedTemplateId === item.id"
+          >
+            <AgentTemplateCard
+              :title="item.displayName"
+              :subtitle="item.name"
+              :avatar-name="item.name"
+              :avatar-seed="item.name"
+              :selected="selectedTemplateId === item.id"
+            />
             <button
-              v-if="editable"
               type="button"
-              class="secondary-button"
-              :disabled="!canSaveMember"
-              @click="emit('save')"
+              class="member-template-use"
+              :aria-pressed="selectedTemplateId === item.id"
+              @click.stop="selectedTemplateModel = item.id"
             >
-              {{ t('common.save') }}
+              {{ t('common.use') }}
             </button>
+          </div>
+
+          <div v-if="!templateOptions.length" class="member-template-empty">
+            {{ t('member.noAvailableTemplates') }}
           </div>
         </div>
       </section>
-    </div>
-  </Teleport>
+
+      <div class="member-editor-actions">
+        <div class="member-editor-actions-main">
+          <button type="button" class="ghost-button" @click="emit('close')">
+            {{ editable ? t('common.cancel') : t('common.close') }}
+          </button>
+          <button
+            v-if="editable"
+            type="button"
+            class="secondary-button"
+            :disabled="!canSaveMember"
+            @click="emit('save')"
+          >
+            {{ t('common.save') }}
+          </button>
+        </div>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.member-editor-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.58);
-  backdrop-filter: blur(8px);
-}
 
 .member-editor-dialog {
   width: min(920px, 100%);

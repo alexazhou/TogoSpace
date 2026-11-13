@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { CSSProperties } from 'vue';
+import ModalDialog from './ModalDialog.vue';
 import { useI18n } from 'vue-i18n';
 
 defineProps<{
@@ -16,48 +18,50 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+// 迁移到 ModalDialog(bare) 后遮罩视觉参数的落点：原本写在本文件 `.confirm-overlay` 里，
+// 现改为内联样式逐项保留原值，层级用 z-index prop 传原档位。本组件无 `@media` 覆盖遮罩。
+const overlayStyle: CSSProperties = {
+  padding: '28px',
+  background: 'rgba(6, 10, 16, 0.52)',
+  backdropFilter: 'blur(8px)',
+};
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="confirm-overlay" @click.self="emit('close')">
-      <section class="confirm-dialog panel">
-        <div class="confirm-head">
-          <p class="confirm-eyebrow">Confirm Action</p>
-          <h3>{{ title }}</h3>
-        </div>
+  <ModalDialog
+    :open="open"
+    bare
+    :z-index="120"
+    :overlay-style="overlayStyle"
+    @close="emit('close')"
+  >
+    <section class="confirm-dialog panel">
+      <div class="confirm-head">
+        <p class="confirm-eyebrow">Confirm Action</p>
+        <h3>{{ title }}</h3>
+      </div>
 
-        <p class="confirm-message">{{ message }}</p>
+      <p class="confirm-message">{{ message }}</p>
 
-        <div class="confirm-actions">
-          <button type="button" class="ghost-button" @click="emit('close')">
-            {{ cancelLabel || t('common.cancel') }}
-          </button>
-          <button
-            type="button"
-            class="secondary-button"
-            :class="{ 'secondary-button--danger': danger }"
-            @click="emit('confirm')"
-          >
-            {{ confirmLabel || t('common.confirm') }}
-          </button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
+      <div class="confirm-actions">
+        <button type="button" class="ghost-button" @click="emit('close')">
+          {{ cancelLabel || t('common.cancel') }}
+        </button>
+        <button
+          type="button"
+          class="secondary-button"
+          :class="{ 'secondary-button--danger': danger }"
+          @click="emit('confirm')"
+        >
+          {{ confirmLabel || t('common.confirm') }}
+        </button>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.52);
-  backdrop-filter: blur(8px);
-}
 
 .confirm-dialog {
   width: min(420px, 100%);

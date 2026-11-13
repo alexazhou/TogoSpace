@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { CSSProperties } from 'vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { SkillInfo } from '../../types';
@@ -21,72 +23,74 @@ watch(() => props.open, (newVal) => {
     activeTab.value = 'desc';
   }
 });
+
+// 迁移到 ModalDialog(bare) 后遮罩视觉参数的落点：原本写在本文件 `.confirm-overlay` 里，
+// 现改为内联样式逐项保留原值，层级用 z-index prop 传原档位。本组件无 `@media` 覆盖遮罩。
+const overlayStyle: CSSProperties = {
+  padding: '28px',
+  background: 'rgba(6, 10, 16, 0.52)',
+  backdropFilter: 'blur(8px)',
+};
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="confirm-overlay" @click.self="emit('close')">
-      <section class="confirm-dialog panel">
-        <div class="confirm-head">
-          <p class="confirm-eyebrow">{{ t('settings.skills.detailsTitle') }}</p>
-          <h3>{{ skill?.name }}</h3>
+  <ModalDialog
+    :open="open"
+    bare
+    :z-index="120"
+    :overlay-style="overlayStyle"
+    @close="emit('close')"
+  >
+    <section class="confirm-dialog panel">
+      <div class="confirm-head">
+        <p class="confirm-eyebrow">{{ t('settings.skills.detailsTitle') }}</p>
+        <h3>{{ skill?.name }}</h3>
+      </div>
+
+      <div class="dialog-tabs">
+        <button
+          type="button"
+          class="tab-btn"
+          :class="{ active: activeTab === 'desc' }"
+          @click="activeTab = 'desc'"
+        >
+          {{ t('settings.skills.table.description') }}
+        </button>
+        <button
+          type="button"
+          class="tab-btn"
+          :class="{ active: activeTab === 'files' }"
+          @click="activeTab = 'files'"
+        >
+          {{ t('settings.skills.files') }}
+        </button>
+      </div>
+
+      <div class="dialog-body">
+        <div v-if="activeTab === 'desc'" class="tab-content">
+          <p class="desc-text">{{ skill?.description || t('common.none') }}</p>
         </div>
 
-        <div class="dialog-tabs">
-          <button
-            type="button"
-            class="tab-btn"
-            :class="{ active: activeTab === 'desc' }"
-            @click="activeTab = 'desc'"
-          >
-            {{ t('settings.skills.table.description') }}
-          </button>
-          <button
-            type="button"
-            class="tab-btn"
-            :class="{ active: activeTab === 'files' }"
-            @click="activeTab = 'files'"
-          >
-            {{ t('settings.skills.files') }}
-          </button>
+        <div v-else-if="activeTab === 'files'" class="tab-content">
+          <ul v-if="skill?.files && skill.files.length" class="file-list">
+            <li v-for="file in skill.files" :key="file" class="file-item">
+              <span class="file-icon">📄</span> {{ file }}
+            </li>
+          </ul>
+          <p v-else class="desc-text">{{ t('common.none') }}</p>
         </div>
+      </div>
 
-        <div class="dialog-body">
-          <div v-if="activeTab === 'desc'" class="tab-content">
-            <p class="desc-text">{{ skill?.description || t('common.none') }}</p>
-          </div>
-
-          <div v-else-if="activeTab === 'files'" class="tab-content">
-            <ul v-if="skill?.files && skill.files.length" class="file-list">
-              <li v-for="file in skill.files" :key="file" class="file-item">
-                <span class="file-icon">📄</span> {{ file }}
-              </li>
-            </ul>
-            <p v-else class="desc-text">{{ t('common.none') }}</p>
-          </div>
-        </div>
-
-        <div class="confirm-actions">
-          <button type="button" class="secondary-button" @click="emit('close')">
-            {{ t('common.close') }}
-          </button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
+      <div class="confirm-actions">
+        <button type="button" class="secondary-button" @click="emit('close')">
+          {{ t('common.close') }}
+        </button>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.52);
-  backdrop-filter: blur(8px);
-}
 
 .confirm-dialog {
   width: min(560px, 100%);
