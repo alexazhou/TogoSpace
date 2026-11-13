@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getTeamRooms } from '../../realtime/runtimeStore';
 import type { AgentActivity } from '../../types';
 import { displayName, stripAnsi } from '../../utils';
 import MarkdownContent from '../ui/MarkdownContent.vue';
+import { useResizeObserver } from '../../composables/useResizeObserver';
 import AgentActivityToken from './AgentActivityToken.vue';
 
 const { t } = useI18n();
@@ -19,7 +20,6 @@ const chatReplyCollapsed = ref(false);
 const reasoningCollapsed = ref(true);
 const reasoningBodyRef = ref<HTMLElement | null>(null);
 const reasoningOverflows = ref(false);
-let reasoningResizeObserver: ResizeObserver | null = null;
 
 /**
  * 判断思考内容是否确实被三行裁掉了（决定要不要给「展开」按钮）。
@@ -49,32 +49,18 @@ function toggleReasoning(): void {
   reasoningCollapsed.value = !reasoningCollapsed.value;
 }
 
-/** 把观察目标换成当前的思考内容节点（内容块是 v-if 渲染的，节点可能换新）。 */
-function syncReasoningObserver(): void {
-  if (typeof ResizeObserver === 'undefined') {
-    return;
-  }
-  reasoningResizeObserver ??= new ResizeObserver(() => measureReasoningOverflow());
-  reasoningResizeObserver.disconnect();
-  if (reasoningBodyRef.value) {
-    reasoningResizeObserver.observe(reasoningBodyRef.value);
-  }
-}
+// 思考内容块是 `v-if` 渲染的、节点会换新，所以交给 `useResizeObserver` 跟随 ref：
+// ref 换成新节点时会自动重挂，组件卸载时自动清理。
+useResizeObserver(reasoningBodyRef, () => measureReasoningOverflow());
 
 watch(
   [() => props.activity, reasoningBodyRef, reasoningCollapsed],
   async () => {
     await nextTick();
-    syncReasoningObserver();
     measureReasoningOverflow();
   },
   { immediate: true },
 );
-
-onBeforeUnmount(() => {
-  reasoningResizeObserver?.disconnect();
-  reasoningResizeObserver = null;
-});
 
 function readTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';

@@ -36,15 +36,20 @@ import { installViewportRootClasses } from './responsive/breakpoints';
 import { findTeamById, firstTeamId, loadTeams, preferredTeamId, setPreferredTeamId, teams, teamsLoaded } from './teamStore';
 import { displayName, formatConnectionState } from './utils';
 import { setFrontendLogBridgeEnabled } from './utils/frontendLogBridge';
+import { useLocalStorageState } from './composables/useLocalStorageState';
 
 type ThemeMode = 'dark' | 'light';
+
+const THEME_STORAGE_KEY = 'theme-mode';
 type ConsoleMainView = 'chat' | 'tasks';
 
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 
-const themeMode = ref<ThemeMode>((localStorage.getItem('theme-mode') as ThemeMode) || 'dark');
+// 主题名会落盘，读的时候可能遇到无痕模式 / 存量脏数据，统一走安全存取。
+const themeStorage = useLocalStorageState<ThemeMode>(THEME_STORAGE_KEY);
+const themeMode = ref<ThemeMode>(themeStorage.read() ?? 'dark');
 
 const teamIdFromRoute = computed<number | null>(() => {
   const raw = route.params.teamId;
@@ -304,7 +309,7 @@ watch(
 watch(
   themeMode,
   (mode) => {
-    localStorage.setItem('theme-mode', mode);
+    themeStorage.write(mode);
     applyTheme(mode);
   },
   { immediate: true },

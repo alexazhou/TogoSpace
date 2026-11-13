@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch, type C
 import { useI18n } from 'vue-i18n';
 import { renderMarkdownPreviewText } from '../../../utils/markdown';
 import MarkdownContent from '../../ui/MarkdownContent.vue';
+import { createResizeObserver } from '../../../composables/useResizeObserver';
 import type { PendingMessageItem } from './types';
 
 /**
@@ -33,7 +34,9 @@ const { t } = useI18n();
 
 const previewRef = useTemplateRef<HTMLElement>('previewRef');
 const truncated = ref(false);
-let resizeObserver: ResizeObserver | null = null;
+// 预览行是 `v-if` 渲染的，节点会换新；换节点就要重挂，因此用命令式工厂。
+// 回调只做「重新判定是否被截断」，不需要 entry 参数。
+const truncationObserver = createResizeObserver(() => measureTruncation());
 
 /**
  * 收起态文案：所有换行与连续空白合并成一个空格。
@@ -228,15 +231,13 @@ function handleSenderClick(event: MouseEvent): void {
 watch(
   () => [previewRef.value, previewText.value] as const,
   ([el]) => {
-    resizeObserver?.disconnect();
-    resizeObserver = null;
+    truncationObserver.disconnect();
     if (!el || typeof ResizeObserver === 'undefined') {
       // 无 ResizeObserver 的环境（部分测试宿主）退化为「挂载时量一次」。
       measureTruncation();
       return;
     }
-    resizeObserver = new ResizeObserver(() => measureTruncation());
-    resizeObserver.observe(el);
+    truncationObserver.observe(el);
     measureTruncation();
   },
   { flush: 'post', immediate: true },
@@ -254,8 +255,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  resizeObserver?.disconnect();
-  resizeObserver = null;
+  truncationObserver.disconnect();
   // tooltip 是 Teleport 出去的，卸载时 DOM 会跟着走，但 window 上的重算监听不会自己摘。
   detachRepositionListeners();
 });

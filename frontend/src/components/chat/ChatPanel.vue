@@ -6,6 +6,8 @@ import { displayName, i18nText } from '../../utils';
 import type { MessageInfo, RoomMemberProfile, RoomState } from '../../types';
 import { useAgentStatus } from '../../realtime/selectors';
 import MessageStream from './MessageStream.vue';
+import { createResizeObserver } from '../../composables/useResizeObserver';
+import { parseFiniteNumberInRange, useLocalStorageState } from '../../composables/useLocalStorageState';
 
 const COMPOSER_DRAG_ZONE_HEIGHT_PX = 8;
 const COMPOSER_RATIO_STORAGE_KEY = 'chat-composer-height-ratio';
@@ -52,7 +54,16 @@ const chatHeight = ref(0);
 const chatHeadHeight = ref(0);
 const chatBannerHeight = ref(0);
 
-let layoutResizeObserver: ResizeObserver | null = null;
+// 四个目标都是模板 ref，且部分在 `v-if` / `v-show` 之后才出现，所以按需重挂而非跟随生命周期。
+const layoutObserver = createResizeObserver(() => {
+  refreshLayoutMetrics();
+  if (composerDividerDragging.value && pendingComposerBottomAnchorDistance !== null) {
+    preserveMessageBottomAnchor(pendingComposerBottomAnchorDistance);
+  }
+});
+const composerRatioStorage = useLocalStorageState<number>(COMPOSER_RATIO_STORAGE_KEY, {
+  parse: parseFiniteNumberInRange(0.12, 0.72),
+});
 let stopComposerResize: (() => void) | null = null;
 let pendingComposerBottomAnchorSync = false;
 let pendingComposerBottomAnchorDistance: number | null = null;
@@ -171,26 +182,13 @@ const composerStyle = computed(() => (
 ));
 
 function persistComposerHeightRatio(): void {
-  try {
-    localStorage.setItem(COMPOSER_RATIO_STORAGE_KEY, String(composerHeightRatio.value));
-  } catch {
-    // ignore localStorage failures
-  }
+  composerRatioStorage.write(composerHeightRatio.value);
 }
 
 function restoreComposerHeightRatio(): void {
-  try {
-    const raw = localStorage.getItem(COMPOSER_RATIO_STORAGE_KEY);
-    if (!raw) {
-      return;
-    }
-
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed >= 0.12 && parsed <= 0.72) {
-      composerHeightRatio.value = parsed;
-    }
-  } catch {
-    // ignore localStorage failures
+  const stored = composerRatioStorage.read();
+  if (stored !== null) {
+    composerHeightRatio.value = stored;
   }
 }
 
@@ -201,31 +199,12 @@ function refreshLayoutMetrics(): void {
 }
 
 function bindLayoutResizeObserver(): void {
-  layoutResizeObserver?.disconnect();
-
-  if (typeof ResizeObserver === 'undefined') {
-    return;
-  }
-
-  layoutResizeObserver = new ResizeObserver(() => {
-    refreshLayoutMetrics();
-    if (composerDividerDragging.value && pendingComposerBottomAnchorDistance !== null) {
-      preserveMessageBottomAnchor(pendingComposerBottomAnchorDistance);
-    }
-  });
-
-  if (chatRef.value) {
-    layoutResizeObserver.observe(chatRef.value);
-  }
-  if (chatHeadRef.value) {
-    layoutResizeObserver.observe(chatHeadRef.value);
-  }
-  if (chatBannerRef.value) {
-    layoutResizeObserver.observe(chatBannerRef.value);
-  }
-  if (messageViewportRef.value) {
-    layoutResizeObserver.observe(messageViewportRef.value);
-  }
+  layoutObserver.disconnect();
+  // 四个目标任意一个变高变矮都会影响输入框可用高度；未绑定的 ref 由工厂忽略。
+  layoutObserver.observe(chatRef.value);
+  layoutObserver.observe(chatHeadRef.value);
+  layoutObserver.observe(chatBannerRef.value);
+  layoutObserver.observe(messageViewportRef.value);
 }
 
 function resetComposerDragState(): void {
@@ -369,8 +348,7 @@ onBeforeUnmount(() => {
   stopComposerResize = null;
   pendingComposerBottomAnchorDistance = null;
   pendingComposerBottomAnchorSync = false;
-  layoutResizeObserver?.disconnect();
-  layoutResizeObserver = null;
+  layoutObserver.disconnect();
   resetComposerDragState();
 });
 </script>

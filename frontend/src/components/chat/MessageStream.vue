@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n';
 import type { MessageInfo, RoomMemberProfile } from '../../types';
 import { bubbleSide, displayName, formatTime } from '../../utils';
 import MarkdownContent from '../ui/MarkdownContent.vue';
+import { createResizeObserver, useResizeObserver } from '../../composables/useResizeObserver';
 import PendingMessageDock from './pending/PendingMessageDock.vue';
 import { buildPendingKey } from './pending/types';
 import type { PendingMessageItem } from './pending/types';
@@ -47,8 +48,15 @@ const hasScrollbar = ref(false);
 const historyLoadRequested = ref(false);
 const stickToBottom = ref(true);
 let programmaticScroll = false;
-let resizeObserver: ResizeObserver | null = null;
-let pendingDockResizeObserver: ResizeObserver | null = null;
+// 待读浮层是 `v-if` 渲染、节点会换新的，用命令式工厂手动重挂；
+// 滚动容器本身在组件生命周期内稳定，交给 `useResizeObserver` 跟随 ref。
+const pendingDockObserver = createResizeObserver(() => {
+  if (!stickToBottom.value) {
+    return;
+  }
+  scrollToBottom();
+  updateScrollbarState();
+});
 let pendingPrependAnchor: { scrollHeight: number; scrollTop: number } | null = null;
 
 const TOP_HISTORY_LOAD_THRESHOLD_PX = 24;
@@ -350,20 +358,9 @@ watch(
  * 否则会把用户正在看的历史内容拽走。
  */
 function observePendingDock(): void {
-  pendingDockResizeObserver?.disconnect();
-  pendingDockResizeObserver = null;
-  const el = pendingDockRef.value?.$el as HTMLElement | undefined;
-  if (!el || typeof ResizeObserver === 'undefined') {
-    return;
-  }
-  pendingDockResizeObserver = new ResizeObserver(() => {
-    if (!stickToBottom.value) {
-      return;
-    }
-    scrollToBottom();
-    updateScrollbarState();
-  });
-  pendingDockResizeObserver.observe(el);
+  pendingDockObserver.disconnect();
+  // 拿不到节点（浮层还没渲染）时不需要回退测量：等 `v-if` 变成 true 的 watch 会再调一次。
+  pendingDockObserver.observe(pendingDockRef.value?.$el as HTMLElement | undefined);
 }
 
 onMounted(() => {
@@ -372,23 +369,16 @@ onMounted(() => {
   streamRef.value?.addEventListener('scroll', handleStreamScroll, { passive: true });
   maybeLoadOlderMessagesForShortViewport();
   observePendingDock();
-  if (typeof ResizeObserver === 'undefined' || !streamRef.value) {
-    return;
-  }
+});
 
-  resizeObserver = new ResizeObserver(() => {
-    updateScrollbarState();
-    maybeLoadOlderMessagesForShortViewport();
-  });
-  resizeObserver.observe(streamRef.value);
+// 滚动容器自身尺寸变化（窗口缩放、侧栏拖拽）要重算滚动条可见性与「视口太矮需补历史」。
+useResizeObserver(streamRef, () => {
+  updateScrollbarState();
+  maybeLoadOlderMessagesForShortViewport();
 });
 
 onBeforeUnmount(() => {
   streamRef.value?.removeEventListener('scroll', handleStreamScroll);
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  pendingDockResizeObserver?.disconnect();
-  pendingDockResizeObserver = null;
   pendingPrependAnchor = null;
 });
 </script>

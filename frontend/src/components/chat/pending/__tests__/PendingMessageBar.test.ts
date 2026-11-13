@@ -4,29 +4,8 @@ import PendingMessageBar from '../PendingMessageBar.vue';
 import i18n from '../../../../i18n';
 import type { MessageInfo } from '../../../../types';
 import type { PendingMessageItem } from '../types';
-
-/**
- * `ResizeObserver` 在 happy-dom 里没有实现，真实浏览器里才存在。
- * 这里用一个可手动触发回调的假实现：截断判定靠 `scrollWidth > clientWidth`，
- * 而 happy-dom 的布局恒为 0，所以必须由测试显式构造「被截断」的几何。
- */
-class FakeResizeObserver {
-  static instances: FakeResizeObserver[] = [];
-
-  callback: ResizeObserverCallback;
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback;
-    FakeResizeObserver.instances.push(this);
-  }
-
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-  trigger(): void {
-    this.callback([], this as unknown as ResizeObserver);
-  }
-}
+// 假 ResizeObserver 已收敛到 src/__tests__/testMocks.ts（原先两个测试文件各写一份）
+import { FakeResizeObserver, installFakeResizeObserver, triggerLastResizeObserver } from '../../../../__tests__/testMocks';
 
 function createMessage(overrides: Partial<MessageInfo> = {}): MessageInfo {
   return {
@@ -60,7 +39,7 @@ function markTruncated(wrapper: ReturnType<typeof mount>): void {
   Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 400 });
   Object.defineProperty(el, 'clientWidth', { configurable: true, value: 100 });
   // 触发一次 ResizeObserver 回调，模拟真实浏览器里的测量时机
-  FakeResizeObserver.instances[FakeResizeObserver.instances.length - 1]?.trigger();
+  triggerLastResizeObserver();
 }
 
 function mountBar(props: Partial<{ item: PendingMessageItem; expanded: boolean; canEscalate: boolean; escalating: boolean }> = {}) {
@@ -83,12 +62,11 @@ function markNotTruncated(wrapper: ReturnType<typeof mount>): void {
   const el = wrapper.find('.pending-message-content').element as HTMLElement;
   Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 100 });
   Object.defineProperty(el, 'clientWidth', { configurable: true, value: 100 });
-  FakeResizeObserver.instances[FakeResizeObserver.instances.length - 1]?.trigger();
+  triggerLastResizeObserver();
 }
 
 beforeEach(() => {
-  FakeResizeObserver.instances = [];
-  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  installFakeResizeObserver();
 });
 
 describe('PendingMessageBar 单行截断与展开', () => {
@@ -102,6 +80,25 @@ describe('PendingMessageBar 单行截断与展开', () => {
 
     await wrapper.find('.pending-message-bar').trigger('click');
     expect(wrapper.emitted('toggle')).toHaveLength(1);
+  });
+
+  it('尺寸变化由 ResizeObserver 回调驱动重新判定（订阅真的挂上了）', async () => {
+    // 这条与上面那条的区别：上面靠「挂载后首次测量」就能过，**不验证订阅是否存在**。
+    // 这里先让首帧量到「未截断」，之后只改几何、不重新挂载，判定必须由观察器回调推动。
+    const wrapper = mountBar();
+    await flushPromises();
+    expect(wrapper.find('.pending-message-chevron').exists()).toBe(false);
+
+    expect(FakeResizeObserver.instances.length).toBeGreaterThan(0);
+
+    const el = wrapper.find('.pending-message-content').element as HTMLElement;
+    Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 400 });
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: 100 });
+
+    triggerLastResizeObserver();
+    await flushPromises();
+
+    expect(wrapper.find('.pending-message-chevron').text()).toBe('▸');
   });
 
   it('短文本未被截断时不可点击，点击不 emit', async () => {

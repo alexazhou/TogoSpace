@@ -1,4 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, type Ref } from 'vue';
+import { useResizeObserver } from './useResizeObserver';
+import { parseFiniteNumberInRange, useLocalStorageState } from './useLocalStorageState';
 
 const SPLITTER_HEIGHT_PX = 8;
 const SIDEBAR_TOP_RATIO_STORAGE_KEY = 'console-left-stack-top-ratio';
@@ -8,7 +10,11 @@ export function useConsoleSidebarLayout(leftStack: Ref<HTMLElement | null | unde
   const sidebarDividerDragging = ref(false);
   const sidebarTopRatio = ref(0.62);
 
-  let leftStackResizeObserver: ResizeObserver | null = null;
+  // 上下两栏的高度比例：旧版本写的、手改的、半截写入的落盘值都可能出现，
+  // 用区间校验兜住（0.2~0.8 之外视为没有存过）。
+  const sidebarTopRatioStorage = useLocalStorageState<number>(SIDEBAR_TOP_RATIO_STORAGE_KEY, {
+    parse: parseFiniteNumberInRange(0.2, 0.8),
+  });
 
   const leftStackStyle = computed(() => {
     if (leftStackHeight.value <= SPLITTER_HEIGHT_PX) {
@@ -29,26 +35,13 @@ export function useConsoleSidebarLayout(leftStack: Ref<HTMLElement | null | unde
   });
 
   function persistSidebarTopRatio(): void {
-    try {
-      localStorage.setItem(SIDEBAR_TOP_RATIO_STORAGE_KEY, String(sidebarTopRatio.value));
-    } catch {
-      // ignore localStorage failures
-    }
+    sidebarTopRatioStorage.write(sidebarTopRatio.value);
   }
 
   function restoreSidebarTopRatio(): void {
-    try {
-      const raw = localStorage.getItem(SIDEBAR_TOP_RATIO_STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
-
-      const parsed = Number(raw);
-      if (Number.isFinite(parsed) && parsed >= 0.2 && parsed <= 0.8) {
-        sidebarTopRatio.value = parsed;
-      }
-    } catch {
-      // ignore localStorage failures
+    const stored = sidebarTopRatioStorage.read();
+    if (stored !== null) {
+      sidebarTopRatio.value = stored;
     }
   }
 
@@ -107,23 +100,15 @@ export function useConsoleSidebarLayout(leftStack: Ref<HTMLElement | null | unde
     window.addEventListener('pointerup', stopResize, { once: true });
   }
 
+  // 左栏高度直接决定上下两栏的行高分配，高度一变就要重算。
+  useResizeObserver(leftStack, () => refreshLeftStackHeight());
+
   onMounted(() => {
     restoreSidebarTopRatio();
     refreshLeftStackHeight();
-
-    if (!leftStack.value) {
-      return;
-    }
-
-    leftStackResizeObserver = new ResizeObserver(() => {
-      refreshLeftStackHeight();
-    });
-    leftStackResizeObserver.observe(leftStack.value);
   });
 
   onBeforeUnmount(() => {
-    leftStackResizeObserver?.disconnect();
-    leftStackResizeObserver = null;
     resetDragState();
   });
 
