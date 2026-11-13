@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ModalDialog from './ModalDialog.vue';
 import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { setToken } from '../../authStore';
@@ -46,56 +47,52 @@ function handleClear() {
   token.value = '';
   error.value = '';
 }
+
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="token-overlay">
-      <section class="token-dialog panel">
-        <div class="token-head">
-          <p class="token-eyebrow">{{ t('auth.dialogEyebrow') }}</p>
-          <h3>{{ t('auth.dialogTitle') }}</h3>
-        </div>
+  <ModalDialog
+    :open="true"
+    bare
+    :z-index="120"
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.52)"
+    overlay-blur="blur(8px)"
+  >
+    <section class="token-dialog panel">
+      <div class="token-head">
+        <p class="token-eyebrow">{{ t('auth.dialogEyebrow') }}</p>
+        <h3>{{ t('auth.dialogTitle') }}</h3>
+      </div>
 
-        <p class="token-message">{{ t('auth.dialogMessage') }}</p>
+      <p class="token-message">{{ t('auth.dialogMessage') }}</p>
 
-        <div class="token-input-wrapper">
-          <input
-            v-model="token"
-            type="text"
-            class="token-input"
-            :placeholder="t('auth.tokenPlaceholder')"
-            :disabled="pending"
-            @keyup.enter="handleConfirm"
-          />
-        </div>
+      <div class="token-input-wrapper">
+        <input
+          v-model="token"
+          type="text"
+          class="token-input"
+          :placeholder="t('auth.tokenPlaceholder')"
+          :disabled="pending"
+          @keyup.enter="handleConfirm"
+        />
+      </div>
 
-        <p v-if="error" class="token-error">{{ error }}</p>
+      <p v-if="error" class="token-error">{{ error }}</p>
 
-        <div class="token-actions">
-          <button type="button" class="ghost-button" :disabled="pending" @click="handleClear">
-            {{ t('common.reset') }}
-          </button>
-          <button type="button" class="secondary-button" :disabled="pending" @click="handleConfirm">
-            {{ pending ? t('auth.verifying') : t('auth.confirm') }}
-          </button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
+      <div class="token-actions">
+        <button type="button" class="ghost-button" :disabled="pending" @click="handleClear">
+          {{ t('common.reset') }}
+        </button>
+        <button type="button" class="secondary-button" :disabled="pending" @click="handleConfirm">
+          {{ pending ? t('auth.verifying') : t('auth.confirm') }}
+        </button>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.token-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.52);
-  backdrop-filter: blur(8px);
-}
 
 .token-dialog {
   width: min(420px, 100%);

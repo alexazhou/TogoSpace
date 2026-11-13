@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TeamSummary } from '../../types';
 import { useI18n } from 'vue-i18n';
+import ModalDialog from '../ui/ModalDialog.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -16,63 +17,60 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="team-export-overlay" @click.self="emit('close')">
-      <section class="team-export-dialog panel">
-        <div class="team-export-head">
-          <p class="team-export-eyebrow">Team Preset Export</p>
-          <h3>{{ t('settings.maintenance.exportDialogTitle') }}</h3>
-        </div>
+  <ModalDialog
+    :open="open"
+    :z-index="120"
+    bare
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.52)"
+    overlay-blur="blur(8px)"
+    @close="emit('close')"
+  >
+    <section class="team-export-dialog panel">
+      <div class="team-export-head">
+        <p class="team-export-eyebrow">Team Preset Export</p>
+        <h3>{{ t('settings.maintenance.exportDialogTitle') }}</h3>
+      </div>
 
-        <p class="team-export-message">{{ t('settings.maintenance.exportDialogMsg') }}</p>
+      <p class="team-export-message">{{ t('settings.maintenance.exportDialogMsg') }}</p>
 
-        <label class="team-export-field">
-          <span class="team-export-label">{{ t('settings.maintenance.exportTeamLabel') }}</span>
-          <select
-            class="team-export-select"
-            :value="selectedTeamId ?? ''"
-            :disabled="!props.teams.length || isExporting"
-            @change="emit('updateSelectedTeamId', Number(($event.target as HTMLSelectElement).value))"
-          >
-            <option value="" disabled>{{ t('settings.maintenance.exportTeamPlaceholder') }}</option>
-            <option v-for="team in props.teams" :key="team.id" :value="team.id">
-              {{ team.name }}
-            </option>
-          </select>
-        </label>
+      <label class="team-export-field">
+        <span class="team-export-label">{{ t('settings.maintenance.exportTeamLabel') }}</span>
+        <select
+          class="team-export-select"
+          :value="selectedTeamId ?? ''"
+          :disabled="!props.teams.length || isExporting"
+          @change="emit('updateSelectedTeamId', Number(($event.target as HTMLSelectElement).value))"
+        >
+          <option value="" disabled>{{ t('settings.maintenance.exportTeamPlaceholder') }}</option>
+          <option v-for="team in props.teams" :key="team.id" :value="team.id">
+            {{ team.name }}
+          </option>
+        </select>
+      </label>
 
-        <div class="team-export-actions">
-          <button type="button" class="ghost-button" @click="emit('close')">
-            {{ t('common.cancel') }}
-          </button>
-          <button
-            type="button"
-            class="secondary-button"
-            :disabled="selectedTeamId === null || isExporting"
-            @click="emit('confirm')"
-          >
-            {{ isExporting ? t('settings.maintenance.exporting') : t('settings.maintenance.exportButton') }}
-          </button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
+      <div class="team-export-actions">
+        <button type="button" class="ghost-button" @click="emit('close')">
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          type="button"
+          class="secondary-button"
+          :disabled="selectedTeamId === null || isExporting"
+          @click="emit('confirm')"
+        >
+          {{ isExporting ? t('settings.maintenance.exporting') : t('settings.maintenance.exportButton') }}
+        </button>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.team-export-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.52);
-  backdrop-filter: blur(8px);
-}
 
 .team-export-dialog {
   width: min(460px, 100%);

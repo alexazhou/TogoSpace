@@ -205,6 +205,30 @@ watch(
 </template>
 
 <style scoped>
+/* `.error-banner` 与 `.loading-card` 在模板里被用了（错误提示 / 首屏加载态），但本文件
+   **此前没有声明**，全仓也没有非 scoped 的同名规则 ⇒ 这两个元素一直吃浏览器默认样式
+   （实测 computed style：背景透明、边框 0、圆角 0、内边距 0）。
+   视觉语言照抄兄弟面板（AgentTaskPanel / AgentMemoryPanel / AgentActivityPanel / TeamDetailPage）。
+   唯一不同：本面板容器是 flex + `gap: 14px`，间距交给 gap，所以不叠加兄弟面板那条
+   `margin: 0 10px 10px`（那是给块级容器排版用的）。 */
+.loading-card,
+.error-banner {
+  padding: 14px;
+}
+
+.loading-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.error-banner {
+  border-radius: 10px;
+  background: var(--banner-error-bg);
+  color: var(--banner-error-text);
+  border: 1px solid var(--banner-error-border);
+}
+
 .task-panel {
   min-height: 0;
   display: flex;

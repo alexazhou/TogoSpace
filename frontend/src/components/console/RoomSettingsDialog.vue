@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ModalDialog from '../ui/ModalDialog.vue';
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -92,55 +93,52 @@ watch(
   },
   { immediate: true },
 );
+
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="room-settings-overlay" @click.self="() => requestClose()">
-      <section class="room-settings-dialog panel">
-        <div class="room-settings-head">
-          <p class="room-settings-eyebrow">Room Settings</p>
-          <h3>{{ t('roomSettings.title') }}</h3>
-        </div>
+  <ModalDialog
+    :open="open"
+    bare
+    :z-index="60"
+    overlay-padding="24px"
+    overlay-background="rgba(6, 10, 16, 0.42)"
+    overlay-blur="blur(6px)"
+    @close="() => requestClose()"
+  > requestClose()">
+    <section class="room-settings-dialog panel">
+      <div class="room-settings-head">
+        <p class="room-settings-eyebrow">Room Settings</p>
+        <h3>{{ t('roomSettings.title') }}</h3>
+      </div>
 
-        <div v-if="errorMessage" class="room-settings-error">{{ errorMessage }}</div>
-        <div v-if="isDeptRoom" class="room-settings-notice">{{ t('roomSettings.deptRoomNotice') }}</div>
+      <div v-if="errorMessage" class="room-settings-error">{{ errorMessage }}</div>
+      <div v-if="isDeptRoom" class="room-settings-notice">{{ t('roomSettings.deptRoomNotice') }}</div>
 
-        <label class="room-settings-field">
-          <span>{{ t('roomSettings.nameLabel') }}</span>
-          <input
-            v-model="roomName"
-            type="text"
-            maxlength="64"
-            :disabled="isDeptRoom"
-            :placeholder="t('roomSettings.namePlaceholder')"
-          />
-        </label>
+      <label class="room-settings-field">
+        <span>{{ t('roomSettings.nameLabel') }}</span>
+        <input
+          v-model="roomName"
+          type="text"
+          maxlength="64"
+          :disabled="isDeptRoom"
+          :placeholder="t('roomSettings.namePlaceholder')"
+        />
+      </label>
 
-        <div class="room-settings-actions">
-          <button type="button" class="room-settings-button secondary" :disabled="submitting" @click="() => requestClose()">
-            {{ t('common.cancel') }}
-          </button>
-          <button type="button" class="room-settings-button" :disabled="!canSubmit" @click="handleSave">
-            {{ t('common.save') }}
-          </button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
+      <div class="room-settings-actions">
+        <button type="button" class="room-settings-button secondary" :disabled="submitting" @click="() => requestClose()">
+          {{ t('common.cancel') }}
+        </button>
+        <button type="button" class="room-settings-button" :disabled="!canSubmit" @click="handleSave">
+          {{ t('common.save') }}
+        </button>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.room-settings-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(6, 10, 16, 0.42);
-  backdrop-filter: blur(6px);
-}
 
 .room-settings-dialog {
   width: min(640px, 100%);

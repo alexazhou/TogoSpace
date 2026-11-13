@@ -31,20 +31,30 @@ import TopBar from './components/layout/TopBar.vue';
 import { DEFAULT_SETTINGS_SECTION } from './components/settings/sections';
 import ConfirmDialog from './components/ui/ConfirmDialog.vue';
 import { useTeamAgents } from './realtime/selectors';
+import { installRuntimeActions } from './realtime/runtimeActions';
 import { startRealtimeClient, stopRealtimeClient } from './realtime/wsClient';
 import { installViewportRootClasses } from './responsive/breakpoints';
 import { findTeamById, firstTeamId, loadTeams, preferredTeamId, setPreferredTeamId, teams, teamsLoaded } from './teamStore';
 import { displayName, formatConnectionState } from './utils';
 import { setFrontendLogBridgeEnabled } from './utils/frontendLogBridge';
+import { useLocalStorageState } from './composables/useLocalStorageState';
 
 type ThemeMode = 'dark' | 'light';
+
+const THEME_STORAGE_KEY = 'theme-mode';
 type ConsoleMainView = 'chat' | 'tasks';
 
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 
-const themeMode = ref<ThemeMode>((localStorage.getItem('theme-mode') as ThemeMode) || 'dark');
+// 主题名会落盘，读的时候可能遇到无痕模式 / 存量脏数据，统一走安全存取。
+const themeStorage = useLocalStorageState<ThemeMode>(THEME_STORAGE_KEY);
+// 这里必须用 `||` 而不是 `??`：改造前是 `getItem(...) || 'dark'`，**空串也会落到 'dark'**。
+// 用 `??` 会让存量空串保留为 `''`，`data-theme` 就从 "dark" 变成 ""——视觉上碰巧还是暗色
+// （`:root:not([data-theme='light'])` 仍命中），但属性值变了就是行为变了，不能拿「今天看不出差别」
+// 当等价证据。
+const themeMode = ref<ThemeMode>(themeStorage.read() || 'dark');
 
 const teamIdFromRoute = computed<number | null>(() => {
   const raw = route.params.teamId;
@@ -304,7 +314,7 @@ watch(
 watch(
   themeMode,
   (mode) => {
-    localStorage.setItem('theme-mode', mode);
+    themeStorage.write(mode);
     applyTheme(mode);
   },
   { immediate: true },
@@ -316,6 +326,8 @@ onMounted(async () => {
   // 实时连接打开时需要知道是否开启鉴权，先取系统状态再建立连接；
   // 否则 authEnabled 还是初始 false，连接不会发送认证消息，后端不订阅事件。
   await checkSystemStatus();
+  // 装配 action 层的 `team_reloaded` 重拉处理器，必须早于实时连接建立。
+  installRuntimeActions();
   startRealtimeClient();
   await loadTeams();
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ModalDialog from '../ui/ModalDialog.vue';
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { displayName, findDepartmentPath, isDepartmentLeader } from '../../utils';
@@ -87,155 +88,152 @@ function close() {
     selectedAgentId.value = null;
   }, 300);
 }
+
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="clear-data-overlay" @click.self="close">
-      <section class="clear-data-dialog panel">
-        <div class="clear-data-head">
-          <p class="clear-data-eyebrow">{{ t('settings.page.clearDataChoiceTitle') }}</p>
-          <h3>{{ teamName }}</h3>
-        </div>
+  <ModalDialog
+    :open="open"
+    bare
+    :z-index="120"
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.52)"
+    overlay-blur="blur(8px)"
+    @close="close()"
+  >
+    <section class="clear-data-dialog panel">
+      <div class="clear-data-head">
+        <p class="clear-data-eyebrow">{{ t('settings.page.clearDataChoiceTitle') }}</p>
+        <h3>{{ teamName }}</h3>
+      </div>
 
-        <!-- Mode: Choice -->
-        <div v-if="mode === 'choice'" class="clear-data-choices">
-          <p class="clear-data-msg">{{ t('settings.page.clearDataChoiceMsg') }}</p>
-          
-          <button type="button" class="choice-card choice-card--personal" @click="selectPersonal">
-            <div class="choice-card-content">
-              <strong>{{ t('settings.page.clearPersonalData') }}</strong>
-              <p>{{ t('settings.page.personalDataNote') }}</p>
-            </div>
-            <span class="choice-card-arrow">→</span>
-          </button>
-
-          <button type="button" class="choice-card choice-card--team" @click="selectTeam">
-            <div class="choice-card-content">
-              <strong>{{ t('settings.page.clearTeamData') }}</strong>
-              <p>{{ t('settings.page.teamDataNote') }}</p>
-            </div>
-            <span class="choice-card-arrow">→</span>
-          </button>
-        </div>
-
-        <!-- Mode: Personal Member Selection -->
-        <div v-else-if="mode === 'personal'" class="clear-data-personal">
-          <div class="personal-head">
-            <button type="button" class="back-button" @click="handleBack">← {{ t('common.back') }}</button>
-            <p class="personal-msg">{{ t('member.clearDataTitle') }}</p>
+      <!-- Mode: Choice -->
+      <div v-if="mode === 'choice'" class="clear-data-choices">
+        <p class="clear-data-msg">{{ t('settings.page.clearDataChoiceMsg') }}</p>
+        
+        <button type="button" class="choice-card choice-card--personal" @click="selectPersonal">
+          <div class="choice-card-content">
+            <strong>{{ t('settings.page.clearPersonalData') }}</strong>
+            <p>{{ t('settings.page.personalDataNote') }}</p>
           </div>
+          <span class="choice-card-arrow">→</span>
+        </button>
 
-          <div class="member-list">
-            <button
-              v-for="member in members"
-              :key="member.id"
-              type="button"
-              class="member-item"
-              :class="{ 'is-selected': selectedAgentId === member.id }"
-              @click="selectMember(member.id)"
-            >
-              <div class="member-item-main">
-                <span class="member-id">#{{ member.employee_number }}</span>
-                <div class="member-info">
-                  <div class="member-name-row">
-                    <span class="member-name">{{ displayName(member) }}</span>
-                    <UiTag v-if="getIsLeader(member.id)" tone="success" size="xs" shape="rounded">{{ t('agent.departmentLeader') }}</UiTag>
-                  </div>
-                  <span class="member-dept">{{ getMemberDeptPath(member.id) }}</span>
+        <button type="button" class="choice-card choice-card--team" @click="selectTeam">
+          <div class="choice-card-content">
+            <strong>{{ t('settings.page.clearTeamData') }}</strong>
+            <p>{{ t('settings.page.teamDataNote') }}</p>
+          </div>
+          <span class="choice-card-arrow">→</span>
+        </button>
+      </div>
+
+      <!-- Mode: Personal Member Selection -->
+      <div v-else-if="mode === 'personal'" class="clear-data-personal">
+        <div class="personal-head">
+          <button type="button" class="back-button" @click="handleBack">← {{ t('common.back') }}</button>
+          <p class="personal-msg">{{ t('member.clearDataTitle') }}</p>
+        </div>
+
+        <div class="member-list">
+          <button
+            v-for="member in members"
+            :key="member.id"
+            type="button"
+            class="member-item"
+            :class="{ 'is-selected': selectedAgentId === member.id }"
+            @click="selectMember(member.id)"
+          >
+            <div class="member-item-main">
+              <span class="member-id">#{{ member.employee_number }}</span>
+              <div class="member-info">
+                <div class="member-name-row">
+                  <span class="member-name">{{ displayName(member) }}</span>
+                  <UiTag v-if="getIsLeader(member.id)" tone="success" size="xs" shape="rounded">{{ t('agent.departmentLeader') }}</UiTag>
                 </div>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        <!-- Mode: Confirm Team Data -->
-        <div v-else-if="mode === 'confirm-team'" class="clear-data-confirm">
-          <div class="personal-head">
-            <button type="button" class="back-button" @click="handleBack">← {{ t('common.back') }}</button>
-            <p class="personal-msg">{{ t('settings.page.clearTitle') }}</p>
-          </div>
-
-          <div class="confirm-body">
-            <div class="warning-box">
-              <p>{{ t('settings.page.clearMsg') }}</p>
-            </div>
-          </div>
-
-          <div class="confirm-actions">
-            <button type="button" class="ghost-button" @click="close">
-              {{ t('common.cancel') }}
-            </button>
-            <button
-              type="button"
-              class="secondary-button secondary-button--danger"
-              @click="executeClearTeamData"
-            >
-              {{ t('settings.page.clearBtn') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Mode: Confirm Personal Data -->
-        <div v-else-if="mode === 'confirm-personal'" class="clear-data-confirm">
-          <div class="personal-head">
-            <button type="button" class="back-button" @click="handleBack">← {{ t('common.back') }}</button>
-            <p class="personal-msg">{{ t('member.clearDataTitle') }}</p>
-          </div>
-
-          <div class="confirm-body">
-            <div class="warning-box warning-box--narrow">
-              <p>{{ t('member.clearDataConfirm', { name: selectedAgentName }) }}</p>
-            </div>
-            <div class="target-member">
-              <div class="target-member-content">
-                <div class="target-name-row">
-                  <strong>{{ selectedAgentName }}</strong>
-                  <UiTag v-if="selectedAgentId !== null && getIsLeader(selectedAgentId)" tone="success" size="xs" shape="rounded">{{ t('agent.departmentLeader') }}</UiTag>
-                </div>
-                <div class="target-meta">
-                  <span class="member-id">#{{ selectedAgentEmpNo }}</span>
-                  <span class="member-dept">{{ selectedAgentId !== null ? getMemberDeptPath(selectedAgentId) : '' }}</span>
-                </div>
+                <span class="member-dept">{{ getMemberDeptPath(member.id) }}</span>
               </div>
             </div>
-          </div>
+          </button>
+        </div>
+      </div>
 
-          <div class="confirm-actions">
-            <button type="button" class="ghost-button" @click="close">
-              {{ t('common.cancel') }}
-            </button>
-            <button
-              type="button"
-              class="secondary-button secondary-button--danger"
-              @click="executeClearAgentData"
-            >
-              {{ t('member.clearData') }}
-            </button>
+      <!-- Mode: Confirm Team Data -->
+      <div v-else-if="mode === 'confirm-team'" class="clear-data-confirm">
+        <div class="personal-head">
+          <button type="button" class="back-button" @click="handleBack">← {{ t('common.back') }}</button>
+          <p class="personal-msg">{{ t('settings.page.clearTitle') }}</p>
+        </div>
+
+        <div class="confirm-body">
+          <div class="warning-box">
+            <p>{{ t('settings.page.clearMsg') }}</p>
           </div>
         </div>
 
-        <div v-if="mode === 'choice' || mode === 'personal'" class="clear-data-footer">
+        <div class="confirm-actions">
           <button type="button" class="ghost-button" @click="close">
             {{ t('common.cancel') }}
           </button>
+          <button
+            type="button"
+            class="secondary-button secondary-button--danger"
+            @click="executeClearTeamData"
+          >
+            {{ t('settings.page.clearBtn') }}
+          </button>
         </div>
-      </section>
-    </div>
-  </Teleport>
+      </div>
+
+      <!-- Mode: Confirm Personal Data -->
+      <div v-else-if="mode === 'confirm-personal'" class="clear-data-confirm">
+        <div class="personal-head">
+          <button type="button" class="back-button" @click="handleBack">← {{ t('common.back') }}</button>
+          <p class="personal-msg">{{ t('member.clearDataTitle') }}</p>
+        </div>
+
+        <div class="confirm-body">
+          <div class="warning-box warning-box--narrow">
+            <p>{{ t('member.clearDataConfirm', { name: selectedAgentName }) }}</p>
+          </div>
+          <div class="target-member">
+            <div class="target-member-content">
+              <div class="target-name-row">
+                <strong>{{ selectedAgentName }}</strong>
+                <UiTag v-if="selectedAgentId !== null && getIsLeader(selectedAgentId)" tone="success" size="xs" shape="rounded">{{ t('agent.departmentLeader') }}</UiTag>
+              </div>
+              <div class="target-meta">
+                <span class="member-id">#{{ selectedAgentEmpNo }}</span>
+                <span class="member-dept">{{ selectedAgentId !== null ? getMemberDeptPath(selectedAgentId) : '' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="confirm-actions">
+          <button type="button" class="ghost-button" @click="close">
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="secondary-button secondary-button--danger"
+            @click="executeClearAgentData"
+          >
+            {{ t('member.clearData') }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="mode === 'choice' || mode === 'personal'" class="clear-data-footer">
+        <button type="button" class="ghost-button" @click="close">
+          {{ t('common.cancel') }}
+        </button>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.clear-data-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.52);
-  backdrop-filter: blur(8px);
-}
 
 .clear-data-dialog {
   width: min(480px, 100%);

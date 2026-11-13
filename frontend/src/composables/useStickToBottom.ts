@@ -1,4 +1,5 @@
 import { getCurrentInstance, onUnmounted, ref, watch, type Ref } from 'vue';
+import { createResizeObserver } from './useResizeObserver';
 
 /**
  * 「列表自动贴底」的通用实现。
@@ -55,7 +56,9 @@ export function useStickToBottom(options: UseStickToBottomOptions = {}): StickTo
   const hasNewContent = ref(false);
 
   let viewport: HTMLElement | null = null;
-  let observer: ResizeObserver | null = null;
+  // 用纯工厂而不是 `useResizeObserver`：`bind(nextViewport, content)` / `dispose()` 是
+  // 命令式的，且本 composable 允许在非组件上下文里使用（那里没有卸载钩子可挂）。
+  const contentObserver = createResizeObserver(() => notifyContentChanged());
   let removeListeners: Array<() => void> = [];
   let intentFrame: number | null = null;
   let settleFrame: number | null = null;
@@ -220,8 +223,7 @@ export function useStickToBottom(options: UseStickToBottomOptions = {}): StickTo
   }
 
   function dispose(): void {
-    observer?.disconnect();
-    observer = null;
+    contentObserver.disconnect();
     for (const off of removeListeners) {
       off();
     }
@@ -267,13 +269,10 @@ export function useStickToBottom(options: UseStickToBottomOptions = {}): StickTo
       });
     }
 
-    if (typeof ResizeObserver === 'function') {
-      observer = new ResizeObserver(() => notifyContentChanged());
-      observer.observe(nextViewport);
-      if (content) {
-        observer.observe(content);
-      }
-    }
+    // viewport 高度变化（窗口缩放、输入框高度变化）与 content 高度变化（新消息、展开）
+    // 都要复核一次「是否还贴着底」。两者共用同一个观察器，`observe(null)` 会被工厂忽略。
+    contentObserver.observe(nextViewport);
+    contentObserver.observe(content);
 
     if (following.value) {
       settleToBottom();

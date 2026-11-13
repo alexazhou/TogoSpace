@@ -7,7 +7,7 @@ import { getAgentsByTeamId, getTeamDetail } from '../api';
 import AgentActivityDialog from '../components/agent/AgentActivityDialog.vue';
 import TeamInfoCard from '../components/team/TeamInfoCard.vue';
 import TeamMembersCard from '../components/team/TeamMembersCard.vue';
-import { loadRoleTemplates } from '../realtime/runtimeStore';
+import { loadRoleTemplates } from '../realtime/runtimeActions';
 import { useRoleTemplates } from '../realtime/selectors';
 import { displayName, i18nText } from '../utils';
 import type { AgentInfo, AgentStatus, TeamDetail } from '../types';

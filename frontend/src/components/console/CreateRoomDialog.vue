@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import ModalDialog from '../ui/ModalDialog.vue';
 import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { getAgentAvatarUrl } from '../../avatar';
 import { createTeamRoom } from '../../api';
 import { showGlobalSuccessToast } from '../../appUiState';
-import { loadRoleTemplates, loadTeamAgents, loadTeamRooms } from '../../realtime/runtimeStore';
+import { loadRoleTemplates, loadTeamAgents, loadTeamRooms } from '../../realtime/runtimeActions';
 import { useRoleTemplates, useTeamAgents } from '../../realtime/selectors';
 import { displayName } from '../../utils';
 import type { AgentStatus } from '../../types';
@@ -204,82 +205,89 @@ watch(
   },
   { immediate: true },
 );
+
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open && !confirmOpen" class="create-room-overlay" @click.self="() => requestClose()">
-      <section class="create-room-dialog panel">
-        <div class="create-room-head">
-          <p class="create-room-eyebrow">Create Room</p>
-          <h3>{{ t('createRoom.title') }}</h3>
+  <ModalDialog
+    :open="open && !confirmOpen"
+    bare
+    :z-index="60"
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.52)"
+    overlay-blur="blur(8px)"
+    @close="() => requestClose()"
+  > requestClose()">
+    <section class="create-room-dialog panel">
+      <div class="create-room-head">
+        <p class="create-room-eyebrow">Create Room</p>
+        <h3>{{ t('createRoom.title') }}</h3>
+      </div>
+
+      <div v-if="errorMessage" class="create-room-error">{{ errorMessage }}</div>
+
+      <label class="create-room-field">
+        <span>{{ t('createRoom.nameLabel') }}</span>
+        <input
+          v-model="roomName"
+          type="text"
+          maxlength="64"
+          :placeholder="t('createRoom.namePlaceholder')"
+        />
+      </label>
+
+      <section class="create-room-members">
+        <div class="create-room-members-head">
+          <span>{{ t('createRoom.selectMembers') }}</span>
+          <small>{{ t('createRoom.selectedCount', { count: selectedMemberIds.length }) }}</small>
         </div>
 
-        <div v-if="errorMessage" class="create-room-error">{{ errorMessage }}</div>
+        <div v-if="loadingMembers" class="create-room-empty">
+          {{ t('createRoom.loadingMembers') }}
+        </div>
 
-        <label class="create-room-field">
-          <span>{{ t('createRoom.nameLabel') }}</span>
-          <input
-            v-model="roomName"
-            type="text"
-            maxlength="64"
-            :placeholder="t('createRoom.namePlaceholder')"
-          />
-        </label>
-
-        <section class="create-room-members">
-          <div class="create-room-members-head">
-            <span>{{ t('createRoom.selectMembers') }}</span>
-            <small>{{ t('createRoom.selectedCount', { count: selectedMemberIds.length }) }}</small>
-          </div>
-
-          <div v-if="loadingMembers" class="create-room-empty">
-            {{ t('createRoom.loadingMembers') }}
-          </div>
-
-          <div v-else-if="members.length" class="create-room-members-grid">
-            <button
-              v-for="member in members"
-              :key="member.id"
-              type="button"
-              class="create-room-member"
-              :class="{ 'is-selected': isSelected(member.id) }"
-              @click="toggleMember(member.id)"
-            >
-              <span v-if="isSelected(member.id)" class="create-room-member-check">✓</span>
-              <img
-                class="create-room-member-avatar"
-                :src="getAgentAvatarUrl(member.avatarName)"
-                :alt="`${member.name} avatar`"
-              />
-              <div class="create-room-member-body">
-                <div class="create-room-member-head">
-                  <strong>{{ member.name }}</strong>
-                </div>
-                <p>{{ member.subtitle || t('createRoom.noRole') }}</p>
-              </div>
-            </button>
-          </div>
-
-          <div v-else class="create-room-empty">
-            {{ t('createRoom.noAvailableMembers') }}
-          </div>
-        </section>
-
-        <div class="create-room-actions">
-          <button type="button" class="ghost-button" @click="() => requestClose()">{{ t('common.cancel') }}</button>
+        <div v-else-if="members.length" class="create-room-members-grid">
           <button
+            v-for="member in members"
+            :key="member.id"
             type="button"
-            class="secondary-button"
-            :disabled="submitting || !canSubmit"
-            @click="requestConfirm"
+            class="create-room-member"
+            :class="{ 'is-selected': isSelected(member.id) }"
+            @click="toggleMember(member.id)"
           >
-            {{ t('common.create') }}
+            <span v-if="isSelected(member.id)" class="create-room-member-check">✓</span>
+            <img
+              class="create-room-member-avatar"
+              :src="getAgentAvatarUrl(member.avatarName)"
+              :alt="`${member.name} avatar`"
+            />
+            <div class="create-room-member-body">
+              <div class="create-room-member-head">
+                <strong>{{ member.name }}</strong>
+              </div>
+              <p>{{ member.subtitle || t('createRoom.noRole') }}</p>
+            </div>
           </button>
         </div>
+
+        <div v-else class="create-room-empty">
+          {{ t('createRoom.noAvailableMembers') }}
+        </div>
       </section>
-    </div>
-  </Teleport>
+
+      <div class="create-room-actions">
+        <button type="button" class="ghost-button" @click="() => requestClose()">{{ t('common.cancel') }}</button>
+        <button
+          type="button"
+          class="secondary-button"
+          :disabled="submitting || !canSubmit"
+          @click="requestConfirm"
+        >
+          {{ t('common.create') }}
+        </button>
+      </div>
+    </section>
+  </ModalDialog>
 
   <ConfirmDialog
     :open="open && confirmOpen"
@@ -293,16 +301,6 @@ watch(
 </template>
 
 <style scoped>
-.create-room-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.52);
-  backdrop-filter: blur(8px);
-}
 
 .create-room-dialog {
   width: min(560px, 100%);

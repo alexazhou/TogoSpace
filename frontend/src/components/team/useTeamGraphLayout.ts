@@ -1,4 +1,5 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue';
+import { useResizeObserver } from '../../composables/useResizeObserver';
 
 type UseTeamGraphLayoutOptions = {
   readonly: Ref<boolean>;
@@ -31,7 +32,6 @@ export function useTeamGraphLayout(options: UseTeamGraphLayoutOptions) {
     right: `${railEndX.value}px`,
   }));
 
-  let resizeObserver: ResizeObserver | null = null;
   let panStartX = 0;
   let panStartY = 0;
   let panOriginX = 0;
@@ -200,24 +200,19 @@ export function useTeamGraphLayout(options: UseTeamGraphLayoutOptions) {
     zoom.value = nextZoom;
   }
 
+  // 容器尺寸变化要重算布局度量并复位平移（画布中心依赖宽高）。
+  // 两个目标一起观察：图谱容器与画布，任一变化都要重算。
+  useResizeObserver([graphRef, canvasRef], () => {
+    updateMetrics();
+    resetPan();
+  });
+
   onMounted(() => {
     updateMetrics();
     resetPan();
-    if (!graphRef.value || !canvasRef.value) {
-      return;
-    }
-
-    resizeObserver = new ResizeObserver(() => {
-      updateMetrics();
-      resetPan();
-    });
-    resizeObserver.observe(graphRef.value);
-    resizeObserver.observe(canvasRef.value);
   });
 
   onBeforeUnmount(() => {
-    resizeObserver?.disconnect();
-    resizeObserver = null;
     if (metricsFrame) {
       cancelAnimationFrame(metricsFrame);
       metricsFrame = 0;

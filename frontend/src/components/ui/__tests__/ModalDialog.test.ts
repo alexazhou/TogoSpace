@@ -78,4 +78,57 @@ describe('ModalDialog', () => {
     await inner.click();
     expect(wrapper.emitted('close')).toBeFalsy();
   });
+
+  // bare 变体：只提供遮罩 + 插槽 + 遮罩自点击关闭，不渲染 dialog 包裹层与 head。
+  // 用于存量弹窗迁移（面板样式留在调用方），因此必须断言「不多渲染任何东西」，
+  // 否则会给迁移过去的弹窗凭空加一层 padding/圆角/边框。
+  it('bare 只渲染遮罩，不渲染 dialog 包裹层与 head', () => {
+    mount(ModalDialog, {
+      props: { open: true, bare: true, title: 'Should Not Render' },
+      slots: { default: '<section class="own-panel">body</section>' },
+    });
+    const overlay = queryOverlay()!;
+    expect(overlay).not.toBeNull();
+    expect(overlay.querySelector('.ui-modal__dialog')).toBeNull();
+    expect(overlay.querySelector('.ui-modal__head')).toBeNull();
+    expect(overlay.querySelector('.ui-modal__close')).toBeNull();
+    // 插槽内容必须是遮罩的直接子节点（中间不能多一层容器）
+    expect(overlay.firstElementChild!.className).toBe('own-panel');
+  });
+
+  it('bare 把 overlay 契约（padding/背景/blur/zIndex）落到遮罩上', () => {
+    mount(ModalDialog, {
+      props: {
+        open: true,
+        bare: true,
+        zIndex: 120,
+        overlayPadding: '28px',
+        overlayBackground: 'rgba(6, 10, 16, 0.52)',
+        overlayBlur: 'blur(8px)',
+      },
+    });
+    const overlay = queryOverlay()!;
+    expect(overlay.style.padding).toBe('28px');
+    expect(overlay.style.zIndex).toBe('120');
+    expect(overlay.style.background).toContain('rgba(6, 10, 16, 0.52)');
+  });
+
+  it('未传 overlay 契约时不往遮罩写 padding/background/backdrop-filter（默认路径零变化）', () => {
+    mount(ModalDialog, { props: { open: true, bare: true } });
+    const ov = queryOverlay()!;
+    expect(ov.style.padding).toBe('');
+    expect(ov.style.background).toBe('');
+    expect(ov.style.backdropFilter).toBe('');
+  });
+
+  it('bare 仍保留「遮罩自点击关闭 / 点内容不关闭」', async () => {
+    const wrapper = mount(ModalDialog, {
+      props: { open: true, bare: true },
+      slots: { default: '<section class="own-panel">body</section>' },
+    });
+    await (queryOverlay()!.querySelector('.own-panel') as HTMLElement).click();
+    expect(wrapper.emitted('close')).toBeFalsy();
+    queryOverlay()!.click();
+    expect(wrapper.emitted('close')).toBeTruthy();
+  });
 });

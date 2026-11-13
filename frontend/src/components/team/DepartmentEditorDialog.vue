@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ModalDialog from '../ui/ModalDialog.vue';
 import { useI18n } from 'vue-i18n';
 
 defineProps<{
@@ -17,69 +18,66 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="department-editor-overlay" @click.self="emit('close')">
-      <section
-        class="department-editor-dialog panel"
-        :class="{ 'department-editor-dialog--readonly': !editable }"
-      >
-        <div class="department-editor-head">
-          <div class="department-editor-title-row">
-            <h2 class="department-editor-title">{{ editable ? t('dept.editTitle') : t('dept.viewTitle') }}</h2>
-            <p class="section-eyebrow">{{ t('dept.eyebrow') }}</p>
-          </div>
-          <p class="department-editor-meta">{{ t('dept.manager', { name: memberName }) }}</p>
+  <ModalDialog
+    :open="open"
+    bare
+    :z-index="50"
+    overlay-padding="28px"
+    overlay-background="rgba(6, 10, 16, 0.44)"
+    overlay-blur="blur(8px)"
+    @close="emit('close')"
+  >
+    <section
+      class="department-editor-dialog panel"
+      :class="{ 'department-editor-dialog--readonly': !editable }"
+    >
+      <div class="department-editor-head">
+        <div class="department-editor-title-row">
+          <h2 class="department-editor-title">{{ editable ? t('dept.editTitle') : t('dept.viewTitle') }}</h2>
+          <p class="section-eyebrow">{{ t('dept.eyebrow') }}</p>
         </div>
+        <p class="department-editor-meta">{{ t('dept.manager', { name: memberName }) }}</p>
+      </div>
 
-        <label class="department-editor-field">
-          <span>{{ t('dept.name') }}</span>
-          <input
-            :value="departmentName"
-            class="department-editor-input"
-            :class="{ 'department-editor-input--readonly': !editable }"
-            type="text"
-            :placeholder="editable ? t('dept.namePlaceholderEditable') : ''"
-            :readonly="!editable"
-            @input="emit('update:departmentName', ($event.target as HTMLInputElement).value)"
-          />
-        </label>
+      <label class="department-editor-field">
+        <span>{{ t('dept.name') }}</span>
+        <input
+          :value="departmentName"
+          class="department-editor-input"
+          :class="{ 'department-editor-input--readonly': !editable }"
+          type="text"
+          :placeholder="editable ? t('dept.namePlaceholderEditable') : ''"
+          :readonly="!editable"
+          @input="emit('update:departmentName', ($event.target as HTMLInputElement).value)"
+        />
+      </label>
 
-        <label class="department-editor-field">
-          <span>{{ t('dept.responsibility') }}</span>
-          <textarea
-            :value="departmentResponsibility"
-            class="department-editor-input department-editor-textarea"
-            :class="{ 'department-editor-input--readonly': !editable }"
-            rows="4"
-            :placeholder="editable ? t('dept.responsibilityPlaceholderEditable') : ''"
-            :readonly="!editable"
-            @input="emit('update:departmentResponsibility', ($event.target as HTMLTextAreaElement).value)"
-          ></textarea>
-        </label>
+      <label class="department-editor-field">
+        <span>{{ t('dept.responsibility') }}</span>
+        <textarea
+          :value="departmentResponsibility"
+          class="department-editor-input department-editor-textarea"
+          :class="{ 'department-editor-input--readonly': !editable }"
+          rows="4"
+          :placeholder="editable ? t('dept.responsibilityPlaceholderEditable') : ''"
+          :readonly="!editable"
+          @input="emit('update:departmentResponsibility', ($event.target as HTMLTextAreaElement).value)"
+        ></textarea>
+      </label>
 
-        <div class="department-editor-actions">
-          <button type="button" class="ghost-button" @click="emit('close')">{{ editable ? t('common.cancel') : t('common.close') }}</button>
-          <button v-if="editable" type="button" class="secondary-button" @click="emit('save')">{{ t('common.save') }}</button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
+      <div class="department-editor-actions">
+        <button type="button" class="ghost-button" @click="emit('close')">{{ editable ? t('common.cancel') : t('common.close') }}</button>
+        <button v-if="editable" type="button" class="secondary-button" @click="emit('save')">{{ t('common.save') }}</button>
+      </div>
+    </section>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.department-editor-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 28px;
-  background: rgba(6, 10, 16, 0.44);
-  backdrop-filter: blur(8px);
-}
 
 .department-editor-dialog {
   width: min(520px, 100%);

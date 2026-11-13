@@ -4,8 +4,8 @@ import {
   loadRoomMessagesState,
   loadTeamAgents,
   loadTeamRooms,
-  setActiveRealtimeContext,
-} from '../realtime/runtimeStore';
+} from '../realtime/runtimeActions';
+import { setActiveRealtimeContext } from '../realtime/runtimeStore';
 import { useRoomMessageHistory, useRoomMessages, useTeamAgents, useTeamRooms } from '../realtime/selectors';
 import type { AgentInfo, RoomState } from '../types';
 

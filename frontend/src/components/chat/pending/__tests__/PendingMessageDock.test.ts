@@ -1,31 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import PendingMessageDock from '../PendingMessageDock.vue';
 import i18n from '../../../../i18n';
 import type { MessageInfo } from '../../../../types';
 import type { PendingMessageItem } from '../types';
-
-/**
- * happy-dom 没有 ResizeObserver。这里用可手动触发的假实现，才能把卡片推进到
- * 「已截断」状态（截断判定是 scrollWidth > clientWidth 的几何量测）。
- */
-class FakeResizeObserver {
-  static instances: FakeResizeObserver[] = [];
-
-  callback: ResizeObserverCallback;
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback;
-    FakeResizeObserver.instances.push(this);
-  }
-
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-  trigger(): void {
-    this.callback([], this as unknown as ResizeObserver);
-  }
-}
+// 假 ResizeObserver 已收敛到 src/__tests__/testMocks.ts（原先两个测试文件各写一份）
+import { installFakeResizeObserver, triggerAllResizeObservers } from '../../../../__tests__/testMocks';
 
 /** 把所有卡片的预览行都标记为「已截断」，使它们可点击展开。 */
 function markAllTruncated(wrapper: ReturnType<typeof mount>): void {
@@ -34,7 +14,7 @@ function markAllTruncated(wrapper: ReturnType<typeof mount>): void {
     Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 400 });
     Object.defineProperty(el, 'clientWidth', { configurable: true, value: 100 });
   });
-  FakeResizeObserver.instances.forEach((observer) => observer.trigger());
+  triggerAllResizeObservers();
 }
 
 function createItem(index: number, overrides: Partial<PendingMessageItem> = {}): PendingMessageItem {
@@ -68,8 +48,7 @@ function mountDock(items: PendingMessageItem[], extra: Record<string, unknown> =
 }
 
 beforeEach(() => {
-  FakeResizeObserver.instances = [];
-  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  installFakeResizeObserver();
 });
 
 describe('PendingMessageDock 折叠', () => {
