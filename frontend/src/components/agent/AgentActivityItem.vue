@@ -3,9 +3,12 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getTeamRooms } from '../../realtime/runtimeStore';
 import type { AgentActivity } from '../../types';
-import MarkdownContent from '../ui/MarkdownContent.vue';
 import { useResizeObserver } from '../../composables/useResizeObserver';
 import AgentActivityToken from './AgentActivityToken.vue';
+import ActivityBashResult from './activity/ActivityBashResult.vue';
+import ActivityChatReply from './activity/ActivityChatReply.vue';
+import ActivityReceivedMessages from './activity/ActivityReceivedMessages.vue';
+import ActivityToolResult from './activity/ActivityToolResult.vue';
 import {
   buildActivityView,
   resolveTaskRoomNameFromRooms,
@@ -201,64 +204,37 @@ const activityView = computed(() => buildActivityView({
       class="agent-activity-item__chat-reply-toggle agent-activity-item__reasoning-toggle"
       @click="toggleReasoning"
     >{{ reasoningCollapsed ? t('common.expand') : t('common.collapse') }}</button>
-    <template v-if="activityView.sendChatMsgContent && !activityView.sendChatMsgError">
-      <div
-        class="agent-activity-item__chat-reply"
-        :class="{ 'agent-activity-item__chat-reply--collapsed': chatReplyCollapsed && activityView.sendChatMsgTruncated }"
-      >
-        <MarkdownContent :content="activityView.sendChatMsgContent" />
-      </div>
-      <button
-        v-if="activityView.sendChatMsgTruncated"
-        type="button"
-        class="agent-activity-item__chat-reply-toggle"
-        @click="chatReplyCollapsed = !chatReplyCollapsed"
-      >{{ chatReplyCollapsed ? t('common.expand') : t('common.collapse') }}</button>
-    </template>
+    <ActivityChatReply
+      v-if="activityView.sendChatMsgContent && !activityView.sendChatMsgError"
+      :content="activityView.sendChatMsgContent"
+      :collapsed="chatReplyCollapsed"
+      :collapsible="activityView.sendChatMsgTruncated"
+      @toggle="chatReplyCollapsed = !chatReplyCollapsed"
+    />
     <p v-if="activityView.sendChatMsgError" class="agent-activity-item__error">调用失败：{{ activityView.sendChatMsgError }}</p>
     <p v-if="activityView.showRetryErrorMessage" class="agent-activity-item__error">{{ activityView.retryErrorText }}</p>
-    <template v-if="activityView.executeBashResult">
-      <p
-        v-if="activityView.executeBashCommand"
-        class="agent-activity-item__tool-result agent-activity-item__tool-result--code"
-      >{{ activityView.executeBashCommand }}</p>
-      <p
-        v-if="activityView.stdout"
-        class="agent-activity-item__tool-result agent-activity-item__tool-result--stdout"
-      >{{ activityView.stdout }}</p>
-      <p
-        v-if="activityView.stderr"
-        class="agent-activity-item__tool-result agent-activity-item__tool-result--stderr"
-      >{{ activityView.stderr }}</p>
-    </template>
-    <template v-else>
-      <p
-        v-if="activityView.expandedToolResult"
-        class="agent-activity-item__tool-result"
-      >{{ activityView.toolResult }}</p>
-    </template>
-    <template v-if="activity.activity_type === 'message_received' && activityView.receivedMessages.length > 0">
-      <p
-        v-for="(msg, idx) in activityView.receivedMessages"
-        :key="idx"
-        class="agent-activity-item__received-message"
-      ><span class="agent-activity-item__received-sender">{{ msg.sender }}:</span> {{ msg.content }}</p>
-    </template>
+    <ActivityBashResult
+      v-if="activityView.executeBashResult"
+      :command="activityView.executeBashCommand"
+      :stdout="activityView.stdout"
+      :stderr="activityView.stderr"
+    />
+    <ActivityToolResult
+      v-else-if="activityView.expandedToolResult"
+      :content="activityView.toolResult"
+    />
+    <ActivityReceivedMessages
+      v-if="activity.activity_type === 'message_received' && activityView.receivedMessages.length > 0"
+      :messages="activityView.receivedMessages"
+    />
     <p v-if="activityView.showErrorMessage" class="agent-activity-item__error">{{ activity.error_message }}</p>
-    <template v-if="activityView.chatReplyContent">
-      <div
-        class="agent-activity-item__chat-reply"
-        :class="{ 'agent-activity-item__chat-reply--collapsed': chatReplyCollapsed && activityView.chatReplyIsLong }"
-      >
-        <MarkdownContent :content="activityView.chatReplyContent" />
-      </div>
-      <button
-        v-if="activityView.chatReplyIsLong"
-        type="button"
-        class="agent-activity-item__chat-reply-toggle"
-        @click="chatReplyCollapsed = !chatReplyCollapsed"
-      >{{ chatReplyCollapsed ? t('common.expand') : t('common.collapse') }}</button>
-    </template>
+    <ActivityChatReply
+      v-if="activityView.chatReplyContent"
+      :content="activityView.chatReplyContent"
+      :collapsed="chatReplyCollapsed"
+      :collapsible="activityView.chatReplyIsLong"
+      @toggle="chatReplyCollapsed = !chatReplyCollapsed"
+    />
   </article>
 </template>
 
@@ -611,11 +587,11 @@ const activityView = computed(() => buildActivityView({
 }
 
 .agent-activity-item[data-status='failed'] .agent-activity-item__tool-result,
-.agent-activity-item[data-status='failed'] .agent-activity-item__received-message {
+.agent-activity-item[data-status='failed'] :deep(.agent-activity-item__received-message) {
   color: var(--danger);
 }
 
-.agent-activity-item[data-status='failed'] .agent-activity-item__tool-result--code {
+.agent-activity-item[data-status='failed'] :deep(.agent-activity-item__tool-result--code) {
   color: var(--danger);
 }
 
@@ -627,15 +603,15 @@ const activityView = computed(() => buildActivityView({
   color: var(--danger);
 }
 
-.agent-activity-item[data-status='failed'].agent-activity-item--bash-result .agent-activity-item__tool-result--code {
+.agent-activity-item[data-status='failed'].agent-activity-item--bash-result :deep(.agent-activity-item__tool-result--code) {
   color: var(--danger);
 }
 
-.agent-activity-item[data-status='failed'].agent-activity-item--bash-result .agent-activity-item__tool-result--stdout {
+.agent-activity-item[data-status='failed'].agent-activity-item--bash-result :deep(.agent-activity-item__tool-result--stdout) {
   color: var(--danger);
 }
 
-.agent-activity-item[data-status='failed'] .agent-activity-item__received-sender {
+.agent-activity-item[data-status='failed'] :deep(.agent-activity-item__received-sender) {
   color: var(--danger);
 }
 
@@ -710,7 +686,7 @@ const activityView = computed(() => buildActivityView({
   text-overflow: ellipsis;
 }
 
-.agent-activity-item__tool-result {
+:deep(.agent-activity-item__tool-result) {
   margin: 0;
   padding-left: 22px;
   color: var(--text);
@@ -724,12 +700,12 @@ const activityView = computed(() => buildActivityView({
   word-break: break-all;
 }
 
-.agent-activity-item__tool-result--description {
+:deep(.agent-activity-item__tool-result--description) {
   display: block;
   -webkit-line-clamp: unset;
 }
 
-.agent-activity-item__tool-result--code {
+:deep(.agent-activity-item__tool-result--code) {
   display: block;
   -webkit-line-clamp: unset;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -737,15 +713,15 @@ const activityView = computed(() => buildActivityView({
   color: var(--muted);
 }
 
-.agent-activity-item__tool-result--stdout {
+:deep(.agent-activity-item__tool-result--stdout) {
   color: var(--text);
 }
 
-.agent-activity-item__tool-result--stderr {
+:deep(.agent-activity-item__tool-result--stderr) {
   color: var(--danger);
 }
 
-.agent-activity-item__received-message {
+:deep(.agent-activity-item__received-message) {
   margin: 0;
   padding-left: 22px;
   color: var(--text);
@@ -759,13 +735,13 @@ const activityView = computed(() => buildActivityView({
   -webkit-line-clamp: 3;
 }
 
-.agent-activity-item__received-sender {
+:deep(.agent-activity-item__received-sender) {
   font-weight: 600;
   color: var(--text-strong);
   margin-right: 4px;
 }
 
-.agent-activity-item__chat-reply {
+:deep(.agent-activity-item__chat-reply) {
   padding-left: 22px;
   padding-right: 4px;
   font-size: 0.8rem;
@@ -808,13 +784,13 @@ const activityView = computed(() => buildActivityView({
   overflow: hidden;
 }
 
-.agent-activity-item__chat-reply--collapsed {
+:deep(.agent-activity-item__chat-reply--collapsed) {
   max-height: 7.5em;
   overflow: hidden;
   position: relative;
 }
 
-.agent-activity-item__chat-reply--collapsed::after {
+:deep(.agent-activity-item__chat-reply--collapsed)::after {
   content: '';
   position: absolute;
   bottom: 0;
@@ -825,7 +801,7 @@ const activityView = computed(() => buildActivityView({
   pointer-events: none;
 }
 
-.agent-activity-item__chat-reply-toggle {
+:deep(.agent-activity-item__chat-reply-toggle) {
   background: none;
   border: none;
   color: var(--accent);
@@ -835,7 +811,7 @@ const activityView = computed(() => buildActivityView({
   line-height: 1.4;
 }
 
-.agent-activity-item__chat-reply-toggle:hover {
+:deep(.agent-activity-item__chat-reply-toggle:hover) {
   text-decoration: underline;
 }
 
