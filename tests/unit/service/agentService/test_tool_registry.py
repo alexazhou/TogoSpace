@@ -411,8 +411,10 @@ EXPECTED_TOOL_CATEGORIES = {
     "send_chat_msg": ToolCategory.BASIC,
     "start_chat": ToolCategory.BASIC,
     "update_task": ToolCategory.BASIC,
-    # #203：容器说明修改走 console（`container note`），与其它容器工具同属执行类。
-    "update_container_note": ToolCategory.EXECUTE,
+    # #209：容器说明修改走 console（`container note`），归 ADMIN —— note 是「给人看的
+    # 说明」，设计意图是人在控制台整理；归 EXECUTE 会让普通成员经 console 第 2 跳改掉
+    # 自己容器的 note（#209 修 F1）。与另外 5 个容器工具（EXECUTE）不同是有意的。
+    "update_container_note": ToolCategory.ADMIN,
     "wake_up_agent": ToolCategory.BASIC,
     "web_search": ToolCategory.READ,
     # #191：webfetch 与 web_search 同属只读联网能力，归 READ。

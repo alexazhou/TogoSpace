@@ -57,11 +57,21 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "exit_to_host": ToolCategory.EXECUTE,
     "list_containers": ToolCategory.EXECUTE,
     "delete_container": ToolCategory.EXECUTE,
-    # 改容器说明（#203）：由 `container note` 转发，模型面不可见（CONSOLE_ONLY）。
-    # 分类照旧是执行类 —— 它改的是自己名下容器的元数据，落在同一权限域里；
-    # 真正的「模型不可见」由 `funcToolService.core._CONTAINER_TOOL_VISIBILITY` 表达，
-    # 这里只回答「要不要 Admin」。
-    "update_container_note": ToolCategory.EXECUTE,
+    # 改容器说明（#203 引入，#209 改类目）：由 `container note` 转发，模型面不可见。
+    #
+    # 归 ADMIN 而**不是** EXECUTE（#209 修 F1）：note 是「给人看的历史信息」，不是
+    # 模型可自选的标签 —— `funcToolService/core.py` 与 `tools.create_container`
+    # 的 docstring 都明写「创建后如需修改，由人在管理控制台用 `container note` 调整」。
+    # 类目归 EXECUTE 时，普通成员的权限面含 `Category:Execute`，于是 console 第 2 跳
+    # 的 `enabled` 判定放行，模型能把自己容器的用途说明改成任意内容（#209 实测）。
+    #
+    # 只靠 `CONSOLE_ONLY` 挡不住：可见性管「从哪个入口进」，类目管「进得去之后
+    # 有没有权限」。两者正交，缺任一条都不成立 —— `CONSOLE_ONLY` 只是让模型**看不见**
+    # 这个工具名，而 console 是普通成员可用的 BASIC 入口，转发目标仍按自己的类目判定。
+    #
+    # 与另外 5 个容器工具（EXECUTE）不同是有意的：那些改的是执行环境本身，
+    # 属于 Agent 的正当自治范围；note 是**人**写的说明，不是执行动作。
+    "update_container_note": ToolCategory.ADMIN,
     "reload_team": ToolCategory.ADMIN,
     "list_role_templates": ToolCategory.ADMIN,
     "get_role_template": ToolCategory.ADMIN,
