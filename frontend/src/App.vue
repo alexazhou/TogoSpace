@@ -49,7 +49,11 @@ const { t } = useI18n();
 
 // 主题名会落盘，读的时候可能遇到无痕模式 / 存量脏数据，统一走安全存取。
 const themeStorage = useLocalStorageState<ThemeMode>(THEME_STORAGE_KEY);
-const themeMode = ref<ThemeMode>(themeStorage.read() ?? 'dark');
+// 这里必须用 `||` 而不是 `??`：改造前是 `getItem(...) || 'dark'`，**空串也会落到 'dark'**。
+// 用 `??` 会让存量空串保留为 `''`，`data-theme` 就从 "dark" 变成 ""——视觉上碰巧还是暗色
+// （`:root:not([data-theme='light'])` 仍命中），但属性值变了就是行为变了，不能拿「今天看不出差别」
+// 当等价证据。
+const themeMode = ref<ThemeMode>(themeStorage.read() || 'dark');
 
 const teamIdFromRoute = computed<number | null>(() => {
   const raw = route.params.teamId;
