@@ -1,0 +1,1500 @@
+<!--
+  ⚠️ 金标准快照（oracle），**不要编辑、不要在业务里引用**。
+  来源：`git show 72fd5444:frontend/src/components/agent/AgentActivityItem.vue`
+  用途：`__tests__/activityDomEquivalence.test.ts` 用它当「拆分前」的对照，
+        对 20 组 activity 逐字符比对渲染出的 DOM，证明 #213 的拆分没有改变输出。
+  与被测对象的关系：这是**参照物**，不是被测代码的副本（拆分后真实组件仍是唯一实现）。
+  维护约定：本分支合并后若后续再改 AgentActivityItem 的正常渲染，可删除本文件与对应测试。
+-->
+<script setup lang="ts">
+import { computed, nextTick, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { getTeamRooms } from '../../realtime/runtimeStore';
+import type { AgentActivity } from '../../types';
+import { displayName, stripAnsi } from '../../utils';
+import MarkdownContent from '../ui/MarkdownContent.vue';
+import { useResizeObserver } from '../../composables/useResizeObserver';
+import AgentActivityToken from './AgentActivityToken.vue';
+
+const { t } = useI18n();
+
+const props = defineProps<{
+  activity: AgentActivity;
+}>();
+
+// 发言内容（send_chat_msg / chat_reply）默认展开，长内容仍可手动收起。
+const chatReplyCollapsed = ref(false);
+// 思考内容默认只露出三行，可展开看全文。
+const reasoningCollapsed = ref(true);
+const reasoningBodyRef = ref<HTMLElement | null>(null);
+const reasoningOverflows = ref(false);
+
+/**
+ * 判断思考内容是否确实被三行裁掉了（决定要不要给「展开」按钮）。
+ *
+ * 有布局时按真实溢出判断；无布局环境（jsdom / 首帧）`clientHeight` 为 0，
+ * 退回字数启发式，避免出现「被裁掉却没有展开入口」的情况。
+ */
+function measureReasoningOverflow(): void {
+  const el = reasoningBodyRef.value;
+  if (!el) {
+    reasoningOverflows.value = false;
+    return;
+  }
+  // 展开态不做判定：此时 scrollHeight == clientHeight，会误把按钮撤掉，导致收不回去。
+  if (!reasoningCollapsed.value) {
+    return;
+  }
+  if (el.clientHeight === 0) {
+    const content = props.activity.activity_type === 'reasoning' ? props.activity.detail.trim() : '';
+    reasoningOverflows.value = content.split('\n').length > 3 || content.length > 120;
+    return;
+  }
+  reasoningOverflows.value = el.scrollHeight - el.clientHeight > 1;
+}
+
+function toggleReasoning(): void {
+  reasoningCollapsed.value = !reasoningCollapsed.value;
+}
+
+// 思考内容块是 `v-if` 渲染的、节点会换新，所以交给 `useResizeObserver` 跟随 ref：
+// ref 换成新节点时会自动重挂，组件卸载时自动清理。
+useResizeObserver(reasoningBodyRef, () => measureReasoningOverflow());
+
+watch(
+  [() => props.activity, reasoningBodyRef, reasoningCollapsed],
+  async () => {
+    await nextTick();
+    measureReasoningOverflow();
+  },
+  { immediate: true },
+);
+
+function readTrimmedString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function safeTrimEnd(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\s+$/, '') : '';
+}
+
+function formatActivityTime(value: string | null | undefined): string {
+  if (!value) {
+    return '';
+  }
+  return value.replace('T', ' ').slice(0, 19);
+}
+
+function formatDuration(durationMs: number | null | undefined): string {
+  if (durationMs == null || Number.isNaN(durationMs) || durationMs < 0) {
+    return '0ms';
+  }
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+  return `${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)}s`;
+}
+
+const toolName = computed(() => {
+  const metadataToolName = props.activity.metadata?.tool_name;
+  if (typeof metadataToolName === 'string' && metadataToolName.trim()) {
+    return metadataToolName.trim();
+  }
+  const detail = props.activity.detail.trim();
+  return props.activity.activity_type === 'tool_call' ? detail : '';
+});
+
+const roomName = computed(() => {
+  // send_chat_msg 的目标房间存放在 tool_arguments.room_name
+  const toolArguments = props.activity.metadata?.tool_arguments;
+  if (toolArguments && typeof toolArguments === 'object') {
+    const argRoomName = (toolArguments as { room_name?: unknown }).room_name;
+    if (typeof argRoomName === 'string' && argRoomName.trim()) {
+      return argRoomName.trim();
+    }
+  }
+  return '';
+});
+
+function activityStatusSymbol(status: AgentActivity['status']): string {
+  if (status === 'started') {
+    return '●';
+  }
+  if (status === 'succeeded') {
+    return '✓';
+  }
+  return '×';
+}
+
+function shouldShowToolName(activity: AgentActivity): boolean {
+  return activity.activity_type === 'tool_call'
+    && toolName.value !== 'send_chat_msg'
+    && toolName.value !== 'create_task'
+    && toolName.value !== 'update_task'
+    && toolName.value !== 'finish_action'
+    && toolName.value !== 'start_chat'
+    && toolName.value.length > 0;
+}
+
+function displayToolName(toolNameValue: string): string {
+  if (!toolNameValue) {
+    return '';
+  }
+  const i18nKey = `agent.toolNames.${toolNameValue}`;
+  const translated = t(i18nKey);
+  // 如果翻译后的内容包含 key 路径，说明没有定义翻译，回退到原始名称
+  return translated !== i18nKey ? translated : toolNameValue;
+}
+
+function activityTitle(activity: AgentActivity): string {
+  if (activity.activity_type === 'agent_state') {
+    const detail = activity.detail.trim().toUpperCase();
+    if (detail === 'ACTIVE') {
+      return t('agent.activityType.startActivity');
+    }
+    if (detail === 'IDLE') {
+      return t('agent.activityType.stopAction');
+    }
+  }
+
+  if (activity.activity_type === 'tool_call') {
+    if (toolName.value === 'send_chat_msg') {
+      return t('agent.activityType.sendMessage');
+    }
+    if (toolName.value === 'create_task') {
+      return t('agent.activityType.createTask');
+    }
+    if (toolName.value === 'update_task') {
+      return t('agent.activityType.updateTask');
+    }
+    if (toolName.value === 'finish_action') {
+      return t('agent.activityType.finishAction');
+    }
+    if (toolName.value === 'start_chat') {
+      return t('agent.activityType.startChat');
+    }
+  }
+
+  switch (activity.activity_type) {
+    case 'agent_state':
+      return t('agent.activityType.agentState');
+    case 'llm_infer':
+      return t('agent.activityType.llmInfer');
+    case 'reasoning':
+      return t('agent.activityType.reasoning');
+    case 'chat_reply':
+      return t('agent.activityType.chatReply');
+    case 'tool_call':
+      return t('agent.activityType.toolCall');
+    case 'compact':
+      return t('agent.activityType.compact');
+    case 'message_received':
+      return t('agent.activityType.messageReceived');
+    case 'task_received':
+      return t('agent.activityType.taskReceived');
+    case 'unknown':
+      return t('agent.activityType.unknown');
+    default:
+      return t('agent.activityType.unknown');
+  }
+}
+
+function getActivityTaskTitle(activity: AgentActivity): string {
+  if (activity.activity_type === 'task_received') {
+    return readTrimmedString(activity.detail);
+  }
+
+  const toolNameValue = toolName.value;
+  if (toolNameValue !== 'create_task' && toolNameValue !== 'update_task') {
+    return '';
+  }
+
+  // 优先从 tool_result 中取（后端通常会返回最新的 task 对象）
+  const toolResult = activity.metadata?.tool_result;
+  if (toolResult && typeof toolResult === 'object') {
+    // 兼容两种格式：直接在 result 中，或在 result.task 中
+    const title = readTrimmedString((toolResult as { title?: unknown }).title)
+      || readTrimmedString((toolResult as { task?: { title?: unknown } }).task?.title);
+    if (title) {
+      return title;
+    }
+  }
+
+  // 兜底：如果是 create_task，可以从参数里取
+  if (toolNameValue === 'create_task') {
+    const toolArguments = activity.metadata?.tool_arguments;
+    if (toolArguments && typeof toolArguments === 'object') {
+      const title = readTrimmedString((toolArguments as { title?: unknown }).title);
+      if (title) {
+        return title;
+      }
+    }
+  }
+
+  return '';
+}
+
+function getReceivedMessages(activity: AgentActivity): Array<{ sender: string; content: string }> {
+  const messages = activity.metadata?.messages;
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+  return messages.filter(
+    (m): m is { sender: string; content: string } =>
+      m != null && typeof m.sender === 'string' && typeof m.content === 'string',
+  );
+}
+
+function getActivityToolCommand(activity: AgentActivity): string {
+  const command = activity.metadata?.command;
+  return typeof command === 'string' ? command : '';
+}
+
+function getExecuteBashDescription(activity: AgentActivity): string {
+  if (activity.activity_type !== 'tool_call' || toolName.value !== 'execute_bash') {
+    return '';
+  }
+  const toolArguments = activity.metadata?.tool_arguments;
+  if (!toolArguments || typeof toolArguments !== 'object') {
+    return '';
+  }
+  return readTrimmedString((toolArguments as { description?: unknown }).description);
+}
+
+function getActivityToolArguments(activity: AgentActivity): string {
+  const toolArguments = activity.metadata?.tool_arguments;
+  if (toolArguments == null) {
+    return '';
+  }
+
+  if (typeof toolArguments !== 'object' || toolArguments === null) {
+    return t('agent.parseFailed');
+  }
+
+  if (toolName.value === 'execute_bash') {
+    const command = readTrimmedString((toolArguments as { command?: unknown }).command);
+    if (command) {
+      return command;
+    }
+  }
+
+  if (toolName.value === 'write_file' || toolName.value === 'read_file' || toolName.value === 'edit') {
+    const filePath = readTrimmedString((toolArguments as { file_path?: unknown }).file_path);
+    if (filePath) {
+      return filePath;
+    }
+  }
+
+  if (toolName.value === 'create_container') {
+    const image = readTrimmedString((toolArguments as { image?: unknown }).image);
+    return image || '';
+  }
+
+  if (toolName.value === 'enter_container') {
+    return readTrimmedString((toolArguments as { container_id?: unknown }).container_id);
+  }
+
+  if (toolName.value === 'list_containers' || toolName.value === 'exit_to_host') {
+    return '';
+  }
+
+  if (toolName.value === 'get_time') {
+    return readTrimmedString((toolArguments as { timezone?: unknown }).timezone);
+  }
+
+  if (toolName.value === 'get_room_info') {
+    return readTrimmedString((toolArguments as { room_name?: unknown }).room_name);
+  }
+
+  // 无参数工具不展示 `{}`，避免活动行出现无意义的参数胶囊。
+  if (Object.keys(toolArguments as Record<string, unknown>).length === 0) {
+    return '';
+  }
+
+  return JSON.stringify(toolArguments);
+}
+
+function getSendMessageContent(activity: AgentActivity): string {
+  const toolArguments = activity.metadata?.tool_arguments;
+  if (toolArguments == null || typeof toolArguments !== 'object') {
+    return toolArguments == null ? '' : t('agent.parseFailed');
+  }
+
+  const candidate = toolArguments as { msg?: unknown; content?: unknown; text?: unknown };
+  const message = [candidate.msg, candidate.content, candidate.text]
+    .map((item) => readTrimmedString(item))
+    .find(Boolean);
+  return message || t('agent.parseFailed');
+}
+
+function getSendMessagePrefix(): string {
+  if (!roomName.value) {
+    return '';
+  }
+  return t('agent.sendToRoomPrefix', { room: roomName.value });
+}
+
+function getStartChatTarget(): string {
+  if (toolName.value !== 'start_chat') {
+    return '';
+  }
+  const toolArguments = props.activity.metadata?.tool_arguments;
+  if (!toolArguments || typeof toolArguments !== 'object') {
+    return '';
+  }
+  const agentName = readTrimmedString((toolArguments as { agent_name?: unknown }).agent_name);
+  return agentName ? t('agent.startChatTarget', { agent: agentName }) : '';
+}
+
+function getTaskRoomDisplayName(activity: AgentActivity): string {
+  const taskRoomId = activity.metadata?.task_room_id;
+  if (typeof taskRoomId !== 'number') {
+    return '';
+  }
+  const room = getTeamRooms(activity.team_id).find((item) => item.room_id === taskRoomId);
+  if (!room) {
+    return '';
+  }
+  return displayName({ name: room.room_name, i18n: room.i18n });
+}
+
+function getTaskRoomLabel(activity: AgentActivity): string {
+  if (
+    activity.activity_type !== 'message_received'
+    && !(activity.activity_type === 'tool_call' && toolName.value === 'finish_action')
+  ) {
+    return '';
+  }
+  const taskRoomName = getTaskRoomDisplayName(activity);
+  if (!taskRoomName) {
+    return '';
+  }
+  return t('agent.finishActionRoomLabel', { room: taskRoomName });
+}
+
+function getExecuteBashStdout(activity: AgentActivity): string {
+  const toolResult = activity.metadata?.tool_result;
+  if (!toolResult || typeof toolResult !== 'object') {
+    return '';
+  }
+  return stripAnsi(safeTrimEnd((toolResult as { stdout?: unknown }).stdout));
+}
+
+function getExecuteBashStderr(activity: AgentActivity): string {
+  const toolResult = activity.metadata?.tool_result;
+  if (!toolResult || typeof toolResult !== 'object') {
+    return '';
+  }
+  return stripAnsi(safeTrimEnd((toolResult as { stderr?: unknown }).stderr));
+}
+
+function getExecuteBashExitCode(activity: AgentActivity): string {
+  const toolResult = activity.metadata?.tool_result;
+  if (!toolResult || typeof toolResult !== 'object') {
+    return '';
+  }
+  const exitCode = (toolResult as { exit_code?: unknown }).exit_code;
+  return typeof exitCode === 'number' ? `return_code=${exitCode}` : '';
+}
+
+function getActivityToolResult(activity: AgentActivity): string {
+  if (toolName.value === 'execute_bash') {
+    return [getExecuteBashStdout(activity), getExecuteBashStderr(activity)].filter(Boolean).join('\n');
+  }
+
+  if (toolName.value === 'write_file') {
+    const toolArguments = activity.metadata?.tool_arguments;
+    if (toolArguments && typeof toolArguments === 'object') {
+      const candidate = toolArguments as { content?: unknown; text?: unknown };
+      const writeContent = [candidate.content, candidate.text]
+        .map((item) => stripAnsi(safeTrimEnd(item)))
+        .find(Boolean);
+      if (writeContent) {
+        return writeContent;
+      }
+    }
+  }
+
+  const toolResult = activity.metadata?.tool_result;
+  if (toolResult == null) {
+    return '';
+  }
+  if (typeof toolResult === 'string') {
+    return stripAnsi(toolResult.replace(/\s+$/, ''));
+  }
+  if (typeof toolResult === 'number' || typeof toolResult === 'boolean') {
+    return String(toolResult);
+  }
+  if (typeof toolResult === 'object') {
+    const candidate = toolResult as { message?: unknown; content?: unknown; text?: unknown };
+    const preferredText = [candidate.message, candidate.content, candidate.text]
+      .map((item) => stripAnsi(safeTrimEnd(item)))
+      .find(Boolean);
+    if (preferredText) {
+      return preferredText;
+    }
+    try {
+      return JSON.stringify(toolResult, null, 2);
+    } catch {
+      return t('agent.parseFailed');
+    }
+  }
+  return t('agent.parseFailed');
+}
+
+/**
+ * 执行环境徽标文案（§8：容器状态直接展示 Docker 原值，不翻译）。
+ *
+ * 后端 `AgentActivityMeta.to_dict()` 会剔掉值为 None 的字段，所以宿主态下
+ * `current_container_id` / `container_name` 的**键可能直接不存在**（不是 null），
+ * 判断环境只能认 `metadata.exec_env` 本身，不能拿 `=== null` 猜。
+ * 宿主态是默认环境，不渲染徽标；三键全缺失（老记录、Native driver 不带该字段）
+ * 时同样返回空串 ⇒ 不渲染任何徽标。
+ */
+function execEnvBadgeText(activity: AgentActivity): string {
+  if (activity.metadata?.exec_env !== 'container') {
+    return '';
+  }
+  const containerName = readTrimmedString(activity.metadata?.container_name);
+  if (containerName) {
+    return containerName;
+  }
+  const containerId = readTrimmedString(activity.metadata?.current_container_id);
+  if (containerId) {
+    // 后端正常回填 12 位短 ID；长度不合预期时截断成短 ID，避免撑爆 chip。
+    return containerId.slice(0, 12);
+  }
+  // 环境已知是容器，但容器标识缺失：给环境名而不是空白胶囊。
+  return t('agent.execEnv.container');
+}
+
+/** 徽标 hover 提示：容器态给完整容器 ID（徽标里是截断的短 ID）。 */
+function execEnvBadgeTitle(activity: AgentActivity): string {
+  const containerName = readTrimmedString(activity.metadata?.container_name);
+  const containerId = readTrimmedString(activity.metadata?.current_container_id);
+  const identity = [containerName, containerId].filter(Boolean).join(' · ');
+  return identity ? `${t('agent.execEnv.container')} · ${identity}` : t('agent.execEnv.container');
+}
+
+function getActivityModel(activity: AgentActivity): string {
+  const model = activity.metadata?.model;
+  return typeof model === 'string' ? model : '';
+}
+
+function getActivityRetryState(activity: AgentActivity): string {
+  const retryState = activity.metadata?.request_state;
+  return typeof retryState === 'string' ? retryState.trim().toUpperCase() : '';
+}
+
+function getActivityRetryAttempt(activity: AgentActivity): number | null {
+  const retryAttempt = activity.metadata?.retry_attempt;
+  return typeof retryAttempt === 'number' ? retryAttempt : null;
+}
+
+function getActivityRetryMaxAttempts(activity: AgentActivity): number | null {
+  const retryMaxAttempts = activity.metadata?.retry_max_attempts;
+  return typeof retryMaxAttempts === 'number' ? retryMaxAttempts : null;
+}
+
+function getActivityRetryDelaySeconds(activity: AgentActivity): number | null {
+  const retryDelaySeconds = activity.metadata?.retry_delay_seconds;
+  return typeof retryDelaySeconds === 'number' && retryDelaySeconds > 0 ? retryDelaySeconds : null;
+}
+
+function getActivityLastRetryError(activity: AgentActivity): string {
+  if (activity.activity_type !== 'llm_infer') {
+    return '';
+  }
+  return readTrimmedString(activity.metadata?.last_retry_error);
+}
+
+function getActivityRetryText(activity: AgentActivity): string {
+  if (activity.activity_type !== 'llm_infer') {
+    return '';
+  }
+  const retryState = getActivityRetryState(activity);
+  const attempt = getActivityRetryAttempt(activity);
+  const maxAttempts = getActivityRetryMaxAttempts(activity);
+  const delaySeconds = getActivityRetryDelaySeconds(activity);
+
+  if (retryState === 'RETRY_SCHEDULED' && attempt !== null && maxAttempts !== null && delaySeconds !== null) {
+    return t('agent.retryScheduled', { seconds: delaySeconds, attempt, max: maxAttempts });
+  }
+  if (retryState === 'RETRYING' && attempt !== null && maxAttempts !== null) {
+    return t('agent.retryingProgress', { attempt, max: maxAttempts });
+  }
+  return '';
+}
+
+function getActivityRetryHistoryText(activity: AgentActivity): string {
+  if (activity.activity_type !== 'llm_infer') {
+    return '';
+  }
+  const retryState = getActivityRetryState(activity);
+  if (retryState) {
+    return '';
+  }
+  const attempt = getActivityRetryAttempt(activity);
+  if (attempt === null) {
+    return '';
+  }
+  const retryCount = attempt - 1;
+  if (retryCount <= 0) {
+    return '';
+  }
+  if (activity.status === 'succeeded') {
+    return t('agent.retrySucceededAfter', { count: retryCount });
+  }
+  if (activity.status === 'failed') {
+    return t('agent.retryFailedAfter', { count: retryCount });
+  }
+  return t('agent.retryUsed', { count: retryCount });
+}
+
+function getActivityToolName(activity: AgentActivity): string {
+  const metadataToolName = activity.metadata?.tool_name;
+  return typeof metadataToolName === 'string' ? metadataToolName : '';
+}
+
+function activitySummary(
+  activity: AgentActivity,
+  summaryToolName: string,
+  showToolName: boolean,
+  toolArguments: string,
+  toolCommand: string,
+): string {
+  if (activity.activity_type === 'tool_call') {
+    if (summaryToolName === 'send_chat_msg' || summaryToolName === 'create_task' || summaryToolName === 'update_task') {
+      return '';
+    }
+    if (summaryToolName === 'finish_action') {
+      return '';
+    }
+    if (summaryToolName === 'execute_bash') {
+      return getExecuteBashDescription(activity);
+    }
+    if (showToolName && toolArguments) {
+      return '';
+    }
+  }
+
+  if (activity.activity_type === 'task_received') {
+    return '';
+  }
+
+  if (activity.activity_type === 'chat_reply') {
+    return '';
+  }
+
+  // 思考内容单独成块展示（默认三行），不再挤进单行摘要里当 `💭 ...` 截断。
+  if (activity.activity_type === 'reasoning') {
+    return '';
+  }
+
+  if ((activity.activity_type === 'llm_infer' || activity.activity_type === 'compact') && activity.status === 'failed') {
+    return '';
+  }
+
+  if (toolCommand) {
+    return toolCommand;
+  }
+
+  const detail = activity.detail.trim();
+  if (activity.activity_type === 'agent_state' && (detail.toUpperCase() === 'ACTIVE' || detail.toUpperCase() === 'IDLE')) {
+    return '';
+  }
+  if (detail && detail !== summaryToolName) {
+    return detail;
+  }
+
+  return activity.error_message?.trim() ?? '';
+}
+
+const activityView = computed(() => {
+  const activity = props.activity;
+  const currentToolName = toolName.value;
+  const isFinishTurnActivity = activity.activity_type === 'tool_call' && currentToolName === 'finish_action';
+  const currentTitle = activityTitle(activity);
+  const currentToolCommand = getActivityToolCommand(activity);
+  const currentToolArguments = getActivityToolArguments(activity);
+  const currentModel = getActivityModel(activity);
+  const currentMetadataToolName = getActivityToolName(activity);
+  const currentDisplayToolName = displayToolName(currentToolName);
+  const showToolName = shouldShowToolName(activity);
+  const currentSendMessagePrefix = currentToolName === 'send_chat_msg' ? getSendMessagePrefix() : '';
+  const currentStartChatTarget = currentToolName === 'start_chat' ? getStartChatTarget() : '';
+  const currentTaskRoomLabel = getTaskRoomLabel(activity);
+  const executeBashResult = activity.activity_type === 'tool_call' && currentToolName === 'execute_bash';
+  const currentExecuteBashDescription = executeBashResult ? getExecuteBashDescription(activity) : '';
+  const hasExecuteBashDetails = executeBashResult && (Boolean(currentExecuteBashDescription) || Boolean(currentToolCommand));
+  const currentStdout = executeBashResult ? getExecuteBashStdout(activity) : '';
+  const currentStderr = executeBashResult ? getExecuteBashStderr(activity) : '';
+  const currentExitCode = executeBashResult ? getExecuteBashExitCode(activity) : '';
+  const currentToolResult = getActivityToolResult(activity);
+  const currentErrorMessage = readTrimmedString(activity.error_message);
+  const currentRetryText = getActivityRetryText(activity);
+  const currentRetryHistoryText = getActivityRetryHistoryText(activity);
+  const currentLastRetryError = getActivityLastRetryError(activity);
+  const currentRetryErrorText = currentLastRetryError
+    ? t('agent.retryError', { message: currentLastRetryError })
+    : '';
+  const expandedToolResult = activity.activity_type === 'tool_call'
+    && currentToolName !== 'send_chat_msg'
+    && (!isFinishTurnActivity || activity.status === 'failed')
+    && Boolean(currentToolResult);
+  const expandedMessage = activity.activity_type === 'tool_call' && currentToolName === 'send_chat_msg';
+  const sendChatMsgContent = expandedMessage ? getSendMessageContent(activity) : '';
+  const sendChatMsgTruncated = sendChatMsgContent.split('\n').length > 5 || sendChatMsgContent.length > 350;
+  const sendChatMsgError = expandedMessage && activity.status === 'failed'
+    ? (currentErrorMessage || currentToolResult)
+    : '';
+  const receivedMessages = getReceivedMessages(activity);
+  const expandedContent = activity.activity_type === 'chat_reply' || expandedMessage || expandedToolResult
+    || hasExecuteBashDetails
+    || (activity.activity_type === 'message_received' && receivedMessages.length > 0);
+  const currentTaskTitle = getActivityTaskTitle(activity);
+  const currentExecEnvBadge = execEnvBadgeText(activity);
+  const currentExecEnvBadgeTitle = currentExecEnvBadge ? execEnvBadgeTitle(activity) : '';
+  const currentSummary = activitySummary(
+    activity,
+    currentToolName,
+    showToolName,
+    currentToolArguments,
+    currentToolCommand,
+  );
+  const inlineTitle = (
+    !(
+      Boolean(currentSummary)
+      || showToolName
+      || (activity.activity_type !== 'tool_call' && Boolean(currentMetadataToolName))
+    ) || activity.activity_type === 'message_received' || activity.activity_type === 'compact'
+  ) && !(activity.activity_type === 'reasoning' && activity.detail.trim());
+  const chatReplyContent = activity.activity_type === 'chat_reply' ? activity.detail.trim() : '';
+  const chatReplyIsLong = chatReplyContent.split('\n').length > 5 || chatReplyContent.length > 350;
+  // 思考内容默认展示三行（超出可展开），因此不看「是否很长」——三行以外的部分
+  // 一律由 CSS 裁掉，按钮只在确实有被裁内容时出现。
+  const reasoningContent = activity.activity_type === 'reasoning' ? activity.detail.trim() : '';
+
+  return {
+    chatReplyContent,
+    chatReplyIsLong,
+    reasoningContent,
+    durationText: formatDuration(activity.duration_ms),
+    executeBashDescription: currentExecuteBashDescription,
+    displayToolName: currentDisplayToolName,
+    executeBashCommand: executeBashResult && currentToolCommand ? `$ ${currentToolCommand}` : '',
+    executeBashResult,
+    expandedContent,
+    expandedMessage,
+    expandedToolResult,
+    execEnvBadge: currentExecEnvBadge,
+    execEnvBadgeTitle: currentExecEnvBadgeTitle,
+    taskRoomLabel: currentTaskRoomLabel,
+    receivedMessages,
+    exitCode: currentExitCode,
+    inlineTitle,
+    metadataToolName: currentMetadataToolName,
+    model: currentModel,
+    taskTitle: currentTaskTitle,
+    sendChatMsgContent,
+    sendChatMsgError,
+    sendChatMsgTruncated,
+    sendMessagePrefix: currentSendMessagePrefix,
+    retryHistoryText: currentRetryHistoryText,
+    retryErrorText: currentRetryErrorText,
+    retryText: currentRetryText,
+    showRetryErrorMessage: activity.status !== 'failed' && Boolean(currentRetryErrorText) && currentLastRetryError !== currentErrorMessage,
+    startChatTarget: currentStartChatTarget,
+    showErrorMessage: Boolean(currentErrorMessage) && currentErrorMessage !== currentToolResult && !expandedMessage,
+    showSummary: Boolean(currentSummary),
+    showToolArguments: showToolName && Boolean(currentToolArguments) && !executeBashResult,
+    showToolName,
+    startedAtText: formatActivityTime(activity.started_at),
+    stateSymbol: activityStatusSymbol(activity.status),
+    stderr: currentStderr,
+    stdout: currentStdout,
+    summary: currentSummary,
+    summaryIsCode: (executeBashResult && Boolean(currentExecuteBashDescription)) || (Boolean(currentToolCommand) && !executeBashResult),
+    // bash 描述被压成单行（超出省略），展开态也保留 hover 看全文的机会。
+    summaryTitle: expandedContent && !(executeBashResult && Boolean(currentExecuteBashDescription))
+      ? ''
+      : currentSummary,
+    title: currentTitle,
+    toolArguments: currentToolArguments,
+    toolName: currentToolName,
+    toolResult: currentToolResult,
+  };
+});
+
+</script>
+
+<template>
+  <article
+    class="agent-activity-item"
+    :class="{
+      'agent-activity-item--expanded': activityView.expandedContent,
+      'agent-activity-item--message': activityView.expandedMessage,
+      'agent-activity-item--tool-result': activityView.expandedToolResult,
+      'agent-activity-item--bash-result': activityView.executeBashResult,
+    }"
+    :data-status="activity.status"
+    :data-activity-type="activity.activity_type"
+  >
+    <!-- 思考条目不留「思考」标题文字（💭 已足够标识），但对勾与正文同行保留，
+         和其它卡片一致。内容为空时退回显示标题，避免出现空白卡片。 -->
+    <div
+      class="agent-activity-item__row"
+      :class="{ 'agent-activity-item__row--reasoning': Boolean(activityView.reasoningContent) }"
+    >
+      <span class="agent-activity-item__state-anchor" tabindex="0">
+        <span class="agent-activity-item__state" :data-status="activity.status">{{ activityView.stateSymbol }}</span>
+        <span class="agent-activity-item__state-popover">
+          <span class="agent-activity-item__state-row">
+            <span class="agent-activity-item__state-row-left">
+              <span class="agent-activity-item__state-title">{{ activityView.title }}</span>
+              <span class="agent-activity-item__state-meta agent-activity-item__state-meta--strong">{{ activityView.durationText }}</span>
+            </span>
+            <span class="agent-activity-item__state-meta">{{ activityView.startedAtText }}</span>
+          </span>
+          <span v-if="activityView.exitCode" class="agent-activity-item__state-extra">
+            {{ activityView.exitCode }}
+          </span>
+        </span>
+      </span>
+      <div
+        v-if="activityView.reasoningContent"
+        ref="reasoningBodyRef"
+        class="agent-activity-item__reasoning"
+        :class="{ 'agent-activity-item__reasoning--collapsed': reasoningCollapsed }"
+      ><span class="agent-activity-item__reasoning-mark" aria-hidden="true">💭</span>{{ activityView.reasoningContent }}</div>
+      <strong v-if="activityView.inlineTitle" class="agent-activity-item__title">{{ activityView.title }}</strong>
+      <span
+        v-if="activityView.showToolName"
+        class="agent-activity-item__chip agent-activity-item__chip--mono"
+        :class="{ 'agent-activity-item__chip--danger': activity.status === 'failed' }"
+        :title="activityView.displayToolName"
+      >{{ activityView.displayToolName }}</span>
+      <span
+        v-if="activityView.execEnvBadge"
+        class="agent-activity-item__chip agent-activity-item__chip--env"
+        :title="activityView.execEnvBadgeTitle"
+        data-exec-env="container"
+      >{{ activityView.execEnvBadge }}</span>
+      <span
+        v-if="activityView.showToolArguments"
+        class="agent-activity-item__summary agent-activity-item__summary--code agent-activity-item__tool-args"
+        :title="activityView.toolArguments"
+      >{{ activityView.toolArguments }}</span>
+      <span
+        v-if="activity.activity_type === 'llm_infer' && activityView.model"
+        class="agent-activity-item__chip agent-activity-item__chip--mono"
+        :title="activityView.model"
+      >{{ activityView.model }}</span>
+      <span
+        v-if="activityView.retryHistoryText"
+        class="agent-activity-item__chip agent-activity-item__chip--danger"
+        :title="activityView.retryHistoryText"
+      >{{ activityView.retryHistoryText }}</span>
+      <span
+        v-if="activityView.sendMessagePrefix"
+        class="agent-activity-item__direction"
+        aria-hidden="true"
+      >➡️</span>
+      <span
+        v-if="activityView.sendMessagePrefix"
+        class="agent-activity-item__chip"
+        :title="activityView.sendMessagePrefix"
+      >{{ activityView.sendMessagePrefix }}</span>
+      <span
+        v-if="activityView.startChatTarget"
+        class="agent-activity-item__chip"
+        :title="activityView.startChatTarget"
+      >{{ activityView.startChatTarget }}</span>
+      <span
+        v-if="activityView.taskTitle"
+        class="agent-activity-item__chip"
+        :title="activityView.taskTitle"
+      >{{ activityView.taskTitle }}</span>
+      <span
+        v-if="activityView.retryText"
+        class="agent-activity-item__summary agent-activity-item__summary--danger"
+        :title="activityView.retryText"
+      >{{ activityView.retryText }}</span>
+      <span
+        v-if="activityView.showSummary"
+        class="agent-activity-item__summary"
+        :class="{
+          'agent-activity-item__summary--code': activityView.summaryIsCode,
+          'agent-activity-item__summary--bash-description': activityView.executeBashResult && Boolean(activityView.executeBashDescription),
+        }"
+        :title="activityView.summaryTitle"
+      >{{ activityView.summary }}</span>
+      <span
+        v-if="activity.activity_type !== 'llm_infer' && activityView.model"
+        class="agent-activity-item__chip agent-activity-item__chip--mono"
+        :title="activityView.model"
+      >{{ activityView.model }}</span>
+      <span
+        v-if="activity.activity_type !== 'tool_call' && activityView.metadataToolName"
+        class="agent-activity-item__chip agent-activity-item__chip--mono"
+        :title="activityView.metadataToolName"
+      >{{ activityView.metadataToolName }}</span>
+      <AgentActivityToken :activity="activity" />
+      <span v-if="activityView.taskRoomLabel" class="agent-activity-item__tail">
+        <span
+          class="agent-activity-item__finish-turn-room"
+          :title="activityView.taskRoomLabel"
+        >{{ activityView.taskRoomLabel }}</span>
+      </span>
+    </div>
+    <button
+      v-if="activityView.reasoningContent && reasoningOverflows"
+      type="button"
+      class="agent-activity-item__chat-reply-toggle agent-activity-item__reasoning-toggle"
+      @click="toggleReasoning"
+    >{{ reasoningCollapsed ? t('common.expand') : t('common.collapse') }}</button>
+    <template v-if="activityView.sendChatMsgContent && !activityView.sendChatMsgError">
+      <div
+        class="agent-activity-item__chat-reply"
+        :class="{ 'agent-activity-item__chat-reply--collapsed': chatReplyCollapsed && activityView.sendChatMsgTruncated }"
+      >
+        <MarkdownContent :content="activityView.sendChatMsgContent" />
+      </div>
+      <button
+        v-if="activityView.sendChatMsgTruncated"
+        type="button"
+        class="agent-activity-item__chat-reply-toggle"
+        @click="chatReplyCollapsed = !chatReplyCollapsed"
+      >{{ chatReplyCollapsed ? t('common.expand') : t('common.collapse') }}</button>
+    </template>
+    <p v-if="activityView.sendChatMsgError" class="agent-activity-item__error">调用失败：{{ activityView.sendChatMsgError }}</p>
+    <p v-if="activityView.showRetryErrorMessage" class="agent-activity-item__error">{{ activityView.retryErrorText }}</p>
+    <template v-if="activityView.executeBashResult">
+      <p
+        v-if="activityView.executeBashCommand"
+        class="agent-activity-item__tool-result agent-activity-item__tool-result--code"
+      >{{ activityView.executeBashCommand }}</p>
+      <p
+        v-if="activityView.stdout"
+        class="agent-activity-item__tool-result agent-activity-item__tool-result--stdout"
+      >{{ activityView.stdout }}</p>
+      <p
+        v-if="activityView.stderr"
+        class="agent-activity-item__tool-result agent-activity-item__tool-result--stderr"
+      >{{ activityView.stderr }}</p>
+    </template>
+    <template v-else>
+      <p
+        v-if="activityView.expandedToolResult"
+        class="agent-activity-item__tool-result"
+      >{{ activityView.toolResult }}</p>
+    </template>
+    <template v-if="activity.activity_type === 'message_received' && activityView.receivedMessages.length > 0">
+      <p
+        v-for="(msg, idx) in activityView.receivedMessages"
+        :key="idx"
+        class="agent-activity-item__received-message"
+      ><span class="agent-activity-item__received-sender">{{ msg.sender }}:</span> {{ msg.content }}</p>
+    </template>
+    <p v-if="activityView.showErrorMessage" class="agent-activity-item__error">{{ activity.error_message }}</p>
+    <template v-if="activityView.chatReplyContent">
+      <div
+        class="agent-activity-item__chat-reply"
+        :class="{ 'agent-activity-item__chat-reply--collapsed': chatReplyCollapsed && activityView.chatReplyIsLong }"
+      >
+        <MarkdownContent :content="activityView.chatReplyContent" />
+      </div>
+      <button
+        v-if="activityView.chatReplyIsLong"
+        type="button"
+        class="agent-activity-item__chat-reply-toggle"
+        @click="chatReplyCollapsed = !chatReplyCollapsed"
+      >{{ chatReplyCollapsed ? t('common.expand') : t('common.collapse') }}</button>
+    </template>
+  </article>
+</template>
+
+<style scoped>
+.agent-activity-item {
+  display: grid;
+  gap: 3px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--surface-activity-item);
+  border: 1px solid var(--border-activity-item);
+  flex-shrink: 0;
+  position: relative;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-activity-item:hover,
+.agent-activity-item:focus-within {
+  z-index: 50;
+}
+
+.agent-activity-item[data-status='started'] {
+  background: var(--surface-activity-item-active);
+  border-color: var(--border-subtle);
+}
+
+.agent-activity-item[data-status='failed'] {
+  border-color: var(--border-danger-item);
+  background: var(--surface-danger-item);
+}
+
+.agent-activity-item__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: visible;
+}
+
+.agent-activity-item__state-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  outline: none;
+}
+
+.agent-activity-item__state {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.agent-activity-item__state[data-status='started'] {
+  color: var(--good);
+}
+
+.agent-activity-item__state[data-status='succeeded'] {
+  color: var(--good);
+}
+
+.agent-activity-item__state[data-status='failed'],
+.agent-activity-item__state[data-status='cancelled'] {
+  color: var(--danger, #f85149);
+}
+
+.agent-activity-item__state-popover {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 12px);
+  z-index: 100;
+  display: grid;
+  gap: 8px;
+  min-width: 236px;
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 84%, transparent);
+  background: var(--surface-elevated);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.15),
+    0 2px 8px rgba(0, 0, 0, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-50%) translateX(-4px);
+  pointer-events: auto;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+}
+
+.agent-activity-item__state-title {
+  color: var(--text-strong);
+  font-size: 0.78rem;
+  line-height: 1.25;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.agent-activity-item__state-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.agent-activity-item__state-row-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-activity-item__state-anchor:hover .agent-activity-item__state-popover,
+.agent-activity-item__state-anchor:focus-visible .agent-activity-item__state-popover,
+.agent-activity-item__state-anchor:focus-within .agent-activity-item__state-popover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translateX(0);
+}
+
+.agent-activity-item__state-meta {
+  color: var(--text);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0.88;
+}
+
+.agent-activity-item__state-meta--strong {
+  font-weight: 600;
+  opacity: 1;
+}
+
+.agent-activity-item__state-extra {
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-activity-item__title {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  color: var(--text-strong);
+  font-size: 0.82rem;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.agent-activity-item__row span {
+  color: var(--text-strong);
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.agent-activity-item__chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  max-width: 180px;
+  min-width: 0;
+  height: 18px;
+  padding: 0 6px;
+  line-height: 1;
+  border-radius: 4px;
+  background: var(--surface-chip);
+  color: var(--text-strong);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-item__chip--mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  padding-bottom: 1px;
+}
+
+.agent-activity-item__chip--danger {
+  background: var(--surface-chip-danger);
+  color: var(--danger);
+}
+
+/* 执行环境徽标：只在容器态渲染，用 info 色与普通 chip 区分。 */
+.agent-activity-item__chip--env {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  padding-bottom: 1px;
+  max-width: 140px;
+  border: 1px solid color-mix(in srgb, var(--state-info) 24%, var(--border-default) 76%);
+  background: color-mix(in srgb, var(--state-info) 12%, var(--surface-panel) 88%);
+  color: color-mix(in srgb, var(--state-info) 84%, var(--text-primary) 16%);
+}
+
+.agent-activity-item__direction {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1;
+}
+
+.agent-activity-item__status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: color-mix(in srgb, var(--accent) 76%, var(--text) 24%);
+  font-weight: 600;
+}
+
+.agent-activity-item__tail {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+  min-width: max-content;
+  padding-left: 8px;
+}
+
+.agent-activity-item__tail > * {
+  flex: none;
+}
+
+.agent-activity-item__finish-turn-room {
+  min-width: 0;
+  max-width: 220px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-activity-item[data-status='started'] .agent-activity-item__status {
+  background: color-mix(in srgb, var(--good) 16%, transparent);
+  color: color-mix(in srgb, var(--good) 84%, var(--text) 16%);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__status {
+  background: var(--surface-chip-danger);
+  color: var(--danger);
+}
+
+.agent-activity-item__summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--text-description);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-item__tool-name,
+.agent-activity-item__tool-args {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.agent-activity-item__tool-name {
+  max-width: 150px;
+}
+
+.agent-activity-item__tool-args {
+  flex: 1 1 auto;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-item[data-activity-type='tool_call'] .agent-activity-item__tail {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.agent-activity-item[data-status='started'] .agent-activity-item__summary {
+  color: var(--muted);
+}
+
+.agent-activity-item__summary--code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.69rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.agent-activity-item__summary--danger {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__send-chat-content {
+  color: var(--danger);
+}
+
+
+
+.agent-activity-item__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.35;
+  padding-left: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__title {
+  color: var(--text-danger-strong);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__row span {
+  color: var(--text-danger-muted);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__summary {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__chip {
+  background: var(--surface-chip-danger);
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__tool-result,
+.agent-activity-item[data-status='failed'] .agent-activity-item__received-message {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__tool-result--code {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'].agent-activity-item--bash-result .agent-activity-item__summary--code {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'].agent-activity-item--bash-result .agent-activity-item__summary--bash-description {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'].agent-activity-item--bash-result .agent-activity-item__tool-result--code {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'].agent-activity-item--bash-result .agent-activity-item__tool-result--stdout {
+  color: var(--danger);
+}
+
+.agent-activity-item[data-status='failed'] .agent-activity-item__received-sender {
+  color: var(--danger);
+}
+
+.agent-activity-item--expanded .agent-activity-item__row {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.agent-activity-item--expanded .agent-activity-item__state-anchor {
+  margin-top: 0.18rem;
+}
+
+.agent-activity-item--expanded .agent-activity-item__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 0;
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--text-description);
+}
+
+.agent-activity-item--expanded .agent-activity-item__tail {
+  margin-left: auto;
+  width: auto;
+  padding-left: 8px;
+}
+
+.agent-activity-item--message .agent-activity-item__row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.agent-activity-item--message .agent-activity-item__summary {
+  flex: 1 0 100%;
+  order: 10;
+  padding-left: 22px;
+}
+
+.agent-activity-item--message .agent-activity-item__tail {
+  order: 11;
+}
+
+.agent-activity-item--tool-result .agent-activity-item__row {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.agent-activity-item--tool-result .agent-activity-item__summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+  color: var(--text-description);
+}
+
+/* bash 描述要和左侧 18px 高的 chip 落在同一条视觉中线上。
+   expanded（0.8rem/1.55，flex-start）与 tool-result（1.2）给 summary 的行盒都比 chip 高，
+   于是右侧「查版本号位置」比左侧「执行命令」低 1.5~2.5px。这里把描述钉成 18px 行盒、
+   垂直居中并单行省略，执行中/已完成两种状态都贴合 chip 中线。
+   字号故意不写：沿用各状态原有字号（执行中 0.7rem、展开态 0.8rem），只改行盒和居中方式，
+   否则展开态的字会莫名变小。
+   注意本规则必须在 --expanded / --tool-result 的 summary 规则之后，靠顺序覆盖它们。 */
+.agent-activity-item--bash-result .agent-activity-item__summary--bash-description {
+  align-self: center;
+  height: 18px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-item__tool-result {
+  margin: 0;
+  padding-left: 22px;
+  color: var(--text);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.agent-activity-item__tool-result--description {
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.agent-activity-item__tool-result--code {
+  display: block;
+  -webkit-line-clamp: unset;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.agent-activity-item__tool-result--stdout {
+  color: var(--text);
+}
+
+.agent-activity-item__tool-result--stderr {
+  color: var(--danger);
+}
+
+.agent-activity-item__received-message {
+  margin: 0;
+  padding-left: 22px;
+  color: var(--text);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.agent-activity-item__received-sender {
+  font-weight: 600;
+  color: var(--text-strong);
+  margin-right: 4px;
+}
+
+.agent-activity-item__chat-reply {
+  padding-left: 22px;
+  padding-right: 4px;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  min-width: 0;
+  color: var(--text);
+}
+
+/* 思考内容：与对勾同一行（不在下面另起一行），默认只露三行、超出可展开。
+   正文用 💭 起头，样式比正文更弱，避免抢注意力。 */
+.agent-activity-item__row--reasoning {
+  align-items: flex-start;
+}
+
+.agent-activity-item__row--reasoning .agent-activity-item__state-anchor {
+  margin-top: 0.18rem;
+}
+
+.agent-activity-item__reasoning {
+  flex: 1 1 auto;
+  padding-left: 0;
+  padding-right: 4px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  min-width: 0;
+  color: var(--text-description);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-activity-item__reasoning-mark {
+  margin-right: 3px;
+}
+
+
+.agent-activity-item__reasoning--collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.agent-activity-item__chat-reply--collapsed {
+  max-height: 7.5em;
+  overflow: hidden;
+  position: relative;
+}
+
+.agent-activity-item__chat-reply--collapsed::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2.5em;
+  background: linear-gradient(transparent, color-mix(in srgb, var(--panel-bg) 94%, var(--surface-soft) 6%));
+  pointer-events: none;
+}
+
+.agent-activity-item__chat-reply-toggle {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 0 0 0 22px;
+  line-height: 1.4;
+}
+
+.agent-activity-item__chat-reply-toggle:hover {
+  text-decoration: underline;
+}
+
+/* 思考内容的展开按钮与正文左对齐（对勾宽 14px + gap 6px），必须放在
+   .chat-reply-toggle 之后，否则同优先级下 padding-left: 22px 会覆盖回来。 */
+.agent-activity-item__reasoning-toggle {
+  padding-left: 20px;
+}
+
+</style>
