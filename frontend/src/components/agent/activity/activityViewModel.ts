@@ -35,10 +35,16 @@ export type ActivityView = {
   execEnvBadgeTitle: string;
   taskRoomLabel: string;
   receivedMessages: Array<{ sender: string; content: string }>;
+  /** 是否渲染「收到的消息」块：把父模板里最后一处视图分支判断收回视图模型 */
+  showReceivedMessages: boolean;
   exitCode: string;
   inlineTitle: boolean;
   metadataToolName: string;
   model: string;
+  /** 以下三个把模板里最后的「类型比较」收进视图模型（父组件视图分支比较归零） */
+  showModelInLlmInfer: boolean;
+  showModelOutsideLlmInfer: boolean;
+  showMetadataToolName: boolean;
   taskTitle: string;
   sendChatMsgContent: string;
   sendChatMsgError: string;
@@ -694,10 +700,14 @@ export function buildActivityView(input: ActivityViewInput): ActivityView {
     execEnvBadgeTitle: currentExecEnvBadgeTitle,
     taskRoomLabel: currentTaskRoomLabel,
     receivedMessages,
+    showReceivedMessages: activity.activity_type === 'message_received' && receivedMessages.length > 0,
     exitCode: currentExitCode,
     inlineTitle,
     metadataToolName: currentMetadataToolName,
     model: currentModel,
+    showModelInLlmInfer: activity.activity_type === 'llm_infer' && Boolean(currentModel),
+    showModelOutsideLlmInfer: activity.activity_type !== 'llm_infer' && Boolean(currentModel),
+    showMetadataToolName: activity.activity_type !== 'tool_call' && Boolean(currentMetadataToolName),
     taskTitle: currentTaskTitle,
     sendChatMsgContent,
     sendChatMsgError,

@@ -117,6 +117,13 @@ const FIXTURES: Array<[string, AgentActivity]> = [
     metadata: { tool_name: 'get_time', tool_arguments: {} },
   })],
   ['compact 失败', act({ activity_type: 'compact', status: 'failed', detail: 'x', error_message: 'bad' })],
+  // 补齐 9 种类型的最后两种（验收人 S-2① 要求类型全覆盖）
+  ['task_received 带房间', act({
+    activity_type: 'task_received',
+    detail: '修复登录问题',
+    metadata: { task_room_id: 9 },
+  })],
+  ['unknown 类型', act({ activity_type: 'unknown', detail: 'something odd' })],
 ];
 
 function render(component: unknown, activity: AgentActivity): string {

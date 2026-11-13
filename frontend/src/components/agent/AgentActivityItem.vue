@@ -137,7 +137,7 @@ const activityView = computed(() => buildActivityView({
         :title="activityView.toolArguments"
       >{{ activityView.toolArguments }}</span>
       <span
-        v-if="activity.activity_type === 'llm_infer' && activityView.model"
+        v-if="activityView.showModelInLlmInfer"
         class="agent-activity-item__chip agent-activity-item__chip--mono"
         :title="activityView.model"
       >{{ activityView.model }}</span>
@@ -181,12 +181,12 @@ const activityView = computed(() => buildActivityView({
         :title="activityView.summaryTitle"
       >{{ activityView.summary }}</span>
       <span
-        v-if="activity.activity_type !== 'llm_infer' && activityView.model"
+        v-if="activityView.showModelOutsideLlmInfer"
         class="agent-activity-item__chip agent-activity-item__chip--mono"
         :title="activityView.model"
       >{{ activityView.model }}</span>
       <span
-        v-if="activity.activity_type !== 'tool_call' && activityView.metadataToolName"
+        v-if="activityView.showMetadataToolName"
         class="agent-activity-item__chip agent-activity-item__chip--mono"
         :title="activityView.metadataToolName"
       >{{ activityView.metadataToolName }}</span>
@@ -224,7 +224,7 @@ const activityView = computed(() => buildActivityView({
       :content="activityView.toolResult"
     />
     <ActivityReceivedMessages
-      v-if="activity.activity_type === 'message_received' && activityView.receivedMessages.length > 0"
+      v-if="activityView.showReceivedMessages"
       :messages="activityView.receivedMessages"
     />
     <p v-if="activityView.showErrorMessage" class="agent-activity-item__error">{{ activity.error_message }}</p>
