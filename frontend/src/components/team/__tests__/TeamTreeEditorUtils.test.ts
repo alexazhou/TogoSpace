@@ -1,178 +1,24 @@
 import { describe, it, expect } from 'vitest';
+import type { AgentInfo } from '../../../types';
+import {
+  cloneDraftOrgNode,
+  collectMemberNodes,
+  countManagedChildren,
+  createDepartmentNameAllocator,
+  createDraftNodeId,
+  createPendingNode,
+  findNodeById,
+  isOnBoardAgent,
+  parseDriverTypeValue,
+  removeNodeById,
+  treeHasPendingNode,
+  type DraftOrgNode,
+} from '../../../utils/teamTreeModel';
 
-// 从 TeamTreeEditor.vue 提取的纯函数逻辑，便于独立测试
-// 这些函数不依赖组件状态，可以安全地提取和测试
+// 这些纯函数原本在 TeamTreeEditor.vue 的 <script setup> 里，测试文件**复制了一份同名实现**来测
+// ——那样测的是副本，组件改坏了也照样绿（#213 P3 把它抽到 utils/teamTreeModel.ts 后，这里改成
+// 直接 import 真实实现，才真正咬住代码）。
 
-function createDraftNodeId(prefix = 'node'): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function parseDriverTypeValue(driver: string): string {
-  const normalized = driver.trim().toUpperCase();
-  if (normalized === 'NATIVE' || normalized === 'CLAUDE_SDK' || normalized === 'TSP') {
-    return normalized;
-  }
-  return '';
-}
-
-function isOnBoardAgent(employStatus: string | undefined): boolean {
-  return employStatus === 'ON_BOARD' || !employStatus;
-}
-
-function createDepartmentNameAllocator(
-  newDeptPrefix: string,
-  initialDepartmentNames: string[] = [],
-): () => string {
-  const usedDepartmentNames = new Set<string>();
-  let maxDepartmentIndex = 0;
-
-  initialDepartmentNames.forEach((departmentName) => {
-    const trimmedDepartmentName = departmentName.trim();
-    if (!trimmedDepartmentName) {
-      return;
-    }
-
-    usedDepartmentNames.add(trimmedDepartmentName);
-    const matched = trimmedDepartmentName.match(new RegExp(`^${newDeptPrefix}(\\d+)$`));
-    if (!matched) {
-      return;
-    }
-
-    maxDepartmentIndex = Math.max(maxDepartmentIndex, Number(matched[1]));
-  });
-
-  return () => {
-    let nextDepartmentIndex = maxDepartmentIndex + 1;
-    while (usedDepartmentNames.has(`${newDeptPrefix}${nextDepartmentIndex}`)) {
-      nextDepartmentIndex += 1;
-    }
-
-    const nextDepartmentName = `${newDeptPrefix}${nextDepartmentIndex}`;
-    usedDepartmentNames.add(nextDepartmentName);
-    maxDepartmentIndex = nextDepartmentIndex;
-    return nextDepartmentName;
-  };
-}
-
-type DraftOrgNode = {
-  id: string;
-  kind: 'member' | 'pending';
-  agentId: number | null;
-  deptId: number | null;
-  memberName: string;
-  roleTemplateId: number | null;
-  model: string;
-  driver: string;
-  employeeNumber: string;
-  deptName: string;
-  deptResponsibility: string;
-  children: DraftOrgNode[];
-};
-
-function createPendingNode(): DraftOrgNode {
-  return {
-    id: createDraftNodeId('pending'),
-    kind: 'pending',
-    agentId: null,
-    deptId: null,
-    memberName: '',
-    roleTemplateId: null,
-    model: '',
-    driver: '',
-    employeeNumber: '',
-    deptName: '',
-    deptResponsibility: '',
-    children: [],
-  };
-}
-
-function cloneDraftOrgNode(node: DraftOrgNode | null): DraftOrgNode | null {
-  if (!node) {
-    return null;
-  }
-
-  return {
-    ...node,
-    children: node.children.map((child) => cloneDraftOrgNode(child)!),
-  };
-}
-
-function findNodeById(root: DraftOrgNode | null, nodeId: string): DraftOrgNode | null {
-  if (!root) {
-    return null;
-  }
-
-  const stack = [root];
-  while (stack.length) {
-    const current = stack.pop()!;
-    if (current.id === nodeId) {
-      return current;
-    }
-    for (let index = current.children.length - 1; index >= 0; index -= 1) {
-      stack.push(current.children[index]);
-    }
-  }
-
-  return null;
-}
-
-function collectMemberNodes(root: DraftOrgNode | null): DraftOrgNode[] {
-  if (!root) {
-    return [];
-  }
-
-  const result: DraftOrgNode[] = [];
-  const stack = [root];
-  while (stack.length) {
-    const current = stack.pop()!;
-    if (current.kind === 'member' && current.memberName) {
-      result.push(current);
-    }
-    for (let index = current.children.length - 1; index >= 0; index -= 1) {
-      stack.push(current.children[index]);
-    }
-  }
-
-  return result;
-}
-
-function countManagedChildren(node: DraftOrgNode): number {
-  return node.children.filter((child) => child.kind === 'member').length;
-}
-
-function removeNodeById(root: DraftOrgNode, nodeId: string): boolean {
-  for (let index = 0; index < root.children.length; index += 1) {
-    const child = root.children[index];
-    if (child.id === nodeId) {
-      root.children.splice(index, 1);
-      return true;
-    }
-    if (removeNodeById(child, nodeId)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function treeHasPendingNode(root: DraftOrgNode | null): boolean {
-  if (!root) {
-    return false;
-  }
-
-  const stack = [root];
-  while (stack.length) {
-    const current = stack.pop()!;
-    if (current.kind === 'pending') {
-      return true;
-    }
-    for (let index = current.children.length - 1; index >= 0; index -= 1) {
-      stack.push(current.children[index]);
-    }
-  }
-
-  return false;
-}
 
 describe('TeamTreeEditor utility functions', () => {
   describe('createDraftNodeId', () => {
@@ -207,17 +53,19 @@ describe('TeamTreeEditor utility functions', () => {
   });
 
   describe('isOnBoardAgent', () => {
+    const agentWith = (employStatus: string | undefined): AgentInfo => ({ employ_status: employStatus } as AgentInfo);
+
     it('returns true for ON_BOARD status', () => {
-      expect(isOnBoardAgent('ON_BOARD')).toBe(true);
+      expect(isOnBoardAgent(agentWith('ON_BOARD'))).toBe(true);
     });
 
     it('returns true for undefined status', () => {
-      expect(isOnBoardAgent(undefined)).toBe(true);
+      expect(isOnBoardAgent(agentWith(undefined))).toBe(true);
     });
 
     it('returns false for other statuses', () => {
-      expect(isOnBoardAgent('OFF_BOARD')).toBe(false);
-      expect(isOnBoardAgent('PENDING')).toBe(false);
+      expect(isOnBoardAgent(agentWith('OFF_BOARD'))).toBe(false);
+      expect(isOnBoardAgent(agentWith('PENDING'))).toBe(false);
     });
   });
 
