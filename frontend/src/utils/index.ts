@@ -1,5 +1,5 @@
-import type { EntityI18n, DeptTreeNode } from './types';
-import i18n, { t } from './i18n';
+import type { EntityI18n, DeptTreeNode } from '../types';
+import i18n, { t } from '../i18n';
 
 export type ConnectionState =
   | 'connecting'
