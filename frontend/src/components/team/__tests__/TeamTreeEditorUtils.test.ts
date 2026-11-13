@@ -126,6 +126,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '1',
         deptName: '研发部',
         deptResponsibility: '开发',
+        hasAssignedDepartment: false,
         children: [
           {
             id: 'child',
@@ -139,6 +140,7 @@ describe('TeamTreeEditor utility functions', () => {
             employeeNumber: '',
             deptName: '',
             deptResponsibility: '',
+            hasAssignedDepartment: false,
             children: [],
           },
         ],
@@ -171,6 +173,7 @@ describe('TeamTreeEditor utility functions', () => {
       employeeNumber: '',
       deptName: '',
       deptResponsibility: '',
+      hasAssignedDepartment: false,
       children: [
         {
           id: 'child1',
@@ -184,6 +187,7 @@ describe('TeamTreeEditor utility functions', () => {
           employeeNumber: '',
           deptName: '',
           deptResponsibility: '',
+          hasAssignedDepartment: false,
           children: [],
         },
         {
@@ -198,6 +202,7 @@ describe('TeamTreeEditor utility functions', () => {
           employeeNumber: '',
           deptName: '',
           deptResponsibility: '',
+          hasAssignedDepartment: false,
           children: [],
         },
       ],
@@ -238,6 +243,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [
           {
             id: 'child1',
@@ -251,6 +257,7 @@ describe('TeamTreeEditor utility functions', () => {
             employeeNumber: '',
             deptName: '',
             deptResponsibility: '',
+            hasAssignedDepartment: false,
             children: [],
           },
           {
@@ -265,6 +272,7 @@ describe('TeamTreeEditor utility functions', () => {
             employeeNumber: '',
             deptName: '',
             deptResponsibility: '',
+            hasAssignedDepartment: false,
             children: [],
           },
         ],
@@ -295,6 +303,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [
           createPendingNode(),
           createPendingNode(),
@@ -316,6 +325,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [
           {
             id: 'member1',
@@ -329,6 +339,7 @@ describe('TeamTreeEditor utility functions', () => {
             employeeNumber: '',
             deptName: '',
             deptResponsibility: '',
+            hasAssignedDepartment: false,
             children: [],
           },
           createPendingNode(),
@@ -344,6 +355,7 @@ describe('TeamTreeEditor utility functions', () => {
             employeeNumber: '',
             deptName: '',
             deptResponsibility: '',
+            hasAssignedDepartment: false,
             children: [],
           },
         ],
@@ -366,6 +378,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [
           {
             id: 'child1',
@@ -379,6 +392,7 @@ describe('TeamTreeEditor utility functions', () => {
             employeeNumber: '',
             deptName: '',
             deptResponsibility: '',
+            hasAssignedDepartment: false,
             children: [],
           },
         ],
@@ -402,6 +416,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [
           {
             id: 'child1',
@@ -415,6 +430,7 @@ describe('TeamTreeEditor utility functions', () => {
             employeeNumber: '',
             deptName: '',
             deptResponsibility: '',
+            hasAssignedDepartment: false,
             children: [
               {
                 id: 'grandchild',
@@ -428,6 +444,7 @@ describe('TeamTreeEditor utility functions', () => {
                 employeeNumber: '',
                 deptName: '',
                 deptResponsibility: '',
+                hasAssignedDepartment: false,
                 children: [],
               },
             ],
@@ -453,6 +470,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [],
       };
 
@@ -474,6 +492,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [createPendingNode()],
       };
       expect(treeHasPendingNode(root)).toBe(true);
@@ -492,6 +511,7 @@ describe('TeamTreeEditor utility functions', () => {
         employeeNumber: '',
         deptName: '',
         deptResponsibility: '',
+        hasAssignedDepartment: false,
         children: [],
       };
       expect(treeHasPendingNode(root)).toBe(false);
