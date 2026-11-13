@@ -9,6 +9,15 @@ const props = withDefaults(defineProps<{
   zIndex?: number;
   closeLabel?: string;
   scrollbar?: boolean;
+  /**
+   * bare：只渲染遮罩层（`.ui-modal__overlay`）+ 默认插槽 + 遮罩自点击关闭，
+   * 不渲染 `.ui-modal__dialog` 包裹层与自带 head。
+   * 用于「面板/头部样式各异、只需统一遮罩」的存量弹窗迁移：
+   * 面板样式留在调用方组件里原样不动，遮罩的视觉参数由 overlayStyle 逐项保留原值。
+   */
+  bare?: boolean;
+  /** 遮罩层额外内联样式（padding/background/backdropFilter 等），用于逐弹窗保留原有视觉参数 */
+  overlayStyle?: CSSProperties;
 }>(), {
   title: '',
   eyebrow: '',
@@ -16,13 +25,15 @@ const props = withDefaults(defineProps<{
   zIndex: 80,
   closeLabel: '',
   scrollbar: true,
+  bare: false,
+  overlayStyle: () => ({}),
 });
 
 const emit = defineEmits<{
   close: [];
 }>();
 
-const overlayStyle = computed<CSSProperties>(() => ({ zIndex: props.zIndex }));
+const overlayStyle = computed<CSSProperties>(() => ({ ...props.overlayStyle, zIndex: props.zIndex }));
 const dialogStyle = computed<CSSProperties>(
   () => ({ '--modal-width': `${props.width}px` }) as CSSProperties,
 );
@@ -42,7 +53,9 @@ function handleOverlayClick(e: MouseEvent): void {
       :style="overlayStyle"
       @click="handleOverlayClick"
     >
+      <slot v-if="bare" />
       <section
+        v-else
         class="ui-modal__dialog panel"
         :class="{ 'scrollbar-thin': scrollbar }"
         :style="dialogStyle"
