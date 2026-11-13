@@ -21,11 +21,14 @@ vi.mock('../../realtime/selectors', () => ({
   useRoomMessageHistory: () => mocks.messageHistoryRef,
 }));
 
-vi.mock('../../realtime/runtimeStore', () => ({
+vi.mock('../../realtime/runtimeActions', () => ({
   loadOlderRoomMessagesState: mocks.loadOlderRoomMessagesStateMock,
   loadRoomMessagesState: mocks.loadRoomMessagesStateMock,
   loadTeamAgents: mocks.loadTeamAgentsMock,
   loadTeamRooms: mocks.loadTeamRoomsMock,
+}));
+
+vi.mock('../../realtime/runtimeStore', () => ({
   setActiveRealtimeContext: mocks.setActiveRealtimeContextMock,
 }));
 

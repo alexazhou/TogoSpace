@@ -33,7 +33,7 @@ vi.mock('../../../api', async (importOriginal) => {
   };
 });
 
-vi.mock('../../../realtime/runtimeStore', async (importOriginal) => {
+vi.mock('../../../realtime/runtimeActions', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,

@@ -19,6 +19,7 @@ vi.mock('../../api', async (importOriginal) => {
   };
 });
 
+import { installRuntimeActions } from '../runtimeActions';
 import {
   applyRealtimeEvent,
   clearRuntimeStore,
@@ -54,6 +55,9 @@ function createDeptTree(name: string): DeptTreeNode {
 
 describe('runtimeStore team_reloaded handling', () => {
   beforeEach(() => {
+    // P4：`team_reloaded` 的重拉动作从 store 移到 action 层，store 只调用注册进来的处理器，
+    // 因此这里必须先安装（与 App.vue 启动时的顺序一致）。断言内容未改。
+    installRuntimeActions();
     clearRuntimeStore();
     apiMocks.getAgentsByTeamId.mockReset();
     apiMocks.getRooms.mockReset();

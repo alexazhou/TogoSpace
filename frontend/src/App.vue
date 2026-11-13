@@ -31,6 +31,7 @@ import TopBar from './components/layout/TopBar.vue';
 import { DEFAULT_SETTINGS_SECTION } from './components/settings/sections';
 import ConfirmDialog from './components/ui/ConfirmDialog.vue';
 import { useTeamAgents } from './realtime/selectors';
+import { installRuntimeActions } from './realtime/runtimeActions';
 import { startRealtimeClient, stopRealtimeClient } from './realtime/wsClient';
 import { installViewportRootClasses } from './responsive/breakpoints';
 import { findTeamById, firstTeamId, loadTeams, preferredTeamId, setPreferredTeamId, teams, teamsLoaded } from './teamStore';
@@ -325,6 +326,8 @@ onMounted(async () => {
   // 实时连接打开时需要知道是否开启鉴权，先取系统状态再建立连接；
   // 否则 authEnabled 还是初始 false，连接不会发送认证消息，后端不订阅事件。
   await checkSystemStatus();
+  // 装配 action 层的 `team_reloaded` 重拉处理器，必须早于实时连接建立。
+  installRuntimeActions();
   startRealtimeClient();
   await loadTeams();
 

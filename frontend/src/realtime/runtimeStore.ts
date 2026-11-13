@@ -2,15 +2,6 @@ import { ref } from 'vue';
 import { showGlobalSuccessToast, totalMessageCount, updateScheduleState } from '../appUiState';
 import { t } from '../i18n';
 import type { RawMessageInfo } from '../api';
-import {
-  getAgentActivities as fetchAgentActivities,
-  getAgentsByTeamId as fetchAgentsByTeamId,
-  getDeptTree as fetchDeptTree,
-  getRoomLastMessages as fetchRoomLastMessages,
-  getRoleTemplates as fetchRoleTemplates,
-  getRoomMessages as fetchRoomMessages,
-  getRooms as fetchRooms,
-} from '../api';
 import type {
   AgentActivity,
   AgentActivityType,
@@ -59,7 +50,7 @@ const teamDeptTreeState = ref<Record<number, DeptTreeNode | null>>({});
 const teamTasksState = ref<Record<number, AgentTask[]>>({});
 const roleTemplatesState = ref<RoleTemplateSummary[]>([]);
 const MAX_AGENT_ACTIVITY_ITEMS = 100;
-const ROOM_MESSAGES_PAGE_SIZE = 20;
+export const ROOM_MESSAGES_PAGE_SIZE = 20;
 
 const activeTeamId = ref<number | null>(null);
 const activeRoomId = ref<number | null>(null);
@@ -73,7 +64,7 @@ function syncTotalMessageCount(): void {
   totalMessageCount.value = getRoomEntry(activeRoomId.value).messages.length;
 }
 
-function normalizeMessage(teamId: number, raw: RawMessageInfo): MessageInfo {
+export function normalizeMessage(teamId: number, raw: RawMessageInfo): MessageInfo {
   return {
     db_id: raw.id,
     sender_id: raw.sender_id,
@@ -124,18 +115,18 @@ function mergeMessages(messages: MessageInfo[]): MessageInfo[] {
   return sortMessages([...uniqueMessages.values()]);
 }
 
-function getRoomEntry(roomId: number): RoomMessagesEntry {
+export function getRoomEntry(roomId: number): RoomMessagesEntry {
   return roomMessagesState.value[roomId] ?? { messages: [], hasMoreHistory: false, loadingHistory: false };
 }
 
-function setRoomEntry(roomId: number, patch: Partial<RoomMessagesEntry>): void {
+export function setRoomEntry(roomId: number, patch: Partial<RoomMessagesEntry>): void {
   roomMessagesState.value = {
     ...roomMessagesState.value,
     [roomId]: { ...getRoomEntry(roomId), ...patch },
   };
 }
 
-function resolveOldestLoadedMessageId(messages: MessageInfo[]): number | null {
+export function resolveOldestLoadedMessageId(messages: MessageInfo[]): number | null {
   for (const message of messages) {
     if (message.db_id !== null) {
       return message.db_id;
@@ -144,7 +135,7 @@ function resolveOldestLoadedMessageId(messages: MessageInfo[]): number | null {
   return null;
 }
 
-function resolveMessageSenderDisplayName(teamId: number, senderId: number): string {
+export function resolveMessageSenderDisplayName(teamId: number, senderId: number): string {
   if (senderId === -1) {
     return 'OPERATOR';
   }
@@ -181,7 +172,7 @@ function refreshTeamRoomPreviews(teamId: number): void {
   );
 }
 
-function syncRoomPreview(teamId: number, roomId: number, messages?: MessageInfo[]): void {
+export function syncRoomPreview(teamId: number, roomId: number, messages?: MessageInfo[]): void {
   updateTeamRooms(teamId, (rooms) =>
     rooms.map((room) =>
       room.room_id === roomId
@@ -271,12 +262,6 @@ export function seedTeamAgents(teamId: number, agents: AgentInfo[]): void {
   refreshTeamRoomPreviews(teamId);
 }
 
-export async function loadTeamAgents(teamId: number, options?: { includeSpecial?: boolean }): Promise<AgentInfo[]> {
-  const agents = await fetchAgentsByTeamId(teamId, options);
-  seedTeamAgents(teamId, agents);
-  return agents;
-}
-
 export function seedTeamRooms(teamId: number, rooms: RoomState[]): void {
   const existingRooms = new Map((teamRoomsState.value[teamId] ?? []).map((room) => [room.room_id, room]));
   const mergedRooms = rooms.map((room) => {
@@ -292,39 +277,6 @@ export function seedTeamRooms(teamId: number, rooms: RoomState[]): void {
     ...teamRoomsState.value,
     [teamId]: mergedRooms,
   };
-}
-
-export async function loadTeamRooms(teamId: number): Promise<RoomState[]> {
-  const baseRooms = await fetchRooms(teamId);
-  const roomIds = baseRooms.map((room) => room.room_id).filter((roomId) => roomId > 0);
-  const previewMap = new Map<number, string>();
-
-  if (roomIds.length > 0) {
-    try {
-      const lastMessageItems = await fetchRoomLastMessages(roomIds);
-      for (const item of lastMessageItems) {
-        const senderDisplayName = resolveMessageSenderDisplayName(teamId, item.sender_id);
-        previewMap.set(item.room_id, formatPreview(senderDisplayName, item.content));
-      }
-    } catch {
-      // 房间列表本身可用时，不让 preview 补充失败阻塞整个加载流程。
-    }
-  }
-
-  const rooms: RoomState[] = baseRooms.map((room) => ({
-    ...room,
-    preview: resolveRoomPreview({
-      messages: getRoomEntry(room.room_id).messages,
-      previousRoom: (teamRoomsState.value[teamId] ?? []).find((item) => item.room_id === room.room_id) ?? null,
-      preview: previewMap.get(room.room_id),
-      resolveSenderDisplayName: (senderId) => resolveMessageSenderDisplayName(teamId, senderId),
-    }),
-    unread: 0,
-    current_turn_agent_id: room.current_turn_agent_id ?? null,
-  }));
-
-  seedTeamRooms(teamId, rooms);
-  return rooms;
 }
 
 export function seedRoomMessages(
@@ -344,53 +296,10 @@ export function seedRoomMessages(
   syncTotalMessageCount();
 }
 
-export async function loadRoomMessagesState(teamId: number, roomId: number): Promise<MessageInfo[]> {
-  const page = await fetchRoomMessages(roomId, { limit: ROOM_MESSAGES_PAGE_SIZE });
-  const messages = page.messages.map((m) => normalizeMessage(teamId, m));
-  seedRoomMessages(roomId, messages, { hasMoreHistory: page.hasMore });
-  syncRoomPreview(teamId, roomId, messages);
-  return messages;
-}
-
-export async function loadOlderRoomMessagesState(teamId: number, roomId: number): Promise<MessageInfo[]> {
-  const currentEntry = getRoomEntry(roomId);
-  if (!currentEntry.hasMoreHistory || currentEntry.loadingHistory) {
-    return [];
-  }
-  const oldestMessageId = resolveOldestLoadedMessageId(currentEntry.messages);
-  if (oldestMessageId === null) {
-    return [];
-  }
-
-  setRoomEntry(roomId, { loadingHistory: true });
-
-  try {
-    const page = await fetchRoomMessages(roomId, {
-      limit: ROOM_MESSAGES_PAGE_SIZE,
-      beforeId: oldestMessageId,
-    });
-    const messages = page.messages.map((message) => normalizeMessage(teamId, message));
-    seedRoomMessages(roomId, messages, {
-      preserveExisting: true,
-      hasMoreHistory: page.hasMore,
-    });
-    syncRoomPreview(teamId, roomId, getRoomEntry(roomId).messages);
-    return messages;
-  } finally {
-    setRoomEntry(roomId, { loadingHistory: false });
-  }
-}
-
 export function seedAgentActivities(agentId: number, activities: AgentActivity[]): void {
   agentActivitiesState.value[agentId] = [...activities]
     .sort((a, b) => a.id - b.id)
     .slice(-MAX_AGENT_ACTIVITY_ITEMS);
-}
-
-export async function loadAgentActivities(agentId: number): Promise<AgentActivity[]> {
-  const activities = await fetchAgentActivities(agentId);
-  seedAgentActivities(agentId, activities);
-  return activities;
 }
 
 export function seedDeptTree(teamId: number, deptTree: DeptTreeNode | null): void {
@@ -400,20 +309,8 @@ export function seedDeptTree(teamId: number, deptTree: DeptTreeNode | null): voi
   };
 }
 
-export async function loadDeptTree(teamId: number): Promise<DeptTreeNode | null> {
-  const deptTree = await fetchDeptTree(teamId);
-  seedDeptTree(teamId, deptTree);
-  return deptTree;
-}
-
 export function seedRoleTemplates(roleTemplates: RoleTemplateSummary[]): void {
   roleTemplatesState.value = [...roleTemplates];
-}
-
-export async function loadRoleTemplates(): Promise<RoleTemplateSummary[]> {
-  const roleTemplates = await fetchRoleTemplates();
-  seedRoleTemplates(roleTemplates);
-  return roleTemplates;
 }
 
 export function setActiveRealtimeContext(teamId: number | null, roomId: number | null): void {
@@ -662,6 +559,15 @@ export function appendTaskEvent(taskId: number, event: AgentTaskEvent): void {
   }
 }
 
+/** `team_reloaded` 的重拉处理器：由 action 层（runtimeActions.ts）注册，store 只负责调用。 */
+type TeamReloadHandler = (teamId: number) => void;
+
+let teamReloadHandler: TeamReloadHandler | null = null;
+
+export function registerTeamReloadHandler(handler: TeamReloadHandler | null): void {
+  teamReloadHandler = handler;
+}
+
 export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
   if (event.type === 'message') {
     const nextMessage: MessageInfo = event.message;
@@ -815,12 +721,10 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
   }
 
   if (event.type === 'team_reloaded') {
-    loadTeamRooms(event.teamId);
-    loadTeamAgents(event.teamId, { includeSpecial: true });
-    // 成员的部门归属由部门树（manager_id / agent_ids）现算，成员列表重载不会
-    // 顺带更新它；组织树变更也走热更新，这里必须一并重载，否则成员卡片的
-    // 部门路径会一直是旧值。
-    loadDeptTree(event.teamId);
+    // 三个重拉动作是业务请求，归 action 层（runtimeActions.ts）。store 不再 import 任何
+    // 业务 fetch，所以这里只调用 action 层注册进来的处理器；未注册时（如纯 store 单元测试）
+    // 退化为「只提示不重拉」，不会抛错。
+    teamReloadHandler?.(event.teamId);
     showGlobalSuccessToast(t('topbar.teamReloaded'));
     return;
   }

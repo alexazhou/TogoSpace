@@ -6,7 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { getAgentAvatarUrl } from '../../avatar';
 import { createTeamRoom } from '../../api';
 import { showGlobalSuccessToast } from '../../appUiState';
-import { loadRoleTemplates, loadTeamAgents, loadTeamRooms } from '../../realtime/runtimeStore';
+import { loadRoleTemplates, loadTeamAgents, loadTeamRooms } from '../../realtime/runtimeActions';
 import { useRoleTemplates, useTeamAgents } from '../../realtime/selectors';
 import { displayName } from '../../utils';
 import type { AgentStatus } from '../../types';

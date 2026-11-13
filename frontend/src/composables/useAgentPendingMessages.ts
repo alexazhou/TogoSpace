@@ -1,7 +1,8 @@
 import { computed, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from 'vue';
 import { getAgentAvatarUrl } from '../avatar';
 import { connectionState } from '../appUiState';
-import { getTeamAgents, loadRoomMessagesState, loadTeamRooms } from '../realtime/runtimeStore';
+import { loadRoomMessagesState, loadTeamRooms } from '../realtime/runtimeActions';
+import { getTeamAgents } from '../realtime/runtimeStore';
 import { useRoomMessages, useTeamRooms } from '../realtime/selectors';
 import {
   OPERATOR_ID,

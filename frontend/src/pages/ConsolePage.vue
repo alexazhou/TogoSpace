@@ -13,7 +13,7 @@ import CreateRoomDialog from '../components/console/CreateRoomDialog.vue';
 import { useAgentActivityDialogState } from '../composables/useAgentActivityDialogState';
 import { useConsoleRuntimeState } from '../composables/useConsoleRuntimeState';
 import { useConsoleSidebarLayout } from '../composables/useConsoleSidebarLayout';
-import { loadDeptTree, loadRoleTemplates } from '../realtime/runtimeStore';
+import { loadDeptTree, loadRoleTemplates } from '../realtime/runtimeActions';
 import { getAgentControlRoom } from '../api';
 import { useDeptTree, useRoleTemplates } from '../realtime/selectors';
 import { VIEWPORT_QUERIES } from '../responsive/breakpoints';
