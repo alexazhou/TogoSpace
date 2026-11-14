@@ -50,7 +50,7 @@
       "docs/design/2026-11-08-desktop-login-shell-path/step1_product.md": 4,
       "docs/design/2026-11-08-desktop-login-shell-path/step2_technical.md": 9,
       "frontend/src/App.vue": 1,
-      "frontend/src/api.ts": 1,
+      "frontend/src/api/system.ts": 1,
       "frontend/src/utils/desktopLog.ts": 2,
       "frontend/src/utils/frontendLogBridge.ts": 1,
       "src/appPaths.py": 1,
