@@ -178,7 +178,7 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     ),
     "task create": (
         "建单不会自动唤醒执行人：建完请另发 send_chat_msg 通知对方（返回体 hint 字段会再提醒一次）。",
-        "必填 --title / --assignee_id；其余可选。数组/对象型参数（--depends_on）"
+        "必填 --title / --assignee-id；其余可选。数组/对象型参数（--depends-on）"
         "建议用 --from payload 传，避免引号被 shell 拆坏。",
     ),
     "mcp ls": (
