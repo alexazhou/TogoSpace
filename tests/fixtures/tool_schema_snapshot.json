@@ -112,6 +112,25 @@
           ]
         }
       },
+      "stages": {
+        "description": "多级工作流节点列表（**与 reviewer_id 互斥**）：每项为 {\"owner_id\": int, \"node_type\": \"REVIEW\"|\"EXECUTION\", \"name\": \"组长初审\"}，也可简写为 owner_id 整数（默认为 REVIEW 审核节点）。节点 0 恒为执行人（assignee_id），无需在 stages 里重复。例：stages=[{\"name\":\"组长初审\",\"owner_id\":7},{\"name\":\"总监终审\",\"owner_id\":9}] ⇒ 节点链 [执行 → 组长初审 → 总监终审]。每个节点负责人必须是本团队在职成员。",
+        "schema": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
       "status": {
         "description": "指定初始状态，可选 TODO / ON_HOLD。ON_HOLD 表示创建即搁置（优先于依赖推导）；TODO 与省略等价，由系统按 depends_on 自动判断（有未完成依赖为 PENDING，否则 TODO）",
         "schema": {
@@ -464,7 +483,7 @@
     ]
   },
   "list_tasks": {
-    "description": "查询协作任务列表。assignee / reviewer / scope / title_keyword 至少传其一；返回按最新在前，total > count 表示被截断。\n每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。",
+    "description": "查询协作任务列表。assignee / reviewer / scope / title_keyword / mine 至少传其一；返回按最新在前，total > count 表示被截断。\n每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。",
     "parameters": {
       "assignee": {
         "description": "按执行人 Agent ID 过滤",
@@ -475,6 +494,12 @@
           ]
         }
       },
+      "include_upcoming": {
+        "description": "配合 mine=True：除当前待办外，再包含「后续节点有我但还没轮到」的在途任务（提前预知要接手的活）。单独使用会报 invalid_filter_combo。",
+        "schema": {
+          "type": "boolean"
+        }
+      },
       "limit": {
         "description": "本次返回条数，默认 20，取值 1-50，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）",
         "schema": {
@@ -482,6 +507,12 @@
             "integer",
             "null"
           ]
+        }
+      },
+      "mine": {
+        "description": "「我的待办」视图（v3 推荐写法）：只返回**接力棒当前正轮到我处理**的任务（current_owner_id = 我）。多级工作流下这比 scope=\"self\" 更精确——scope=\"self\" 返回「我参与任一节点」的全部任务，mine=True 只返回现在该我说话的。",
+        "schema": {
+          "type": "boolean"
         }
       },
       "open_only": {
@@ -1182,8 +1213,27 @@
     "required": []
   },
   "update_task": {
-    "description": "更新协作任务：流转状态、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。",
+    "description": "更新协作任务：交棒/打回、调整工作流节点、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。",
     "parameters": {
+      "append_stages": {
+        "description": "后置加签：在当前节点链末尾追加节点，格式同 create_task 的 stages。认领后只能由当前持棒人追加（REVIEW 节点允许加签，这是唯一「增加把关」的合法途径）。",
+        "schema": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
       "clear_fields": {
         "description": "要清除（置空）的字段名列表，白名单当前仅 \"reviewer_id\"。clear_fields=[\"reviewer_id\"] 表示撤销验收人（置空）：只有任务创建人可以操作，任务处于 REVIEWING 时不允许（会导致无人能通过验收），不能与状态流转或 reviewer_id 同时给。传空数组 [] 视为「未提供」，不会撤销任何字段（注意这与 list_tasks 的 status=[] 语义相反：status=[] 是「过滤条件写了个空的」，意图不明故报错；clear_fields=[] 是「没要清任何字段」，意图明确故等价省略）。白名单之外的字段名会被拒绝并返回 error_code=\"invalid_clear_field\"。",
         "schema": {
@@ -1214,8 +1264,35 @@
           "type": "string"
         }
       },
+      "reassign_stage": {
+        "description": "节点换人：{\"stage_index\": 1, \"owner_id\": 9}。用于「当前/后续未完成节点交接换人」，新负责人必须是本团队在职成员。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "remove_stage_index": {
+        "description": "删除未开始的节点序号。**REVIEW 节点任何情况都不可删除**（防绕过审批红线）；认领后才能删未开始的 EXECUTION 节点，只有当前持棒人可删；不能删当前或已通过的节点。节点 0（执行人）不可删除，换人请用 reassign_stage。",
+        "schema": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
       "reviewer_id": {
         "description": "把验收人设为该团队成员（写时间线一条「验收人变更：旧 → 新」）。只有任务创建人或当前验收人可以操作，执行人不能操作；不能设成执行人自己；与当前验收人相同时不写事件。省略表示不改验收人。**不能与状态流转（非自环的 new_status）在同一次调用里做**。",
+        "schema": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "target_stage": {
+        "description": "reject 的目标节点序号（0 .. current_stage-1），省略时默认打回节点 0。只能与 workflow_action=\"reject\" 一起用。",
         "schema": {
           "type": [
             "integer",
@@ -1227,6 +1304,23 @@
         "description": "任务 ID",
         "schema": {
           "type": "integer"
+        }
+      },
+      "workflow_action": {
+        "description": "工作流动作（v3 单棒接力）。advance=交棒给下一节点（已是末节点则任务 DONE）；reject=打回任意前序节点（必须同时给 note 说明原因）。只有**当前持棒人**（接力棒现在在谁手上，见 get_task_detail 的 current_owner_id）可以执行。纯顺序推进类任务（只有 1 个节点，或当前在最后一个节点）用 new_status=DONE 等价；其余请优先用本参数，它不需要你猜状态。",
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "advance",
+                "reject"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
