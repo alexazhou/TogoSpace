@@ -22,12 +22,14 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 
 from exception import ForwardToolCall
 from service.funcToolService import consoleCommands as cc
 from service.funcToolService import consoleParsing as cp
+from service.funcToolService import consoleTool as ct
 from service.funcToolService.consoleTool import console
 
 # --------------------------------------------------------------------------- #
@@ -227,3 +229,91 @@ class TestTaskCreateForwarding:
         _name, args, post_process = _forward_args("dept create --name x --responsibility y")
         assert post_process is None
         assert cc.COMMAND_INDEX["dept create"].success_hint == ""
+
+
+# --------------------------------------------------------------------------- #
+# #233 记档 D1：`_handle_list` 两条路径**各转发恰一次**
+# --------------------------------------------------------------------------- #
+
+
+class TestHandleListForwardsExactlyOnce:
+    """`_handle_list` 的转发必须结构化：有 fallback ⇒ 恰 1 次带 `post_process`；
+    无 fallback ⇒ 恰 1 次不带。
+
+    合并前的形态是 `if auto_filled:` 块尾**裸调用** `_forward(parsed, **args)`、
+    没有显式 `else:`——不双转发完全靠「`_forward` 恒 raise」这个未受保护的
+    前提（#222 记档 D1）。本判据把 `_forward` 换成**返回而不抛**的记录 stub，
+    走真解析链直调 `_handle_list`，只认**精确计数 == 1**：
+
+    - 「双转发」⇒ 计数 2 ⇒ 红（裸调用在「`_forward` 会返回」假设下的真实行为）；
+    - 「零转发」⇒ 计数 0 ⇒ 红；
+    - 「至少一次」类断言咬不住双转发，**禁止使用**——本类三条全部是精确计数。
+
+    解析走真链（tokenizer → _parse_options → ParsedCommand，同
+    `test_console_locator_hints` 的做法），不 mock ParsedCommand，避免与生产解析分叉。
+    """
+
+    @staticmethod
+    def _parsed(command: str) -> cp.ParsedCommand:
+        tokens = cp._tokenize(command)
+        spec = cc.COMMAND_INDEX[" ".join(tokens[:2])]
+        positional, options, input_source = cp._parse_options(spec, tokens[2:])
+        return cp.ParsedCommand(
+            spec,
+            positional=positional,
+            options=options,
+            input_source=input_source,
+            raw_tokens=tokens[2:],
+        )
+
+    @staticmethod
+    def _record_and_run(
+        monkeypatch: pytest.MonkeyPatch, command: str
+    ) -> list[tuple[str, Any, dict[str, Any]]]:
+        calls: list[tuple[str, Any, dict[str, Any]]] = []
+
+        def _stub(parsed: cp.ParsedCommand, /, *, post_process: Any = None, **args: Any) -> None:
+            """返回而不抛：制造「`_forward` 会返回」的假设态，让计数说话。"""
+            calls.append((parsed.spec.legacy_tool, post_process, dict(args)))
+
+        monkeypatch.setattr(ct, "_forward", _stub)
+        ct._handle_list(TestHandleListForwardsExactlyOnce._parsed(command))
+        return calls
+
+    def test_auto_fallback_forwards_once_with_post_process(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`task ls`（过滤项全缺 ⇒ 自动补 scope=self）：恰 1 次，带 post_process。"""
+        calls = self._record_and_run(monkeypatch, "task ls")
+        assert len(calls) == 1, calls
+        target, post_process, args = calls[0]
+        assert target == "list_tasks", target
+        assert post_process is not None, "自动补参必须带 post_process（auto_filled_filters 的唯一来源）"
+        assert args.get("scope") == "self", args
+
+    def test_explicit_filter_forwards_once_without_post_process(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`task ls --scope team`（有 fallback 表但过滤项已给）：恰 1 次，不带 post_process。
+
+        注意不能拿 `--status TODO` 当「已给过滤」：`status` 不在
+        `filter_options`（assignee/reviewer/scope/title_keyword）里，A3 的设计
+        本来就会在只有 --status 时自动补 scope=self（见 TestTaskLsAutoScope）。
+        """
+        calls = self._record_and_run(monkeypatch, "task ls --scope team")
+        assert len(calls) == 1, calls
+        target, post_process, args = calls[0]
+        assert target == "list_tasks", target
+        assert post_process is None, "未补参不许挂后处理（否则 auto_filled_filters 会凭空出现）"
+        assert args.get("scope") == "team", args
+
+    def test_no_fallback_spec_forwards_once_without_post_process(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`dept ls`（命令表根本没有 fallback_options）：恰 1 次，不带 post_process。"""
+        calls = self._record_and_run(monkeypatch, "dept ls")
+        assert len(calls) == 1, calls
+        target, post_process, args = calls[0]
+        assert target == "get_dept_info", target
+        assert post_process is None, "无补参路径不该有后处理"
+        assert "scope" not in args, args

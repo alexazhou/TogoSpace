@@ -692,8 +692,8 @@ def _handle_list(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) 
             return result
 
         _forward(parsed, post_process=_annotate, **args)
-
-    _forward(parsed, **args)
+    else:
+        _forward(parsed, **args)
 
 
 def _handle_get(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
