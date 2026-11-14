@@ -172,6 +172,26 @@ def _first_clause(description: Any) -> str:
     return text
 
 
+def _shape_note(kind: str) -> str:
+    """按类型类别给「这行参数在命令行上怎么写」的形态标注（#219 需求 2）。
+
+    为什么只标 array / object：string / integer / boolean 的形态已经由
+    `<kind>` 或无值开关本身说明了，再注一遍是噪音；而 array / object 的
+    传参形态有真实的分叉经验 —— 模型常把 JSON 数组塞给 CSV 语义的选项
+    （`--member_names '["a","b"]'` 被拆坏，清单 §A1），也常在标量上用
+    CSV 写法（#219 D2：对 integer/object 不可执行）。help 是模型选写法
+    的依据，形态必须写在参数行上、不能只写在实现里。
+
+    文案须与解析行为一致：数组型逗号/JSON/重复三种写法等价
+    （consoleTool._split_option_values），object 只收 JSON object 字面量。
+    """
+    if kind == "array":
+        return "（形态：CSV（a,b）、JSON 数组（[\"a\",\"b\"]）或重复出现，三种写法等价；复杂结构建议 --from payload）"
+    if kind == "object":
+        return "（形态：JSON object（{\"k\":\"v\"}）；复杂结构建议 --from payload）"
+    return ""
+
+
 def describe_param(
     name: str,
     prop: dict,
@@ -192,7 +212,8 @@ def describe_param(
         head += "（别名 " + " / ".join("--" + alias for alias in aliases) + "）"
     note = _first_clause(prop.get("description"))
     tail = f"（{marker}）" + (f" {note}" if note else "")
-    return f"{head}{tail}"
+    shape = _shape_note(kind)
+    return f"{head}{shape}{tail}"
 
 
 def describe_tool_params(tool_name: str, *, aliases: dict[str, tuple[str, ...]] | None = None) -> list[str]:

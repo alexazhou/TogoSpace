@@ -177,15 +177,20 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
         if kind == "boolean":
             options[existing] = value
             return
+        # #219（D2，小马哥 11:48 拍板「建议必须与 kind 匹配」）：这里 kind 一定是
+        # 标量（string/integer/object —— 数组型上面已聚合、布尔型上面已幂等），
+        # 任何「逗号写进一个 --x」的建议对 integer/object 都**不可执行**
+        # （实测：integer ⇒ invalid_target，object ⇒ invalid_option_value），
+        # 不可执行的建议比不给更坏。所以标量重复**只提示原因与改法**、不给
+        # `suggestion` 字段；「逗号 / 重复写法」的引导只放在数组型参数的
+        # help 标注里（consoleSchema.describe_param），那里才匹配 kind。
         raise ConsoleError(
             "duplicate_option",
-            f"--{name} 重复出现：它是 {kind} 型**标量**参数，后一次会覆盖前一次、"
-            f"静默丢掉数据，因此直接拒绝。请检查是否多写；要一次传多个值请用逗号"
-            f"写在一个 --{target} 里（如 --{target} a,b），只有数组型参数支持"
-            f"重复出现并按出现顺序聚合。",
+            f"--{name} 重复出现：它是 {kind} 型**标量**参数，只能给一次；"
+            f"后一次会覆盖前一次、静默丢掉数据，因此直接拒绝。"
+            f"请检查是否多写（只有数组型参数支持逗号分隔或重复出现并按顺序聚合）。",
             option=target,
             kind=kind,
-            suggestion=f"--{target} a,b",
         )
 
     idx = 0

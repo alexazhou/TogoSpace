@@ -98,6 +98,7 @@ def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str
     # 多次还是用逗号，不需要先试一次错。
     lines.append(
         "选项重复：数组型（如 --status / --member_names）可重复出现，按出现顺序聚合并去重保序；"
+        "数组型的值可用 CSV（a,b）或 JSON 数组（[\"a\",\"b\"]），两种写法等价；"
         "标量型重复出现报 duplicate_option（不会静默只认最后一个）；布尔开关重复无副作用"
     )
     lines.append("详情：help <资源> 或 help <资源> <操作>；任意命令加 --help / -h 亦可")
@@ -357,6 +358,80 @@ def _split_csv(raw: Any) -> list[str]:
     return list(dict.fromkeys(p.strip() for p in parts if p.strip()))
 
 
+def _parse_array_literal(text: str, *, name: str, command: str) -> list[str]:
+    """`[` 开头的值按 **JSON 数组字面量**解析（#219）。
+
+    为什么需要它：CSV 是数组型选项的既有形态，但模型经常把 JSON 数组直接塞进
+    选项（`--member_names '["a","b"]'`），被 CSV 拆成 `["a` / `"b"]` 两段，
+    报到下游变成「未找到成员: ["a」——错得看不出原因（清单 §A1 实测）。
+
+    两条硬口径：
+    - 元素**必须是字符串**：本项目所有数组型参数（`member_names` / `status` /
+      `clear_fields` / `allow_tools` …）schema 里都是 `list[str]`；把 `1` / `true`
+      静默 `str()` 成 `"1"` / `"True"` 会造出下游校验看不懂的值，所以直接报错。
+    - 元素**不 trim**：JSON 是精确格式，用户显式写了 `" a "` 就是那个字面量；
+      CSV 段才 trim（那是分隔符语法的一部分）。
+    """
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ConsoleError(
+            "invalid_option_value",
+            f"--{name} 的值以 `[` 开头，按 JSON 数组解析失败：{exc.msg}"
+            f"（第 {exc.lineno} 行第 {exc.colno} 列）。"
+            f"要么写成合法的 JSON 数组（如 '[\"a\",\"b\"]'），要么改用逗号分隔"
+            f"（--{name} a,b），或把配置放进 --from payload。",
+            example=f"{command} --{name} '[\"a\",\"b\"]'",
+        ) from exc
+    if not isinstance(parsed, list):
+        raise ConsoleError(
+            "invalid_option_value",
+            f"--{name} 的值以 `[` 开头，但解析结果是 {type(parsed).__name__}，需要 JSON 数组。",
+            example=f"{command} --{name} '[\"a\",\"b\"]'",
+        )
+    items: list[str] = []
+    for index, item in enumerate(parsed):
+        if not isinstance(item, str):
+            raise ConsoleError(
+                "invalid_option_value",
+                f"--{name} 的 JSON 数组第 {index} 个元素是 {type(item).__name__}，"
+                f"这里只接受字符串元素（如 '[\"a\",\"b\"]'）。",
+                example=f"{command} --{name} '[\"a\",\"b\"]'",
+            )
+        items.append(item)
+    return items
+
+
+def _split_option_values(raw: Any, *, name: str, command: str) -> list[str]:
+    """数组型选项原始值 → 去重保序的字符串列表（#219 起 `[` 开头的值段走 JSON）。
+
+    `raw` 的两种形态（#218 起）：
+    - **字符串**：该选项出现一次（`--status TODO,DONE`）；
+    - **列表**：该选项出现多次（`--status TODO --status DONE`），每个元素是一次
+      出现写下的原始值。
+
+    **必须逐值段判断形态**：只看整体首字符，在「多次出现」时会把后面那些以 `[`
+    开头的值段漏掉（`--status TODO --status '["DONE"]'` 的第二段就会被 CSV 拆坏）。
+
+    合成规则（help 里也写明，本单不改既有语义）：
+    `--x a,b` ≡ `--x a --x b` ≡ `--x '["a","b"]'`，三者产出完全相同的列表；
+    CSV 段 trim、JSON 元素不 trim；空段/空串丢弃；最后统一 `dict.fromkeys` 去重保序。
+    """
+    segments = raw if isinstance(raw, (list, tuple)) else [raw]
+    merged: list[str] = []
+    for segment in segments:
+        if segment is None:
+            continue
+        text = str(segment).strip()
+        if not text:
+            continue
+        if text.startswith("["):
+            merged.extend(_parse_array_literal(text, name=name, command=command))
+        else:
+            merged.extend(_split_csv(text))
+    return list(dict.fromkeys(item for item in merged if item))
+
+
 def _convert_option(raw: Any, *, kind: str, name: str, command: str) -> Any:
     """按 schema 声明的类型把选项值转成工具要的形态。"""
     if kind == "boolean":
@@ -366,10 +441,21 @@ def _convert_option(raw: Any, *, kind: str, name: str, command: str) -> Any:
     if kind == "integer":
         return _require_positive_int(raw, what=f"--{name}", command=command)
     if kind == "array":
-        return _split_csv(raw) or None
+        return _split_option_values(raw, name=name, command=command) or None
     if kind == "object":
+        # 与数组型的 `[` 判断保持一致的**形态说明**（#219）：object 只接受 JSON
+        # object 字面量，先按首字符区分「不是 JSON」与「是 JSON 但语法坏」，两种
+        # 错误原因不同、改法也不同（前者要加 `{`，后者要修语法）。
+        text = str(raw).strip()
+        if not text.startswith("{"):
+            raise ConsoleError(
+                "invalid_option_value",
+                f"--{name} 是 object 型参数，值必须是 JSON object 字面量"
+                f"（以 `{{` 开头，如 '{{\"k\":\"v\"}}'）；复杂结构建议放进 --from payload。",
+                example=f"{command} --{name} '{{\"k\":\"v\"}}'",
+            )
         try:
-            parsed = json.loads(str(raw))
+            parsed = json.loads(text)
         except json.JSONDecodeError as exc:
             raise ConsoleError(
                 "invalid_option_value",
