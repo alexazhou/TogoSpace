@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "cd .. && .venv/Scripts/python.exe tauri/scripts/build_backend.py"
+  },
+  "bundle": {
+    "targets": [
+      "nsis"
+    ]
+  }
+}

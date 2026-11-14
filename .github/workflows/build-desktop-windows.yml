@@ -1,0 +1,181 @@
+name: Build Desktop (Windows)
+
+# Windows 桌面构建 + CI 内验证（#243）。
+#
+# 与 mac 链路**互不影响**：build-desktop.yml / tauri.yml / release.yml 三个文件零改动
+# （本 workflow 里有一步用 git diff 对基线 2debafad 自证），本文件是新增的独立 entry。
+#
+# 产物形态选 NSIS（而非 msi）：
+#   1) Tauri v2 在 Windows 上的默认打包器，单一 .exe 安装器；
+#   2) 不需要 WiX 工具链（msi 走 WiX，CI 里多一层下载依赖，历史上同类外部依赖最易碎）；
+#   3) 支持 `/S` 静默安装，正好用于「装完再验一遍」这一步。
+#
+# 触发方式：手动 dispatch（任意分支）/ push 到本单特性分支 feat/win-build。
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/win-build
+
+concurrency:
+  group: win-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-win:
+    name: Build Windows NSIS installer
+    # 钉 windows-2022，不用 windows-latest：浮动标签会随镜像更新漂移
+    #（macos-14 被退役导致 job 1 秒 cancelled 就是前车之鉴）。
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      # scripts/togo_desktop.spec 读 TARGET_ARCH（Windows 上仅用于日志与一致性）
+      TARGET_ARCH: x86_64
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        # LFS 必须拉：assets/execute/gtsp/gtsp-* 全是 LFS，其中一个就是 Windows 侧要用的
+        # gtsp-windows-amd64.exe。LFS 没拉下来会是 ~130 字节指针文件，验证步骤会用体积下限挡掉。
+        token: ${{ secrets.GH_PAT || github.token }}
+        lfs: true
+        fetch-depth: 0        # 「mac 零改动」的自证需要基线 commit 2debafad 在历史里
+
+    - name: Record runner environment
+      run: |
+        Write-Host "runner   = $env:RUNNER_OS / $env:ImageOS / $env:ImageVersion"
+        Write-Host "os       = $([System.Environment]::OSVersion.VersionString)"
+        Write-Host "cargo    = $(cargo --version)"
+        Write-Host "rustc    = $(rustc --version)"
+        Write-Host "node     = $(node --version)"
+        Write-Host "python   = $(python --version)"
+        Write-Host "webview2 = $((Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue).pv)"
+
+    - name: Assert macOS workflows untouched
+      # 本单硬约束「不许破坏现有 macOS 构建」。mac 的三个 workflow 相对基线必须零改动；
+      # 这是可以在 CI 里当场自证的判据，不靠口头承诺。
+      run: |
+        git diff --exit-code 2debafad -- .github/workflows/build-desktop.yml .github/workflows/tauri.yml .github/workflows/release.yml
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "::error::mac 相关 workflow 相对基线 2debafad 被改动，违反本单边界"
+          exit 1
+        }
+        Write-Host "OK: build-desktop.yml / tauri.yml / release.yml 相对 2debafad 零改动"
+        Write-Host "--- spec 的 mac 分支等价性（EXE kwargs 只在 darwin 上出现）---"
+        Select-String -Path scripts/togo_desktop.spec -Pattern "_EXE_MACOS_ONLY|argv_emulation|target_arch"
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: |
+          frontend/package-lock.json
+          tauri/package-lock.json
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    # .cargo/config.toml 把 target-dir 指向 tauri/build/target
+    - name: Rust Cache
+      uses: swatinem/rust-cache@v2
+      with:
+        workspaces: './tauri/src-tauri -> ../build/target'
+        key: x86_64-pc-windows-msvc
+        cache-on-failure: true
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Create venv and install backend deps
+      run: |
+        python -m venv .venv
+        ./.venv/Scripts/python.exe -m pip install --upgrade pip
+        ./.venv/Scripts/python.exe -m pip install -r requirements.txt pyinstaller
+        ./.venv/Scripts/python.exe -c "import sys, platform; print('venv python', sys.version.split()[0], platform.machine())"
+        ./.venv/Scripts/python.exe -c "import mcp2cli, importlib.metadata as m; print('mcp2cli', m.version('mcp2cli'))"
+
+    - name: Install node dependencies
+      run: |
+        Push-Location frontend; npm ci; Pop-Location
+        Push-Location tauri; npm ci; Pop-Location
+
+    - name: Build frontend and backend
+      # frontend 动作会把 frontend/dist 同步到 assets/frontend 并做双份哈希比对（build_desktop.py 既有逻辑）；
+      # backend 动作跑 PyInstaller onedir → tauri/build/backend。
+      run: ./.venv/Scripts/python.exe tauri/scripts/build_desktop.py --arch x86_64 --action frontend,backend
+
+    - name: Build Tauri bundle (NSIS)
+      working-directory: tauri
+      env:
+        # beforeBuildCommand 会再调一次 build_backend.py；后端已构建则跳过（避免重复打包）
+        TOGOSPACE_SKIP_BACKEND_BUILD: '1'
+      run: npx tauri build --bundles nsis
+
+    - name: Locate installer
+      id: locate
+      run: |
+        $root = 'tauri/build/target/release/bundle/nsis'
+        if (-not (Test-Path $root)) { Write-Host "::error::NSIS 产物目录不存在: $root"; exit 1 }
+        $files = Get-ChildItem -Path $root -Filter *.exe -Recurse
+        if ($files.Count -eq 0) { Write-Host "::error::$root 下没有 .exe 安装包"; exit 1 }
+        $files | ForEach-Object { Write-Host "  candidate: $($_.Name)  $([math]::Round($_.Length/1MB,1)) MB" }
+        "path=$($files[0].FullName)" >> $env:GITHUB_OUTPUT
+        "name=$($files[0].Name)" >> $env:GITHUB_OUTPUT
+
+    # ── A 安装包层 ────────────────────────────────────────────────────────────
+    # 体积区间依据：首次成功构建的实收值 ±（见报告「产物体积基线」一节）。
+    # 区间的作用是抓「打包漏资产 / 后端树没进去」这类事故，不是精确判据，
+    # 所以给的是宽区间；真基线出来后按实测收敛（改这里，不改验证脚本）。
+    - name: "Verify installer (A: 存在 / 体积 / sha256)"
+      run: |
+        ./.venv/Scripts/python.exe scripts/verify_win_bundle.py bundle `
+          --path "${{ steps.locate.outputs.path }}" --min-mb 120 --max-mb 700
+
+    # ── B 后端层：拿构建出来的后端可执行文件真跑 ───────────────────────────────
+    - name: "Verify backend executable (B: 空跑 + 真启动 + 真 HTTP + stdin 停机)"
+      run: ./.venv/Scripts/python.exe scripts/verify_win_bundle.py backend-smoke --exe tauri/build/backend/Togobot-backend.exe
+
+    # ── C 安装层：静默安装后在安装树里复验 ─────────────────────────────────────
+    - name: Silent install (NSIS /S)
+      run: |
+        $dir = 'C:\togotest'
+        if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+        Write-Host "installing to $dir ..."
+        $process = Start-Process -FilePath "${{ steps.locate.outputs.path }}" -ArgumentList '/S', "/D=$dir" -Wait -PassThru
+        Write-Host "installer exit code = $($process.ExitCode)"
+        Start-Sleep -Seconds 5
+        if (-not (Test-Path $dir)) { Write-Host "::error::静默安装后目录不存在: $dir"; exit 1 }
+        Get-ChildItem $dir | Select-Object Mode, Length, Name | Format-Table -AutoSize | Out-String | Write-Host
+
+    - name: "Verify installed tree (C: 结构 + 安装树上复跑后端)"
+      run: |
+        ./.venv/Scripts/python.exe scripts/verify_win_bundle.py installed `
+          --dir 'C:\togotest' --smoke-exe 'C:\togotest\backend\Togobot-backend.exe'
+
+    - name: Show artifact digest
+      run: |
+        $p = "${{ steps.locate.outputs.path }}"
+        $hash = (Get-FileHash -Algorithm SHA256 -Path $p).Hash.ToLower()
+        $size = (Get-Item $p).Length
+        "file=${{ steps.locate.outputs.name }}" | Tee-Object -FilePath artifact-digest.txt
+        "size_bytes=$size"                        | Tee-Object -Append -FilePath artifact-digest.txt
+        "sha256=$hash"                            | Tee-Object -Append -FilePath artifact-digest.txt
+        Get-Content artifact-digest.txt
+
+    - name: Upload installer artifact
+      if: always()   # 构建成功但验证红的场景也要能取到产物来人工分析
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-nsis-installer
+        path: |
+          ${{ steps.locate.outputs.path }}
+          artifact-digest.txt
+        if-no-files-found: error
+        retention-days: 30

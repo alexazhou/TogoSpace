@@ -10,6 +10,7 @@ import fnmatch
 import os
 import platform
 import re
+import sys
 
 # SPECPATH 是 PyInstaller 内置变量，指向本 spec 文件所在目录
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
@@ -141,6 +142,15 @@ a.binaries = filtered_binaries
 
 pyz = PYZ(a.pure)
 
+# macOS 专属的 EXE 参数（#243 起 Windows 也要打这个 spec）。
+# `target_arch` 只对 macOS 有意义（决定产物是 arm64 / x86_64 / universal），
+# `argv_emulation` 是 macOS 的 AppleEvent 参数。PyInstaller 在 Windows 上会忽略它们，
+# 但「靠它忽略」不是契约：显式只在 darwin 上传，darwin 侧 kwargs 与改动前逐字相同
+# （= mac 构建产物不受本单影响），Windows 侧则完全绕开这两项。
+_EXE_MACOS_ONLY = {}
+if sys.platform == "darwin":
+    _EXE_MACOS_ONLY = {"argv_emulation": False, "target_arch": TARGET_ARCH}
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -153,8 +163,7 @@ exe = EXE(
     upx=True,
     console=True,
     disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=TARGET_ARCH,
+    **_EXE_MACOS_ONLY,
 )
 
 coll = COLLECT(
