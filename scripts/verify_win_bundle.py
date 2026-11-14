@@ -141,20 +141,64 @@ def _spawn_and_capture(exe: str, env: dict[str, str]) -> tuple[int, str, str] | 
     return result.returncode, out, err
 
 
+def judge_error_contract(returncode: int, out: str, err: str, *, expect_message: str = "必须为") -> list[str]:
+    """B1 严格判据：错误路径的契约（#245 恢复的版本）。返回失败原因列表，空 = 通过。
+
+    契约来源 src/desktopEntry.py 的 main()：
+      `except DesktopParamError: emit_error(code, message); return 2`
+    ⇒ 缺 `TOGOSPACE_DESKTOP` 时必须是：stdout 打出单行 `[TOGO] ERROR code=1 message=<原因>`，
+      进程 exit **2**。
+
+    为什么还要判「message 可读」而不只是「marker 出现」：编码兜底 `errors="backslashreplace"`
+    会让 marker 以 `\\u5fc5\\u987b…` 的转义形态照样出现在 stdout —— 外壳拿到了行、用户看到的却是转义。
+    PM 要的是「`message=…` 真打出来」，所以这里额外禁止转义形态；否则修没修都绿，等于没人守
+    （#245 的变异自证就是钉这一条：把编码修复去掉，本判据必须变红）。
+    """
+    failures: list[str] = []
+    stdout_lines = [line for line in out.splitlines() if line.strip()]
+
+    marker_lines = [line for line in stdout_lines if line.startswith(MARKER_ERROR_ENV + " message=")]
+    if not marker_lines:
+        others = [line for line in stdout_lines if line.startswith(MARKER_ERROR_ENV)]
+        if others:
+            failures.append(
+                f"stdout 有 ERROR marker 但缺 ` message=` 字段：{others[0][:200]!r}（外壳拿不到可读原因）"
+            )
+        else:
+            failures.append(
+                f"stdout 里没有 `{MARKER_ERROR_ENV} message=…`（stdout 实收 {out.strip()[:300]!r}）"
+            )
+    else:
+        message = marker_lines[0].split("message=", 1)[1]
+        if "\\u" in message or "\\x" in message:
+            failures.append(
+                f"message 是转义形态而非可读文本：{message[:160]!r} ⇒ 编码兜底在干活，用户看不懂真实原因"
+            )
+        elif expect_message and expect_message not in message:
+            failures.append(f"message 里没有预期原因片段 {expect_message!r}：{message[:160]!r}")
+
+    if returncode != 2:
+        failures.append(
+            f"退出码 = {returncode}，期望 2（src/desktopEntry.py 错误路径 `return 2`；"
+            f"1 通常意味着异常处理器自己又崩了，例如 UnicodeEncodeError 顶掉了 return）"
+        )
+
+    if "UnicodeEncodeError" in err or "UnicodeEncodeError" in out:
+        failures.append("输出里出现 UnicodeEncodeError ⇒ 编码兜底没生效")
+
+    missing = [token for token in ("ModuleNotFoundError", "ImportError", "No module named") if token in out + err]
+    if missing:
+        failures.append(f"输出里出现 {missing} ⇒ 打包缺依赖，不是能交付的产物")
+
+    return failures
+
+
 def _run_no_desktop_env(exe: str) -> None:
-    """B1：空跑（不带桌面环境变量），判「打包体在 Windows 上真的能起来、并走到参数校验分支」。
+    """B1（严格版，判据见 judge_error_contract）：空跑 ⇒ 必须 `exit 2` + 可读 `[TOGO] ERROR code=1 message=…`。
 
-    判据不写成「exit 2 + ERROR marker」，是因为 Windows 上这条路径**必然**拿不到 marker：
-    `desktopEntry._emit_marker()` 打印的文案含中文，而 PyInstaller 冻结体在 Windows 上
-    stdout 默认 cp1252（实测 run 43621256265：`encodings\cp1252.py:19 encode` →
-    `UnicodeEncodeError`，异常处理器自己再抛，进程以 1 退出）。这是产品代码缺陷，
-    不在本单改动边界内 ⇒ 本函数判「能观测到的事实」，缺陷本身由 B1' 记录 + 报告「已知问题」承载。
-
-    三条判据：
-      1. stdout/stderr 里出现 `DesktopParamError`（或 marker）⇒ 已执行到参数校验
-         （desktopEntry 顶层 import 了 backend_main / configUtil，能走到这里就说明这些全链路导入成功）；
-      2. 不出现 `ModuleNotFoundError` / `ImportError` / `No module named` ⇒ 不是打包缺依赖；
-      3. 退出码非 0 且进程按时返回 ⇒ 既没挂住，也不是 0 假成功。
+    历史：本判据在 #243 期间被临时放宽成「进到 DesktopParamError 分支 / 无缺依赖 / 非 0」，
+    因为 Windows 上错误路径 100% 撞 cp1252（`UnicodeEncodeError` → exit 1）。#245 修好后恢复严格，
+    并由 `marker-contract` 子命令做变异自证，防止下次坏回去没人红。
     """
     exe = os.path.abspath(exe)
     print(f"--- B1 backend 空跑（无桌面环境变量）: {exe}")
@@ -173,43 +217,18 @@ def _run_no_desktop_env(exe: str) -> None:
     if captured is None:
         return
     code, out, err = captured
-    combined = out + err
     print(f"    真实环境（无 PYTHONIOENCODING）exit code = {code}")
     print(f"    stdout = {out.strip()[:500]!r}")
     print(f"    stderr = {err.strip()[:2000]!r}")
 
-    if "DesktopParamError" in combined or MARKER_ERROR_ENV in combined:
-        ok("进程进到参数校验分支（DesktopParamError / marker）⇒ 打包体在 Windows 上真 boot 起来了")
-    else:
-        fail("未见 DesktopParamError / marker ⇒ 打包体可能根本没起来（缺依赖时是 ModuleNotFoundError）")
-
-    missing = [token for token in ("ModuleNotFoundError", "ImportError", "No module named") if token in combined]
-    if missing:
-        fail(f"输出里出现 {missing} ⇒ 打包缺依赖，不是能交付的产物")
-    else:
-        ok("未见 ModuleNotFoundError / ImportError / No module named ⇒ 无缺依赖")
-
-    if code == 0:
-        fail("空跑 exit code = 0，期望非 0（少了 TOGOSPACE_DESKTOP 就不该正常启动）")
-    else:
-        ok(f"空跑 exit code = {code}（非 0，且 300s 内返回，未挂住）")
-
-    # ── B1'（观测，不判红）：把「错误路径 marker 打不出来」这件事记录成实收 ──
-    if MARKER_ERROR_ENV in combined:
-        print("    ℹ️  错误 marker 正常输出（本环境不触发 cp1252 编码问题）")
-    elif "DesktopParamError" in combined and "UnicodeEncodeError" in err:
-        # 只有「走对了错误分支、但打印 marker 时撞编码」才是那个已知缺陷；其余情况不算，
-        # 免得把「本来就没起来」也误标成已知问题。
-        print("    ⚠️  KNOWN-ISSUE：错误路径的 marker 未能输出（DesktopParamError 后 UnicodeEncodeError）。")
-        print("        影响面：仅「启动期错误提示」这条路径 —— 外壳拿不到 ERROR code=1，用户看不到具体原因；")
-        print("               正常启动不受影响（B2 已实测 READY / MIGRATION_END / HTTP / 停机全通）。")
-        print("        直接原因（实测栈）：desktopEntry.emit_error → _emit_marker → print(中文) →")
-        print("              encodings\cp1252.py:19 encode → UnicodeEncodeError。")
-        print("        机制说明（推断，未再深挖）：冻结体初始化解释器时 PYTHON* 环境变量似乎不生效——")
-        print("              run 43621256265 里给父进程设 PYTHONIOENCODING=utf-8 后仍同样崩。")
-        print("        处置：属产品代码问题，本单边界内不改；已写进报告「已知问题」并上报 PM 决定是否另开单。")
-    else:
-        print("    （既无 marker，也不是已知编码缺陷形态；具体红在哪见上面的失败项）")
+    failures = judge_error_contract(code, out, err)
+    if failures:
+        for reason in failures:
+            fail(f"错误路径契约不成立：{reason}")
+        return
+    ok(f"收到 `{MARKER_ERROR_ENV} message=…`（可读、非转义）⇒ 外壳能拿到真实错误原因")
+    ok(f"退出码 = {code} ⇒ 错误路径的本义（`return 2`），没被编码异常顶成 1")
+    ok("未见 ModuleNotFoundError / ImportError / No module named ⇒ 无缺依赖")
 
 
 # ── B2: 真启动 + 真 HTTP + stdin EOF 停机 ────────────────────────────────────
