@@ -112,10 +112,23 @@ jobs:
         Push-Location frontend; npm ci; Pop-Location
         Push-Location tauri; npm ci; Pop-Location
 
-    - name: Build frontend and backend
-      # frontend 动作会把 frontend/dist 同步到 assets/frontend 并做双份哈希比对（build_desktop.py 既有逻辑）；
-      # backend 动作跑 PyInstaller onedir → tauri/build/backend。
-      run: ./.venv/Scripts/python.exe tauri/scripts/build_desktop.py --arch x86_64 --action frontend,backend
+    # 前后端分三步跑，而不是 `build_desktop.py --action frontend,backend`：
+    # 那个脚本内部用 subprocess 直接调 `npm`，而 Windows 上只有 npm.cmd，无 shell 时
+    # CreateProcess 找不到（实测 run 43617826032: FileNotFoundError [WinError 2]）。
+    # build_desktop.py 不属本单允许改动的文件，所以前端构建交给 shell，同步+哈希校验用
+    # scripts/sync_frontend_assets.py 复刻同一判据，后端仍用官方 build_backend.py。
+    - name: Verify version consistency
+      run: ./.venv/Scripts/python.exe scripts/verify_versions.py
+
+    - name: Build frontend (vite)
+      working-directory: frontend
+      run: npm run build
+
+    - name: Sync frontend dist -> assets/frontend (双份哈希比对)
+      run: ./.venv/Scripts/python.exe scripts/sync_frontend_assets.py
+
+    - name: Build backend (PyInstaller onedir -> tauri/build/backend)
+      run: ./.venv/Scripts/python.exe tauri/scripts/build_backend.py --arch x86_64
 
     - name: Build Tauri bundle (NSIS)
       working-directory: tauri
