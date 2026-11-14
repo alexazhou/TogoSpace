@@ -50,6 +50,14 @@ _SCAN_SKIP_DIRS = {
     ".mypy_cache",
     ".pytest_cache",
     ".lg204",
+    # #222 B2：这两处不是产品代码，是**工作区产物**，扫进来会让量具天天假红：
+    # - `.claude/`：Agent 的技能/笔记目录（本机实测有 md 里引用了旧后端名）；
+    # - `dev_storage_root/`：gitignore 的 agent 工作区（各 Agent 的报告、证据日志、
+    #   别人的 worktree 全在里面），任何跑过团队协作的开发机都会命中。
+    # 为什么用目录名而不是文件后缀排除：这两类目录里的 md/json/log 与产品里的
+    # 同名文件无法靠后缀区分，只能按目录划边界。
+    ".claude",
+    "dev_storage_root",
 }
 _SCAN_SUFFIXES = {
     ".py", ".rs", ".toml", ".json", ".yml", ".yaml", ".md", ".txt", ".sh",
@@ -64,6 +72,22 @@ def _read(rel: str) -> str:
     return (REPO_ROOT / rel).read_text(encoding="utf-8")
 
 
+def _is_skipped(path: Path) -> bool:
+    """该文件是否落在要跳过的目录里 —— **只看相对仓库根的路径段**。
+
+    #222 B2 现场：原先按 `path.parts`（绝对路径）判断，于是「仓库自己放在哪个目录下」
+    会污染结果 —— 我的 worktree 恰好在 `.../dev_storage_root/workspace/.../wt_ease`，
+    一加 `dev_storage_root` 就把**整棵仓库**都跳过了（扫描文件数 0），
+    量具悄悄瘫掉、反面对账用例以「文件消失」报红。同类隐患一直存在：仓库若克隆在
+    `~/build/TeamAgent`，旧的判定会连一个文件都不扫。
+    """
+    try:
+        relative = path.relative_to(REPO_ROOT)
+    except ValueError:  # 不在仓库内（理论上 rglob 不会产出）
+        return True
+    return any(part in _SCAN_SKIP_DIRS for part in relative.parts)
+
+
 def _repo_text_files() -> list[Path]:
     out: list[Path] = []
     for path in REPO_ROOT.rglob("*"):
@@ -73,7 +97,7 @@ def _repo_text_files() -> list[Path]:
         # 与 `git grep` 的口径不一致 ⇒ 跳过，保证量具可比。
         if path.is_symlink():
             continue
-        if any(part in _SCAN_SKIP_DIRS for part in path.parts):
+        if _is_skipped(path):
             continue
         if path.suffix.lower() in _SCAN_SUFFIXES or path.name in _SCAN_EXACT_NAMES:
             out.append(path)
