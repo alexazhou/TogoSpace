@@ -25,10 +25,12 @@ Operator 的要求是「构建与验证都在 CI 上完成，不许 build 绿就
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -46,12 +48,39 @@ MARKER_MIGRATION_END = "[TOGO] MIGRATION_END"
 #   _internal/assets/   ← PyInstaller onedir 的 datas（scripts/togo_desktop.spec）
 #   _internal/assets/execute/gtsp/gtsp-windows-amd64.exe ← 容器沙箱功能依赖（assets 整棵打包）
 #   _internal/assets/frontend/{index,splash}.html ← build_desktop.py 的 frontend 动作同步进来的前端产物
+#
+# 判据分两段：字节下限（挡空文件/截断/指针）+ 内容子串（挡「文件在、内容是错的」）。
+# 内容子串取自仓库里可指认的源文件，不是猜的：
+#   frontend/index.html 源文件 297 字节，引用 `/src/main.ts`；`npm run build` 后 vite 把它
+#   重写成引用 `/assets/main-<hash>.js`（本地 mac 实测 370 字节；CI 实收 382 字节，hash 不同长度也不同）。
+#   所以 index.html 的正确形态是「短 + 含 /assets/ + 不含 /src/main.ts」，
+#   用「≥1000 字节」这种跟真实体量无关的下限只会假红（run 43622465816 就是这么红的）。
+#   splash.html 源文件 3669 字节、构建不改写（直接拷贝，本地实测 3681 字节）。
 REQUIRED_INSTALLED = [
-    ("Togobot.exe", 1_000_000),
-    ("backend/Togobot-backend.exe", 1_000_000),
-    ("backend/_internal/assets/execute/gtsp/gtsp-windows-amd64.exe", 1_000_000),
-    ("backend/_internal/assets/frontend/index.html", 1_000),
-    ("backend/_internal/assets/frontend/splash.html", 1_000),
+    # (相对路径, 字节下限, 必须包含, 不得包含, 失败形态)
+    ("Togobot.exe", 1_000_000, (), (), "Tauri 外壳；缺失/过小 ⇒ 主程序没打进 bundle"),
+    ("backend/Togobot-backend.exe", 1_000_000, (), (), "sidecar 后端；缺失/过小 ⇒ resources 没打进去"),
+    (
+        "backend/_internal/assets/execute/gtsp/gtsp-windows-amd64.exe",
+        1_000_000,
+        (),
+        (),
+        "容器沙箱依赖的 gtsp；只剩百来字节 ⇒ git-lfs 指针没被 pull 下来",
+    ),
+    (
+        "backend/_internal/assets/frontend/index.html",
+        200,
+        ("<script", "/assets/"),
+        ("/src/main.ts",),
+        "前端入口；缺 /assets/ 或含 /src/main.ts ⇒ 装进去的是未构建的源文件（本地能跑、装完白屏）",
+    ),
+    (
+        "backend/_internal/assets/frontend/splash.html",
+        1_000,
+        ("<html",),
+        (),
+        "启动画面；过小 ⇒ 打包漏资产",
+    ),
 ]
 
 _failures: list[str] = []
@@ -201,7 +230,88 @@ def _http(url: str, token: str | None = None, timeout: float = 15.0) -> tuple[in
         return -1, f"{type(error).__name__}: {error}"
 
 
-def _run_desktop_startup(exe: str, label: str) -> None:
+# ── 迁移记账（MIGRATION_END 缺失时的正向对照） ───────────────────────────────
+#
+# `[TOGO] MIGRATION_END` 只在「确有未记账迁移」时才 emit：src/backend_main.py 的
+# `_run_database_migrations` 里是 `if has_pending and ... on_migration_end` 才回调。
+# 所以一个已经迁移过的库再启动一次，本来就不会有这条 marker —— 把它当硬判据必假红
+# （run 43622465816 的 C 层：B 层刚在同一个 user profile 上把库建好并迁移完）。
+# 但「没收到」也不能直接放过（迁移彻底坏掉也会是绿的），得给正向对照：
+# 去 sqlite 里数 `_migrations` 表的记账条数，和 assets/migrate 下的迁移文件数对上。
+
+
+def _db_candidates() -> list[str]:
+    """按 src/appPaths.py + configTypes.py 的优先级给出库路径候选，去重保序。"""
+    candidates: list[str] = []
+    override = (os.environ.get("TEAMAGENT_DB_PATH") or "").strip()
+    if override:
+        candidates.append(override)
+    home_store = os.path.expanduser("~/.togospace")
+    storage_root = (os.environ.get("STORAGE_ROOT") or "").strip() or home_store
+    candidates.append(os.path.join(storage_root, "data", "data.db"))
+    # 兜底：冻结体的 STORAGE_ROOT 若被指到别处，路径猜错不该变成假红，
+    # 在 ~/.togospace 下补两个常见位置（仍是同一个判据，只是先找到文件）。
+    candidates.extend(sorted(glob.glob(os.path.join(home_store, "*", "data", "data.db"))))
+    candidates.append(os.path.join(home_store, "data.db"))
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized not in seen:
+            seen.add(normalized)
+            unique.append(candidate)
+    return unique
+
+
+def _migration_ledger(db_path: str, migrations_dir: str) -> tuple[int, int, str]:
+    """返回 (已记账条数, 迁移文件数, 错误说明)；读失败时条数为 -1。"""
+    if not os.path.isfile(db_path):
+        return -1, -1, f"库文件不存在: {db_path}"
+    files = 0
+    if os.path.isdir(migrations_dir):
+        files = len([name for name in os.listdir(migrations_dir) if name.endswith(".sql")])
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = connection.execute("SELECT COUNT(*) FROM _migrations").fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error as error:
+        return -1, files, f"读 {db_path} 的 _migrations 失败: {error}"
+    return int(row[0]), files, ""
+
+
+def _report_migration_evidence(migrations_dir: str) -> None:
+    """MIGRATION_END 缺失时的替代判据：迁移记账已满 ⇒ 迁移确实在 Windows 上跑过。"""
+    candidates = _db_candidates()
+    existing = [path for path in candidates if os.path.isfile(path)]
+    print(f"    库候选: {candidates}")
+    if not existing:
+        fail(f"未收到 {MARKER_MIGRATION_END!r}，且{len(candidates)} 个候选路径下都没有库文件 ⇒ 无法证明迁移跑过")
+        return
+    db_path = existing[0]
+    applied, files, error = _migration_ledger(db_path, migrations_dir)
+    print(f"    迁移记账: 已记账={applied} 迁移文件={files} 库={db_path}")
+    if error:
+        fail(f"未收到 {MARKER_MIGRATION_END!r}，且查不到迁移记账（{error}）⇒ 无法证明迁移跑过")
+    elif files == 0:
+        fail(f"未收到 {MARKER_MIGRATION_END!r}，且 {migrations_dir} 下没有 .sql 文件 ⇒ 无对照依据")
+    elif applied == files:
+        ok(
+            f"未收到 {MARKER_MIGRATION_END!r} 属预期（marker 只在有 pending 迁移时才打）："
+            f"_migrations 记账 {applied}/{files} 条与迁移文件数一致 ⇒ 迁移确已执行过"
+        )
+    else:
+        fail(f"未收到 {MARKER_MIGRATION_END!r} 且记账不全：{applied}/{files} ⇒ 迁移没跑完")
+
+
+def _run_desktop_startup(
+    exe: str,
+    label: str,
+    *,
+    require_migration_end: bool = True,
+    migrations_dir: str = "",
+) -> None:
     exe = os.path.abspath(exe)
     print(f"--- B2 backend 真启动（{label}）: {exe}")
     if not os.path.isfile(exe):
@@ -254,8 +364,10 @@ def _run_desktop_startup(exe: str, label: str) -> None:
         ok(f"收到 {MARKER_READY!r} ⇒ 迁移完成且服务已在 Windows 上监听")
         if any(line.startswith(MARKER_MIGRATION_END) for line in lines):
             ok(f"收到 {MARKER_MIGRATION_END!r} ⇒ sqlite 迁移在 Windows 上真跑过")
+        elif require_migration_end:
+            fail(f"未收到 {MARKER_MIGRATION_END!r}（首次启动、库是空的，这条必须有）")
         else:
-            fail(f"未收到 {MARKER_MIGRATION_END!r}")
+            _report_migration_evidence(migrations_dir)
 
         base = f"http://127.0.0.1:{port}"
         status, body = _http(f"{base}/system/status.json")
@@ -307,16 +419,26 @@ def check_installed(root: str, smoke_exe: str | None) -> None:
     if not os.path.isdir(root):
         fail(f"安装目录不存在: {root}")
         return
-    for relative, min_bytes in REQUIRED_INSTALLED:
+    for relative, min_bytes, must_contain, must_not_contain, failure_form in REQUIRED_INSTALLED:
         path = os.path.join(root, *relative.split("/"))
         if not os.path.isfile(path):
-            fail(f"安装树缺少 {relative}")
+            fail(f"安装树缺少 {relative}（{failure_form}）")
             continue
         size = os.path.getsize(path)
         if size < min_bytes:
-            fail(f"{relative} 只有 {size} 字节（下限 {min_bytes}）；LFS 指针未拉取或打包漏资产都会这样")
+            fail(f"{relative} 只有 {size} 字节（下限 {min_bytes}）：{failure_form}")
+            continue
+        with open(path, "rb") as handle:
+            text = handle.read(2 * 1024 * 1024).decode("utf-8", "replace")
+        missing = [needle for needle in must_contain if needle not in text]
+        forbidden = [needle for needle in must_not_contain if needle in text]
+        if missing or forbidden:
+            fail(
+                f"{relative} 内容不符（{size} 字节）：缺 {missing}、含不应出现 {forbidden}；"
+                f"{failure_form}"
+            )
         else:
-            ok(f"{relative} 存在，{size} 字节")
+            ok(f"{relative} 存在，{size} 字节，内容判据通过")
 
     internal = os.path.join(root, "backend", "_internal")
     if os.path.isdir(internal):
@@ -327,7 +449,14 @@ def check_installed(root: str, smoke_exe: str | None) -> None:
 
     if smoke_exe:
         _run_no_desktop_env(smoke_exe)
-        _run_desktop_startup(smoke_exe, "安装后的树")
+        # 这里跑的是同一个 user profile 上的第二次启动：迁移已在 B 层做完，
+        # MIGRATION_END 不会再打（只在有 pending 时打），改用迁移记账做正向对照。
+        _run_desktop_startup(
+            smoke_exe,
+            "安装后的树",
+            require_migration_end=False,
+            migrations_dir=os.path.join(internal, "assets", "migrate"),
+        )
 
 
 def main() -> int:
