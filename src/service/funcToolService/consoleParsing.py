@@ -133,6 +133,23 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
     白名单与布尔开关都按 `spec` 派生（#196 P2）：`spec.options` 是真名 + 别名，
     `spec.boolean_options` 是 schema 里 `type: boolean` 的那批（含其别名形态）。
     `options` 里存的是**用户写下的原名**（别名不归一），归一由路由层做。
+
+    ## 重复选项（#218，翻 #187 裁定④）
+
+    同一个参数重复出现时按**归一后的目标名**计数（`--remove-field` 与
+    `--clear_fields` 算同一个），再按类型分流：
+
+    - **数组型**（schema `type: array`：`--status` / `--member_names` /
+      `--remove-field` 等）：按出现顺序**聚合**。值存成「每次出现的原始字符串」
+      列表，CSV 拆分与去重保序统一由 `consoleTool._split_csv` 做（那里已支持
+      list 入参），解析层不再自己拆逗号 —— 否则同一件事有两个实现。
+    - **标量型**（string / integer / object）：报 `duplicate_option`。覆盖式赋值
+      会**静默丢掉前一个值**，那正是 #187-④ 后来被 Operator 翻案的行为。
+    - **布尔开关**：幂等，重复出现不报错（末次显式值生效）。
+
+    聚合落在**首次写下的原名**这个键上：别名与真名混写（`--remove-field a
+    --clear_fields b`）必须合并成同一个键，否则路由层归一后会在 `args` 里看到
+    两个同义键、后一个覆盖前一个 —— 聚合就白做了。
     """
     positional: list[str] = []
     options: dict[str, Any] = {}
@@ -140,6 +157,36 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
 
     boolean_options = spec.boolean_options
     allowed = spec.options
+    kinds = spec.option_kinds
+    #: 归一后的目标名 → `options` 里实际使用的键（首次写下的原名）
+    first_name: dict[str, str] = {}
+
+    def _store(name: str, value: Any) -> None:
+        """把一次出现的选项值落到 `options`（重复语义见本函数 docstring）。"""
+        target = spec.normalize_option(name)
+        kind = kinds.get(target) or kinds.get(name) or "string"
+        existing = first_name.get(target)
+        if existing is None:
+            first_name[target] = name
+            options[name] = value
+            return
+        if kind == "array":
+            current = options[existing]
+            options[existing] = [current, value] if not isinstance(current, list) else current + [value]
+            return
+        if kind == "boolean":
+            options[existing] = value
+            return
+        raise ConsoleError(
+            "duplicate_option",
+            f"--{name} 重复出现：它是 {kind} 型**标量**参数，后一次会覆盖前一次、"
+            f"静默丢掉数据，因此直接拒绝。请检查是否多写；要一次传多个值请用逗号"
+            f"写在一个 --{target} 里（如 --{target} a,b），只有数组型参数支持"
+            f"重复出现并按出现顺序聚合。",
+            option=target,
+            kind=kind,
+            suggestion=f"--{target} a,b",
+        )
 
     idx = 0
     while idx < len(tokens):
@@ -171,15 +218,16 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
                     example=spec.key,
                 )
             if name in boolean_options:
-                options[name] = (
+                _store(
+                    name,
                     parse_boolean_value(inline_value, name=name, command=spec.key)
                     if sep
-                    else True
+                    else True,
                 )
                 idx += 1
                 continue
             if sep:
-                options[name] = inline_value
+                _store(name, inline_value)
                 idx += 1
                 continue
             if idx + 1 >= len(tokens):
@@ -188,7 +236,7 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
                     f"--{name} 需要一个值",
                     example=f"{spec.key} ... --{name} <值>",
                 )
-            options[name] = tokens[idx + 1]
+            _store(name, tokens[idx + 1])
             idx += 2
             continue
         positional.append(token)

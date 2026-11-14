@@ -32,7 +32,7 @@
 
 `HELP_SUMMARY` / `HELP_DETAIL` 由命令表 + `consoleSchema` 生成，手写的只剩
 「参数清单之外的一句话补充」（`_HELP_OVERLAY`：PATCH 语义提示、`--remove-field`
-候选占位符、重复选项只最后一个生效……）。加一条新命令只改命令表一处：help 行、
+候选占位符、重复选项的聚合/报错规则……）。加一条新命令只改命令表一处：help 行、
 参数清单、选项白名单、布尔开关判定全部自动跟随。
 """
 
@@ -93,6 +93,13 @@ def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str
         lines.append(f"{resource:<{width}}{actions}".rstrip())
     lines.append("用法：<资源> <操作> [位置参数] [--选项 ...]")
     lines.append("create/update 的配置输入（可选）：'<json>' 或 --from payload（payload 字段传 JSON object），也可只用 --选项")
+    # 重复选项的处置是**全局规则**（#218 翻 #187-④），不属于某条命令，所以放摘要。
+    # 三句话对应三种类型：数组聚合 / 标量报错 / 布尔幂等 —— 模型据此决定是连写
+    # 多次还是用逗号，不需要先试一次错。
+    lines.append(
+        "选项重复：数组型（如 --status / --member_names）可重复出现，按出现顺序聚合并去重保序；"
+        "标量型重复出现报 duplicate_option（不会静默只认最后一个）；布尔开关重复无副作用"
+    )
     lines.append("详情：help <资源> 或 help <资源> <操作>；任意命令加 --help / -h 亦可")
     return "\n".join(lines)
 
@@ -114,7 +121,7 @@ _CLEAR_FIELDS_PLACEHOLDER = "{ALLOWED_CLEAR_FIELDS}"
 #:
 #: 为什么仍然需要 overlay：schema 的 `description` 说明「这个参数是什么」，但说不出
 #: 「这条命令整体的语义」——例如 `dept update` 是 PATCH、`dept rm` 会被
-#: `DEPT_HAS_CHILDREN` 拒绝、同一个选项给两次只有最后一个生效。这些是命令级事实，
+#: `DEPT_HAS_CHILDREN` 拒绝、某条命令的 PATCH 语义。这些是命令级事实，
 #: schema 里没有对应字段可派生。
 #:
 #: **只许放「补充」，不许放参数清单**：放进去就等于又抄了一份事实。
@@ -169,8 +176,9 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     "task update": (
         "配置字段：new_status / note / reviewer_id。撤销验收人用 --remove-field reviewer_id。",
         "可清除的字段：" + _CLEAR_FIELDS_PLACEHOLDER + "（白名单外的字段会被拒绝并列出候选）。",
-        "⚠️ 同一个 --选项 给两次**只有最后一个生效**：要传多个字段请用逗号写在一个里"
-        "（--remove-field a,b），逗号值会去重保序。",
+        "⚠️ 数组型选项可重复出现（按出现顺序聚合、去重保序）："
+        "--remove-field a --remove-field b 等价于 --remove-field a,b；"
+        "标量选项重复出现会报 duplicate_option，布尔开关重复无副作用。",
         "不传 note 不会清空已有 note（参数默认空串，不会覆盖）。",
         "既没有配置输入也没有 --remove-field 时报 no_update_action（不许静默成功）。",
     ),
@@ -326,7 +334,7 @@ def _require_positive_int(raw: Any, *, what: str, command: str) -> int:
 
 
 def _split_csv(raw: Any) -> list[str]:
-    """逗号分隔的多值选项 → 去重保序的字符串列表（#187 裁定④）。
+    """逗号分隔的多值选项 → 去重保序的字符串列表。
 
     口径（help 里也写明，别只写在这里）：
     - 逗号分隔，**两侧空白被 trim**，空段被丢弃（`"a, ,b"` → `["a","b"]`）；
@@ -334,14 +342,16 @@ def _split_csv(raw: Any) -> list[str]:
       却会让下游的「非法字段」报错把同一个名字列两遍；
     - 全空（`""` / `","` / 只有空白）⇒ 空列表，由调用方决定「空算不算错」。
 
-    ⚠️ 已知限制（#187 裁定④，**只报不改**）：`_parse_options` 对同名选项是
-    「后者覆盖前者」，所以 `--remove-field a --remove-field b` 只有 `b` 生效。
-    逗号写法是不丢数据的唯一方式。
+    `raw` 是 **list** 时表示「该数组型选项出现了多次」（#218 起 `_parse_options`
+    按出现顺序聚合）：每个元素仍按上面的逗号规则拆，再按出现顺序拼接 ——
+    `--member a,b --member c` 因此等价于 `--member a,b,c`，去重保序仍在这一处实现。
+    注意 list 元素**必须**再拆逗号：只把元素当整体会让 `a,b` 变成一个成员名，
+    而 CSV 语义是这一层的唯一口径。
     """
     if raw is None:
         return []
     if isinstance(raw, (list, tuple)):
-        parts = [str(item) for item in raw]
+        parts = [segment for item in raw for segment in str(item).split(",")]
     else:
         parts = str(raw).split(",")
     return list(dict.fromkeys(p.strip() for p in parts if p.strip()))
