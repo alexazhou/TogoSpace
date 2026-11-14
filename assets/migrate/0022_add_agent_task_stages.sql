@@ -5,7 +5,8 @@
 --   ① 新建节点表 agent_task_stages（有序节点链，一行一环）；
 --   ② 主表 agent_tasks 加接力游标 current_stage / current_owner_id + 待办查询索引；
 --   ③ 事件表 agent_task_events 加 action_type / from_stage / to_stage（消除同态流转歧义）；
---   ④ 存量回填：把 v2 的「1 执行人 + 0/1 审核人」翻译成节点链与游标（幂等）。
+--   ④ 存量回填：把 v2 的「1 执行人 + 0/1 审核人」翻译成节点链与游标。
+--      ⚠️ 本迁移**文件级不可重放**，重放保护来自迁移账本（详见 ④ 段前的说明）。
 --
 -- 为什么要冗余 current_stage / current_owner_id 到主表：`list_tasks` 的默认口径
 -- 变成「只看当前持棒人」，这是最高频查询；若每次 join 节点表算游标就无法走索引。
@@ -44,7 +45,7 @@ ALTER TABLE agent_task_events ADD COLUMN to_stage INTEGER;
 -- ④ 存量回填。
 -- 关于「重跑」：本文件级不可重放——重跑会在第一条 ALTER 上撞 duplicate column（db 层把
 -- 该错当可忽略并重新记账，整段 executescript 已回滚），真正的重放保护是迁移账本。
--- 下面的 NOT EXISTS / IS NULL 只是防御性冗余（万一表/列由别的路径先建好），不承担幂等。
+-- 下面的 NOT EXISTS / IS NULL 只是防御性冗余（万一表/列由别的路径先建好），不承担重放保护。
 -- 节点 0 = EXECUTION(assignee_id)；有 reviewer_id 时补节点 1 = REVIEW(reviewer_id)。
 INSERT INTO agent_task_stages (task_id, stage_index, node_type, name, owner_id, stage_status, created_at, updated_at)
 SELECT t.id, 0, 'EXECUTION', '', t.assignee_id, 'WAITING', datetime('now'), datetime('now')
