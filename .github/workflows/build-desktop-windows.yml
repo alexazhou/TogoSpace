@@ -153,9 +153,14 @@ jobs:
     # 区间的作用是抓「打包漏资产 / 后端树没进去」这类事故，不是精确判据，
     # 所以给的是宽区间；真基线出来后按实测收敛（改这里，不改验证脚本）。
     - name: "Verify installer (A: 存在 / 体积 / sha256)"
+      # 体积区间依据（实测基线，不拍脑袋）：run 43618734788 产物
+      #   Togobot_0.5.2-beta1_x64-setup.exe = 66 818 781 字节（63.7 MB），
+      #   sha256=e2215fa8441569ad9cc26ce94cd824365b09fe9465e3ac2531690c8869615e73。
+      # 取 ±20% ⇒ [51, 76] MB。判据用途是抓「后端树没打进去 / 资产漏了 / 误打包了别的东西」，
+      # 不是精确体积管控；真基线变了（依赖升级、资产更新）就按同口径重设并写明新基线。
       run: |
         ./.venv/Scripts/python.exe scripts/verify_win_bundle.py bundle `
-          --path "${{ steps.locate.outputs.path }}" --min-mb 120 --max-mb 700
+          --path "${{ steps.locate.outputs.path }}" --min-mb 51 --max-mb 76
 
     # ── B 后端层：拿构建出来的后端可执行文件真跑 ───────────────────────────────
     - name: "Verify backend executable (B: 空跑 + 真启动 + 真 HTTP + stdin 停机)"
