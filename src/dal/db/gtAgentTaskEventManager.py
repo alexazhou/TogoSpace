@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from peewee import fn
 
-from constants import SpecialAgent, TaskStatus
+from constants import SpecialAgent, TaskEventAction, TaskStatus
 from model.dbModel.gtAgentTaskEvent import GtAgentTaskEvent
 
 # 「不是认领事件」：认领 = 系统在 `TODO → IN_PROGRESS` 上写的自动置位说明
@@ -25,6 +25,9 @@ async def append_event(
     from_status: TaskStatus | None = None,
     to_status: TaskStatus | None = None,
     content: str = '',
+    action_type: TaskEventAction | None = None,
+    from_stage: int | None = None,
+    to_stage: int | None = None,
 ) -> GtAgentTaskEvent:
     """追加一条任务事件（append-only，无 UPDATE / DELETE）。
 
@@ -34,12 +37,20 @@ async def append_event(
     另守 PIN-1（defense-in-depth）：流转事件必须 `from != to`（自环应记为评论、
     `from`/`to` 均空），故 `(非NULL, 非NULL) 且 from == to` 亦为非法——落库前拒绝。
 
+    v3 追加 `action_type` / `from_stage` / `to_stage` 三个**可选**参数：
+    - `action_type` 区分同态流转（`REVIEWING→REVIEWING` 的「打回前序审核节点」与
+      「交棒下一个审核节点」四个状态字段完全一样）；
+    - `from_stage` / `to_stage` 记录本次操作前后的节点游标。
+    三者缺省为 None（不写 NULL 以外的值，历史读取路径不受影响）。
+
     **不自带事务**：需要与任务主表同生共死时，由调用方用
     `model.dbModel.base.atomic()` 包住，本函数只做裸插入（会跟随外层事务）。
     """
     if from_status is not None and to_status is None:
         raise ValueError("非法的状态组合：from_status 非空而 to_status 为空（禁止「非NULL→NULL」）")
-    if from_status is not None and from_status == to_status:
+    if from_status is not None and from_status == to_status and action_type in (None, TaskEventAction.COMMENT):
+        # 自环流转一律记评论；但 v3 的「同态流转」（如 REVIEWING→REVIEWING 的 REJECT）
+        # 是真实动作，由 action_type 显式区分，不在此拒绝。
         raise ValueError("非法的状态组合：from_status == to_status（自环不得记为流转事件；应以评论 from/to 均空记录）")
     event = GtAgentTaskEvent(
         task_id=task_id,
@@ -47,6 +58,9 @@ async def append_event(
         from_status=from_status,
         to_status=to_status,
         content=content,
+        action_type=action_type,
+        from_stage=from_stage,
+        to_stage=to_stage,
     )
     await event.aio_save(force_insert=True)
     return event
