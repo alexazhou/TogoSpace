@@ -173,6 +173,27 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     "task ls": (
         "只列未完结任务（要含已完结请用 --status 显式列出，如 --status DONE,CANCELLED）。",
         "状态：TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED",
+        "过滤项 --assignee / --reviewer / --scope / --kw 全缺时自动补 --scope self（只查我的待办），"
+        "并在返回体 auto_filled_filters 里说明；要查全团队请显式给 --scope team。",
+    ),
+    "task create": (
+        "建单不会自动唤醒执行人：建完请另发 send_chat_msg 通知对方（返回体 hint 字段会再提醒一次）。",
+        "必填 --title / --assignee_id；其余可选。数组/对象型参数（--depends_on）"
+        "建议用 --from payload 传，避免引号被 shell 拆坏。",
+    ),
+    "mcp ls": (
+        "target 形态由 --kind 决定（openapi / mcp / mcp_stdio / graphql），详见 help mcp call。",
+        "⚠️ 若目标 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发）；"
+        "此时请改用完整 URL 的 target，或在该 spec 里补 servers。",
+    ),
+    "mcp call": (
+        "先 `mcp ls <target>` 拿工具清单，再 `mcp call <target> --tool 名 --args '{...}'`。",
+        "target 形态由 --kind 决定：openapi=spec 文件路径或 URL（默认）/ mcp=HTTP-SSE 地址 / "
+        "mcp_stdio=启动命令（含参数，整体加引号）/ graphql=endpoint。",
+        "⚠️ 若目标 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发，"
+        "表现为 404 或打错服务）；请在 spec 里补 servers，或直接用带完整 path 的 URL。"
+        "该限制由 mcp2cli 的 spec 解析决定，本工具不改写你的 target。",
+        "--args 建议用 --from payload 传（嵌套结构免引号转义）。",
     ),
     "task update": (
         "配置字段：new_status / note / reviewer_id。撤销验收人用 --remove-field reviewer_id。",
@@ -197,7 +218,14 @@ _USAGE_TARGET_LABEL: dict[str, str] = {
 
 
 def _usage_line(spec: cc.CommandSpec) -> str:
-    """由命令表拼出用法行（参数清单不在这里，见 `_help_detail`）。"""
+    """由命令表拼出用法行（参数清单不在这里，见 `_help_detail`）。
+
+    #222 A5：只要这条命令有**复杂参数**（array / object），用法行末尾补一句
+    「复杂参数建议优先 --from payload」。此前这条建议只出现在单个参数行的形态标注里
+    （#219 `_shape_note`），模型先看用法行、照着拼命令行，往往还没读到参数行就已经
+    把嵌套结构写成 `--args '{"k": "v"}'` 被 shell 引号拆坏了。复杂参数按 JSON 从
+    payload 传（`payload` 字段本身就是 object）没有引号/转义风险。
+    """
     parts = [spec.key] if spec.key else ["<资源> <操作>"]
     if spec.needs_target or spec.min_args:
         # 多个位置参数的命令（`container note <id> <text>`）逐个占位，占位名取 schema
@@ -212,6 +240,8 @@ def _usage_line(spec: cc.CommandSpec) -> str:
         parts.append("['<json>' | --from payload]")
     if spec.params:
         parts.append("[--选项 ...]")
+    if spec.accepts_input and any(kind in ("array", "object") for kind in spec.option_kinds.values()):
+        parts.append("（复杂参数建议优先 --from payload）")
     return " ".join(parts)
 
 
@@ -591,8 +621,39 @@ def _forward(
 
 
 def _handle_list(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
-    """LIST：只转发选项（`dept ls` / `task ls --status TODO`）。"""
-    _forward(parsed, **_option_args(parsed.spec, parsed))
+    """LIST：只转发选项（`dept ls` / `task ls --status TODO`）。
+
+    #222 A3：`CommandSpec.filter_options` 里的过滤项**全缺**时，按
+    `fallback_options` 自动补一条（`task ls` ⇒ `scope=self`），并在返回体
+    `auto_filled_filters` + message 里显式说明。为什么要补而不是让它报错：
+    「`task ls --status TODO` 是查『我的待办』」是命令行上最常用也最可控的口径，
+    而 `list_tasks` 无过滤项时直接 `missing_target`，用户得先把 help 翻一遍才知道
+    该加 `--scope self`。为什么不静默补：不说明的话模型会以为拿到的是全团队列表。
+    """
+    spec = parsed.spec
+    args = _option_args(spec, parsed)
+    auto_filled: dict[str, Any] = {}
+    if spec.fallback_options and spec.filter_options:
+        if not any(name in args and args[name] is not None for name in spec.filter_options):
+            for name, value in spec.fallback_options:
+                args.setdefault(name, value)
+                auto_filled[name] = value
+
+    if auto_filled:
+
+        def _annotate(result: dict[str, Any]) -> dict[str, Any]:
+            if not isinstance(result, dict):
+                return result
+            described = "、".join(f"--{name} {value}" for name, value in auto_filled.items())
+            note = f"未给过滤条件，已自动补 {described}（只列与该条件匹配的条目）"
+            result = dict(result)
+            result["auto_filled_filters"] = dict(auto_filled)
+            result["message"] = f"{result.get('message')}；{note}" if result.get("message") else note
+            return result
+
+        _forward(parsed, post_process=_annotate, **args)
+
+    _forward(parsed, **args)
 
 
 def _handle_get(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) -> NoReturn:
@@ -710,6 +771,25 @@ def _handle_save(parsed: ParsedCommand, payload: dict[str, Any] | None = None) -
         # （name / id 两种定位都一样）。不替调用方表达更新意图，`dept update root`
         # 就改不了自己的目标 —— 详见 `CommandSpec.patch_by_name`。
         args["overwrite"] = True
+
+    if spec.success_hint:
+        # #222 A6：「命令成功了、但还有一步必须人做」——建单不会唤醒执行人。
+        # 追加在返回体而不是改原工具的 message：服务层语义与既有断言都不动，
+        # 提示只属于命令行这条入口。
+        hint = spec.success_hint
+
+        def _append_hint(result: dict[str, Any]) -> dict[str, Any]:
+            if not isinstance(result, dict) or not result.get("success"):
+                # 失败时不附提示：一张「记得通知对方」的卡片挂在失败返回体上，
+                # 会被读成「建成功了，只是差点什么」，比没有提示更误导。
+                return result
+            result = dict(result)
+            result["hint"] = hint
+            message = result.get("message")
+            result["message"] = f"{message}；{hint}" if message else hint
+            return result
+
+        _forward(parsed, post_process=_append_hint, **args)
 
     _forward(parsed, **args)
 
@@ -887,6 +967,14 @@ def _check_arity(parsed: ParsedCommand) -> None:
         lower = 1 if spec.needs_target else 0
         upper = 2 if spec.needs_target else 1
         if count < lower or count > upper:
+            # 与下面的非输入分支同一口径：**缺** target 且命令自带说明块时报
+            # `missing_target` + usage（#222 A4 的 `mcp call` 就走这一支）。
+            if count < lower and spec.empty_target_hint:
+                raise ConsoleError(
+                    "missing_target",
+                    f"`{spec.key}` 缺少位置参数 target。",
+                    usage=list(spec.empty_target_hint),
+                )
             raise ConsoleError(
                 "invalid_argument_count",
                 f"`{spec.key}` 需要 {'<target> ' if spec.needs_target else ''}"
@@ -895,6 +983,15 @@ def _check_arity(parsed: ParsedCommand) -> None:
             )
         return
     if count < spec.min_args or count > spec.max_args:
+        # #222 A4：缺位置参数（而不是给多了）且命令自带说明块时，报 `missing_target`
+        # 并把「target 该怎么写」整段给出。原来只说「需要 1~1 个位置参数，收到 0 个」，
+        # 而 `mcp ls` 的 target 形态取决于 `--kind`——不说清就无法照着改，只能去翻 help。
+        if count < spec.min_args and spec.empty_target_hint:
+            raise ConsoleError(
+                "missing_target",
+                f"`{spec.key}` 缺少位置参数 target。",
+                usage=list(spec.empty_target_hint),
+            )
         raise ConsoleError(
             "invalid_argument_count",
             f"`{spec.key}` 需要 {spec.min_args}~{spec.max_args} 个位置参数，收到 {count} 个。",

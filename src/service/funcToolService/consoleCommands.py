@@ -188,6 +188,19 @@ class CommandSpec:
             ⚠️ 只能挂在 create 上：`dept update` 若也补 `member_names`，一次只改
             responsibility 的 PATCH 会把成员清空。
 
+        filter_options: 该命令的**过滤项**（#222 A3）。原工具（`list_tasks`）要求这些
+            参数至少给一个，否则返回 `missing_target`；命令层据此判断要不要自动补
+            `fallback_options`，也据此在 help 里说清「不给就会被补成什么」。
+        fallback_options: 过滤项**全缺**时自动补的选项（#222 A3）。补了必须显式告知
+            （返回体 `auto_filled_filters` + message），不许静默改口径——「以为查的是
+            全团队、其实只查了自己」比直接报错更贵。只补「键不存在」，显式给了不覆盖。
+        empty_target_hint: 缺位置参数时的说明块（#222 A4）。有它时 arity 失败改报
+            `missing_target` 并把这几个 kind 说明与用法示例一并给出，取代干巴巴的
+            「需要 1~1 个位置参数，收到 0 个」。
+        success_hint: 成功返回体要追加的一句提醒（#222 A6）。用于「命令做成了、但还有
+            一步必须人做」的场合（建单后要另发消息通知执行人），免得模型以为发完就算了。
+            走 `post_process` 追加，**不改原工具的 message**（服务层语义不动）。
+
     选项面（`options` / `param_names` / `boolean_options` / `option_kinds`）**不是字段**：
     它们从 `legacy_tool` 的 schema 派生（`consoleSchema`），访问时才 import。
     这样一来「加了参数但命令行不认」这种漂移在结构上就不可能发生。
@@ -205,6 +218,10 @@ class CommandSpec:
     locator: Optional[Locator] = None
     patch_by_name: bool = False
     input_defaults: tuple[tuple[str, object], ...] = ()
+    filter_options: tuple[str, ...] = ()
+    fallback_options: tuple[tuple[str, object], ...] = ()
+    empty_target_hint: tuple[str, ...] = ()
+    success_hint: str = ""
 
     @property
     def key(self) -> str:
@@ -290,6 +307,10 @@ def _spec(
     locator: Optional[Locator] = None,
     patch_by_name: bool = False,
     input_defaults: tuple[tuple[str, object], ...] = (),
+    filter_options: tuple[str, ...] = (),
+    fallback_options: tuple[tuple[str, object], ...] = (),
+    empty_target_hint: tuple[str, ...] = (),
+    success_hint: str = "",
 ) -> CommandSpec:
     return CommandSpec(
         resource=resource,
@@ -304,7 +325,25 @@ def _spec(
         locator=locator,
         patch_by_name=patch_by_name,
         input_defaults=input_defaults,
+        filter_options=filter_options,
+        fallback_options=fallback_options,
+        empty_target_hint=empty_target_hint,
+        success_hint=success_hint,
     )
+
+
+#: `mcp` 命令缺 target 时的说明块（#222 A4）。
+#:
+#: 放在命令表**外面**：元组字面量里不能赋值，而这段文案两条 mcp 命令共用一份，
+#: 各抄一遍就会漂移（`ls` 说 openapi 默认、`call` 说 mcp 默认，模型照谁写都不对）。
+MCP_KIND_HINT: tuple[str, ...] = (
+    "用法：mcp <ls|call> <target> [--kind openapi|mcp|mcp_stdio|graphql]，target 形态取决于 kind：",
+    "  --kind openapi（默认）  spec 文件路径或 URL",
+    "  --kind mcp              MCP server 的 HTTP/SSE 地址",
+    "  --kind mcp_stdio        启动该 server 的本地命令（含参数，整体加引号）",
+    "  --kind graphql          GraphQL endpoint",
+    "示例：mcp ls ./openapi.json ｜ mcp ls http://127.0.0.1:8000/mcp --kind mcp",
+)
 
 
 #: 全部 console 子命令。**这张表是权限校验、命令解析与 help 的唯一事实源。**
@@ -402,7 +441,24 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     # 选项面（`status` / `assignee` / `reviewer` / `scope` / `kw` / `limit`，以及 P2
     # 起自动派生出来的 `open_only` / `event_limit`）全部来自 `list_tasks` /
     # `get_task_detail` 的 schema，本表不再手抄。
-    _spec("task", "ls", "list_tasks", verb="LIST"),
+    #
+    # `filter_options` + `fallback_options`（#222 A3）：`list_tasks` 要求至少给一个过滤
+    # 项，裸给 `task ls --status TODO` 会被原工具以 `missing_target` 拒。命令层补
+    # `scope=self`（「我的待办」），因为这才是命令行上最常用、也最可控的列表口径；
+    # 补完在返回体 `auto_filled_filters` 与 message 里显式说明（禁止静默）。
+    _spec(
+        "task", "ls", "list_tasks", verb="LIST",
+        filter_options=("assignee", "reviewer", "scope", "title_keyword"),
+        fallback_options=(("scope", "self"),),
+    ),
+    # `task create`（#222 A6）：转发 `create_task`，与其它 create 一样接受内联 JSON /
+    # `--from payload` / 纯 --选项 三种输入。`success_hint` 是命令级事实：建单**不会**
+    # 唤醒执行人，必须另发消息通知——原工具只在 docstring 里写了这句，返回体里没有，
+    # 于是「建完就等」成了高频误用。提示走 post_process 追加，不改原工具返回体。
+    _spec(
+        "task", "create", "create_task", verb="SAVE", accepts_input=True, max_args=0,
+        success_hint="建单不会自动唤醒执行人：请另发 send_chat_msg 通知对方（本命令不会替你通知）。",
+    ),
     _spec(
         "task", "get", "get_task_detail", verb="GET",
         needs_target=True, min_args=1, max_args=1,
@@ -440,16 +496,21 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     #
     # `mcp call` 用 SAVE 只为拿到 `input_defaults`（把 `action` 补成 `call`）；
     # 它不落库、不吃 `overwrite`，`patch_by_name` 保持默认。
+    # `empty_target_hint`（#222 A4）：裸敲 `mcp ls` 只会拿到「需要 1~1 个位置参数，
+    # 收到 0 个」——而 target 的形态完全取决于 `--kind`，不说清就没法照着改。这里把
+    # kind 与 target 的对应关系、两个可抄的示例直接放进失败返回体。
     _spec(
         "mcp", "ls", "mcp_call", verb="GET",
         needs_target=True, min_args=1, max_args=1,
         locator=_loc(name_param="target"),
+        empty_target_hint=MCP_KIND_HINT,
     ),
     _spec(
         "mcp", "call", "mcp_call", verb="SAVE",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
         locator=_loc(name_param="target"),
         input_defaults=(("action", "call"),),
+        empty_target_hint=MCP_KIND_HINT,
     ),
 )
 
