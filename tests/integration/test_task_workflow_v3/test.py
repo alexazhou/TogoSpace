@@ -19,7 +19,7 @@ import sys
 import pytest
 
 from constants import StageNodeType, StageStatus, TaskEventAction, TaskStatus
-from dal.db import gtAgentManager, gtAgentTaskStageManager, gtTeamManager
+from dal.db import gtAgentManager, gtAgentTaskManager, gtAgentTaskStageManager, gtTeamManager
 from service import (
     agentService,
     funcToolService,
@@ -541,3 +541,207 @@ class TestAmbiguity(_WorkflowCase):
         )
         assert result["success"] is False, result
         assert result["error_code"] == "task_already_terminal"
+
+
+class TestJudgeDebt(_WorkflowCase):
+    """#229 判据债：D1 状态纠偏 / D2 任务级互斥锁。
+
+    这两条行为的共同点是「正常路径上永远不会发生」——D1 只有夹具/手工修过的行才
+    触发纠偏，D2 只有并发才触发锁。所以它们此前**没有任何机器判据**（#227 验收人
+    的 M9 / M10 变异各自 145 / 139 例全绿），本类专门给它们上锁。
+    """
+
+    async def _stages_of(self, task_id: int) -> list[tuple[int, str, int, str]]:
+        return await self._stages(task_id)
+
+    # ------------------------------------------------------------------
+    # D1：`status=REVIEWING` 但游标仍停在 0（执行节点）⇒ 纠偏到首个 REVIEW 节点
+    # ------------------------------------------------------------------
+
+    async def test_reviewing_with_stale_cursor_can_reach_done(self):
+        """状态已是 REVIEWING、`current_stage` 却仍是 0 的行，advance 必须能走到 DONE。
+
+        这行的来源是真实的：迁移 0022 会把存量 REVIEWING 回填成 1，但**直接用 SQL
+        插入的测试夹具 / 手工修过的行**不会，于是「状态说在审核、游标说在执行」。
+        若不纠偏，advance 会把棒交给节点 1（还是 REVIEW）而不是判末节点完成，
+        调用方看到的是「明明只有 1 个审核节点却过不去」。
+
+        变异（M9 方向：去掉 `_effective_cursor` 的纠偏）
+        ⇒ 本用例的 DONE 断言必红（结果停在 REVIEWING）。
+        """
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id,
+            creator_id=alice,
+            title="D1-游标滞后-单审核节点",
+            assignee_id=bob,
+            stages=[{"owner_id": alice, "node_type": "REVIEW", "name": "组长初审"}],
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+
+        # 造出「状态 REVIEWING + 游标 0」的滞后行（模拟夹具 / 手工修正）
+        from model.dbModel.gtAgentTask import GtAgentTask
+
+        row = await gtAgentTaskManager.get_task(task_id)
+        row.status = TaskStatus.REVIEWING
+        row.current_stage = 0
+        row.current_owner_id = alice  # 持棒人是审核节点负责人
+        await gtAgentTaskManager.save_task(
+            row,
+            only=[GtAgentTask.status, GtAgentTask.current_stage, GtAgentTask.current_owner_id],
+        )
+        await gtAgentTaskStageManager.update_stage_statuses(
+            task_id, {0: StageStatus.APPROVED, 1: StageStatus.ACTIVE}
+        )
+        assert (await self._task(team_id, task_id))["current_stage"] == 0, "前置：游标必须停在 0"
+
+        result = await taskService.update_task(
+            team_id=team_id,
+            caller_id=alice,
+            task_id=task_id,
+            workflow_action="advance",
+            note="终审通过（滞后游标行）",
+        )
+
+        assert result["success"] is True, f"滞后游标行交棒被拒：{result}"
+        task = await self._task(team_id, task_id)
+        assert _status_of(task) == "DONE", (
+            f"纠偏失效：状态停在 {_status_of(task)}、游标 {task['current_stage']}"
+            f"（单 REVIEW 节点应从节点 1 直接完成）"
+        )
+
+    async def test_stale_cursor_correction_does_not_apply_to_normal_rows(self):
+        """对照组：正常行（游标与状态一致）不受纠偏影响，逐级推进的语义不变。
+
+        纠偏若写成「REVIEWING 就一律跳到首个 REVIEW 节点」，会把**多级链的中间态**
+        也一并改判（在节点 1 初审中却被跳到 1 —— 幸好相同；但在节点 0 打回后重推时
+        会跳级）。这条用例守住「纠偏只在矛盾时生效」。
+        """
+        task_id, team_id, alice, bob = await self._create_chain(title="D1-正常行对照")
+        await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS"
+        )
+        first = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="交初审"
+        )
+        assert first["success"] is True, first
+
+        task = await self._task(team_id, task_id)
+        assert (_status_of(task), task["current_stage"], task["current_owner_id"]) == (
+            "REVIEWING", 1, alice,
+        ), "正常推进的游标被纠偏改坏了"
+
+    # ------------------------------------------------------------------
+    # D2：同一任务的两路并发写必须串行化
+    # ------------------------------------------------------------------
+
+    async def test_concurrent_advance_only_one_wins(self):
+        """同一 `task_id` 两路并发 advance：只允许一次成功，且只前进一格。
+
+        为什么必须并发才有意义：`update_task` 按 `task_id` 加进程内互斥锁
+        （step2 §6.1），锁外的两路会**读到同一份旧状态**再各自写 —— 表现为
+        「两次都成功、棒被推两格」或「一次成功但从同一节点算了两次」。
+
+        为了让竞态必然发生（否则两次调用可能天然串行、判据恒绿），这里把
+        `_load_stages` 包一层 `sleep`：持有锁的那一路睡完继续，未被锁挡住的那一路
+        会**同时**停在读之后 ⇒ 去掉锁（M10 方向）时两路都会看到游标 0。
+
+        断言三件：恰好一次成功 / 游标只前进到 1 / 库里恰有 1 条 ADVANCE 事件。
+        """
+        import asyncio
+        from unittest import mock
+
+        task_id, team_id, alice, bob = await self._create_chain(title="D2-并发交棒")
+        await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS"
+        )
+
+        real_load = taskService._load_stages
+        entered = 0
+
+        async def slow_load(task):
+            nonlocal entered
+            stages = await real_load(task)
+            entered += 1
+            # 把「读完 → 写」之间的窗口撑开：没有锁时第二路会在这里与第一路重叠
+            await asyncio.sleep(0.05)
+            return stages
+
+        with mock.patch.object(taskService, "_load_stages", slow_load):
+            results = await asyncio.gather(
+                taskService.update_task(
+                    team_id=team_id, caller_id=bob, task_id=task_id,
+                    workflow_action="advance", note="并发 A",
+                ),
+                taskService.update_task(
+                    team_id=team_id, caller_id=bob, task_id=task_id,
+                    workflow_action="advance", note="并发 B",
+                ),
+            )
+
+        successes = [r for r in results if r.get("success")]
+        assert len(successes) == 1, (
+            f"并发两路应只有一次成功，实际 {len(successes)} 次：{results}"
+        )
+        task = await self._task(team_id, task_id)
+        assert task["current_stage"] == 1, (
+            f"棒被推了 {task['current_stage']} 格（并发双推）；应只前进到节点 1"
+        )
+        assert task["current_owner_id"] == alice, "持棒人应已交给初审节点负责人"
+
+        events = await taskService.list_task_events(team_id=team_id, task_id=task_id)
+        advances = [
+            e for e in events["events"] if e["action_type"] == TaskEventAction.ADVANCE.value
+        ]
+        assert len(advances) == 1, f"库里应有 1 条 ADVANCE 事件，实际 {len(advances)} 条"
+        assert (advances[0]["from_stage"], advances[0]["to_stage"]) == (0, 1)
+
+    async def test_concurrent_updates_on_different_tasks_are_not_serialized(self):
+        """对照组：不同 `task_id` 的两路写**不**互相阻塞（锁是按任务分的，不是全局锁）。
+
+        这条防的是「把锁写成全局锁也能过 D2」的错误修法：全局锁同样让并发只成功一次，
+        但会把不相干的任务串成一队。判据用耗时差：两路各睡 0.15s，按任务分锁应接近
+        0.15s，全局锁则接近 0.3s。
+        """
+        import asyncio
+        import time
+        from unittest import mock
+
+        team_id, alice, bob = await self._agents()
+        ids = []
+        for title in ("D2-对照-A", "D2-对照-B"):
+            created = await taskService.create_task(
+                team_id=team_id, creator_id=alice, title=title, assignee_id=bob,
+            )
+            assert created["success"] is True, created
+            ids.append(created["task_id"])
+            await taskService.update_task(
+                team_id=team_id, caller_id=bob, task_id=created["task_id"],
+                new_status="IN_PROGRESS",
+            )
+
+        real_load = taskService._load_stages
+
+        async def slow_load(task):
+            stages = await real_load(task)
+            await asyncio.sleep(0.15)
+            return stages
+
+        with mock.patch.object(taskService, "_load_stages", slow_load):
+            started = time.monotonic()
+            await asyncio.gather(
+                *[
+                    taskService.update_task(
+                        team_id=team_id, caller_id=bob, task_id=tid,
+                        workflow_action="advance", note="并发对照",
+                    )
+                    for tid in ids
+                ]
+            )
+            elapsed = time.monotonic() - started
+
+        assert elapsed < 0.27, (
+            f"两个不同任务被串行化了（耗时 {elapsed:.2f}s，按任务分锁应 ≈0.15s）——"
+            "锁写成了全局锁"
+        )

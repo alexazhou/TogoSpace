@@ -230,3 +230,19 @@ def test_0022_fresh_db_has_stages_table(tmp_path: Path) -> None:
     ]
     assert {"action_type", "from_stage", "to_stage"} <= set(event_columns)
     assert {"current_stage", "current_owner_id"} <= set(cursor_columns)
+
+
+def test_0022_header_does_not_claim_replay_safety() -> None:
+    """头部与 ④ 段的口径必须一致：**不许出现「幂等」字样**（#229 D3）。
+
+    来历：#227 交付时头部第 8 行还写着「④ 存量回填…（幂等）」，而 ④ 段前已经写明
+    「本文件级不可重放、重放保护来自账本」——两处自相矛盾，验收人 38 记档。
+    这条把「别再写回去」变成机器判据：只要有人把「幂等」写回注释，它就红。
+    """
+    text = (MIGRATIONS_DIR / MIGRATION_0022).read_text(encoding="utf-8")
+
+    assert "幂等" not in text, (
+        "0022 注释里又出现了「幂等」：本迁移文件级不可重放，重放保护来自迁移账本"
+    )
+    assert "不可重放" in text, "头部必须明确写出「文件级不可重放」"
+    assert "账本" in text, "必须点明真正的重放保护来源是迁移账本"
