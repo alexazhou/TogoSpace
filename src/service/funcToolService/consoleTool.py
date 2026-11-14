@@ -223,6 +223,35 @@ def _alias_reverse(spec: cc.CommandSpec) -> dict[str, tuple[str, ...]]:
     return reverse
 
 
+def _positional_labels(spec: cc.CommandSpec) -> dict[str, str]:
+    """locator 参数 → 「位置参数」help 标注文案（#220 需求 2）。
+
+    为什么由这里生成而不是 schema 层自己判断：locator 归属是**命令表事实**
+    （`Locator.id_param` / `name_param` + `needs_target`），schema 只有参数类型。
+    两个口径要咬住：
+    - 只标 **needs_target** 的命令（get/rm/update）：它们的 locator 参数在命令行上
+      真的只接受位置形态（`--dept_id 7` 被 arity 拒、与 target 并存被
+      ambiguous_input_source 拒）；
+    - **create 不标**（locator=None）：`dept create --dept_id 5` 是合法的「更新语义
+      一并传入」（_HELP_OVERLAY 明说），标了「不接受选项写法」就是假信息。
+
+    文案含该命令的等价写法占位（`dept get <id|名称>`），与 `_usage_line` 的
+    `_USAGE_TARGET_LABEL` 同源，不另抄一份。
+    """
+    locator = spec.locator
+    if locator is None or not spec.needs_target:
+        return {}
+    target_label = _USAGE_TARGET_LABEL.get(spec.locator_kind, "<target>")
+    labels: dict[str, str] = {}
+    for param_name in (locator.id_param, locator.name_param):
+        if param_name:
+            labels[param_name] = (
+                f"位置参数：值必须写在命令名后面（{spec.key} {target_label}），"
+                f"不接受 --{param_name} 选项写法"
+            )
+    return labels
+
+
 @functools.lru_cache(maxsize=1)
 def _help_detail() -> dict[str, str]:
     """全量详情表：一条命令一段，参数清单从 schema 派生。
@@ -233,7 +262,9 @@ def _help_detail() -> dict[str, str]:
     """
     detail: dict[str, str] = {}
     for spec in cc.COMMAND_SPECS:
-        params = cs.describe_tool_params(spec.legacy_tool, aliases=_alias_reverse(spec))
+        params = cs.describe_tool_params(
+            spec.legacy_tool, aliases=_alias_reverse(spec), positional_labels=_positional_labels(spec)
+        )
         lines = [_usage_line(spec)]
         description = cs.tool_description(spec.legacy_tool)
         lines.append(f"用途：{description}" if description else "用途：（该工具未提供说明）")
@@ -878,6 +909,39 @@ def _parse_command_tokens(
     return parsed
 
 
+def _locator_rewrite_hint(spec: cc.CommandSpec, options: dict[str, Any]) -> str:
+    """定位参数以 --选项 形态出现时，给**等价的位置参数改写示例**（#220 需求 1）。
+
+    为什么在报错里给改写而不是放行：清单 §A7 实测 `dept get --dept_id 7` 是第一次
+    使用必踩的坑——help 把 locator 列成 `--dept_id <integer>（可选）`，照着敲就被
+    `invalid_argument_count` 拒，而报错只说「收到 0 个」，一个字不提怎么改。
+    修复只做「说清楚」：等价写法 `dept get 7`，语义不放宽（建议 2 的选项回填另立，
+    见任务边界）。错误码沿用 `invalid_argument_count`（不扩错误码面）。
+
+    值取**首个**出现的 locator 选项（kind=both 时同时写了 `--dept_id 7 --name x`
+    的场景，提示改第一个即可，报错文案不承诺处理第二种写法）。
+    """
+    locator = spec.locator
+    if locator is None:
+        return ""
+    locator_params = {name for name in (locator.id_param, locator.name_param) if name}
+    value: Any = None
+    matched = ""
+    for name, raw in options.items():
+        if spec.normalize_option(name) in locator_params:
+            matched, value = name, raw
+            break
+    if value is None:
+        return ""
+    text = str(value).strip()
+    quoted = f"'{text}'" if (not text or " " in text) else text
+    return (
+        f"。注意：--{matched} 是定位参数，`{spec.key}` 的定位只接受位置参数形态"
+        f"（不接受 --选项 写法）；等价写法：`{spec.key} {quoted}`"
+        f"（其余 --选项 照原样保留在命令尾部）"
+    )
+
+
 def _check_arity(parsed: ParsedCommand) -> None:
     spec = parsed.spec
     count = len(parsed.positional)
@@ -890,14 +954,18 @@ def _check_arity(parsed: ParsedCommand) -> None:
             raise ConsoleError(
                 "invalid_argument_count",
                 f"`{spec.key}` 需要 {'<target> ' if spec.needs_target else ''}"
-                f"{'[<json>]' if spec.needs_target else '<json>'}，收到 {count} 段参数。",
+                f"{'[<json>]' if spec.needs_target else '<json>'}，收到 {count} 段参数"
+                + _locator_rewrite_hint(spec, parsed.options)
+                + "。",
                 example=f"help {spec.key}",
             )
         return
     if count < spec.min_args or count > spec.max_args:
         raise ConsoleError(
             "invalid_argument_count",
-            f"`{spec.key}` 需要 {spec.min_args}~{spec.max_args} 个位置参数，收到 {count} 个。",
+            f"`{spec.key}` 需要 {spec.min_args}~{spec.max_args} 个位置参数，收到 {count} 个"
+            + _locator_rewrite_hint(spec, parsed.options)
+            + "。",
             example=f"help {spec.key}",
         )
 
