@@ -29,6 +29,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -41,6 +42,8 @@ import urllib.request
 MARKER_ERROR_ENV = "[TOGO] ERROR code=1"
 MARKER_READY = "[TOGO] READY "
 MARKER_MIGRATION_END = "[TOGO] MIGRATION_END"
+# 与 src/db.py 的 MIGRATION_NAME_PATTERN 逐字一致（迁移文件既可能是 .sql 也可能是 .py）
+_MIGRATION_NAME_PATTERN = re.compile(r"^\d{4}.*\.(sql|py)$")
 
 # 安装树里必须存在的相对路径（相对安装根目录）。依据：
 #   backend/            ← tauri.conf.json bundle.resources {"../build/backend": "backend"}
@@ -263,13 +266,27 @@ def _db_candidates() -> list[str]:
     return unique
 
 
+def _migration_files(migrations_dir: str) -> list[str]:
+    """复刻 src/db.py 的 `MIGRATION_NAME_PATTERN = ^\\d{4}.*\\.(sql|py)$`。
+
+    只数 `*.sql` 会漏 —— 迁移里确实存在一个 `.py`（0016_team_workspace_layout.py），
+    数出来 20 而库里有 21 条记账，就成了「记账不全」的假红（run 43624163220）。
+    """
+    if not os.path.isdir(migrations_dir):
+        return []
+    return sorted(
+        name
+        for name in os.listdir(migrations_dir)
+        if os.path.isfile(os.path.join(migrations_dir, name))
+        and _MIGRATION_NAME_PATTERN.match(name)
+    )
+
+
 def _migration_ledger(db_path: str, migrations_dir: str) -> tuple[int, int, str]:
     """返回 (已记账条数, 迁移文件数, 错误说明)；读失败时条数为 -1。"""
     if not os.path.isfile(db_path):
         return -1, -1, f"库文件不存在: {db_path}"
-    files = 0
-    if os.path.isdir(migrations_dir):
-        files = len([name for name in os.listdir(migrations_dir) if name.endswith(".sql")])
+    files = len(_migration_files(migrations_dir))
     try:
         connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
