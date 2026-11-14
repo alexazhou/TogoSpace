@@ -84,6 +84,52 @@ class TestTaskLsAutoScope:
         # 原返回体没有 message 时也要能生成一句，不能把 None 拼进字符串
         assert post_process({"success": True, "tasks": []})["message"]
 
+    def test_note_states_scope_fields_and_keeps_other_filters(self) -> None:
+        """#238 判据 1：给了 `--status` 时 note 不得说「未给过滤条件」。
+
+        note 必须与真实判据一致：补 `--scope self` 只因**过滤项
+        （--assignee / --reviewer / --scope / --kw）全缺**，与 `--status` 无关；
+        且要点明「其它过滤条件（如 --status）照旧生效」，不能让用户以为
+        自己给的过滤项没生效。
+        """
+        _name, args, post_process = _forward_args("task ls --status TODO")
+        assert post_process is not None
+
+        result = post_process({"success": True, "tasks": [], "count": 0, "total": 0})
+        message = result["message"]
+
+        assert "未给过滤条件" not in message, message
+        assert "--assignee / --reviewer / --scope / --kw" in message, message
+        assert "全缺" in message, message
+        assert "--scope self" in message, message
+        assert "--status" in message and "照旧生效" in message, message
+        assert "只列与我相关的任务" in message, message
+
+    def test_no_filter_at_all_still_announced(self) -> None:
+        """#238 判据 2：全缺时照旧补 `scope=self` 且显式提示（#222「不许静默」不退化）。"""
+        _name, args, post_process = _forward_args("task ls")
+        assert args.get("scope") == "self", args
+        assert post_process is not None
+
+        result = post_process({"success": True, "tasks": []})
+
+        assert result["auto_filled_filters"] == {"scope": "self"}, result
+        assert "已自动补" in result["message"] and "--scope self" in result["message"], result
+
+    def test_explicit_scope_gets_no_note(self) -> None:
+        """#238 判据 3：显式给 `--scope team` ⇒ 不补参，无 `auto_filled_filters`、无该文案。"""
+        _name, args, post_process = _forward_args("task ls --scope team")
+        assert post_process is None, "显式给过滤项不许挂补参后处理"
+        assert "auto_filled" not in str(args), args
+
+    def test_help_task_ls_states_same_condition(self) -> None:
+        """#238 判据 4：`help task ls` 与 note 同口径（全缺才补 + 显式 --scope team 可查全团队）。"""
+        result = _run("help task ls")
+        help_text = result["help"]
+
+        assert "过滤项 --assignee / --reviewer / --scope / --kw 全缺时自动补 --scope self" in help_text, help_text
+        assert "要查全团队请显式给 --scope team" in help_text, help_text
+
     def test_explicit_filter_is_not_overridden(self) -> None:
         """显式给过滤项时**不许**再补（否则 `--assignee X` 会被 scope=self 收窄）。"""
         for command in (
