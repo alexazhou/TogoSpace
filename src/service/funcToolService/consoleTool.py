@@ -685,7 +685,10 @@ def _handle_list(parsed: ParsedCommand, _payload: dict[str, Any] | None = None) 
             if not isinstance(result, dict):
                 return result
             described = "、".join(f"--{name} {value}" for name, value in auto_filled.items())
-            note = f"未给过滤条件，已自动补 {described}（只列与该条件匹配的条目）"
+            note = (
+                f"过滤项（--assignee / --reviewer / --scope / --kw）全缺，已自动补 {described}；"
+                "其它过滤条件（如 --status）照旧生效，只列与我相关的任务。"
+            )
             result = dict(result)
             result["auto_filled_filters"] = dict(auto_filled)
             result["message"] = f"{result.get('message')}；{note}" if result.get("message") else note
