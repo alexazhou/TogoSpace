@@ -740,3 +740,117 @@ class TestConsoleTaskCommand(ServiceTestCase):
             detail = _help_text(["help", "task", action])
             assert detail["success"] is True
             assert f"task {action}" in detail["help"]
+
+    # ==================================================================
+    # #222 A6：`task create` 从真入口建单（含唤醒提示透传/追加）
+    # ==================================================================
+
+    async def test_task_create_really_creates_row(self):
+        """`task create --title ... --assignee_id ...` **真的在库里建出任务**。
+
+        判据必须打到库上：console 返回 `success: True` 只证明「没报错」，若把
+        `--title` 吞掉、或把 assignee 丢掉，success 依然为 True。所以这里重读
+        行，逐字段比对标题 / 执行人 / 创建人 / 初始状态。
+        """
+        # 标题不带空格：console 的位置参数里第 1 段会被当成内联 JSON（`accepts_input`），
+        # 带空格的标题不引号包裹会被拆成两段。这里顺带把「用 --from payload 传空格标题」
+        # 留给下面 `test_task_create_payload_input` 覆盖。
+        title = "console建单-真入口-1a2b3c"
+        result = await self._call(
+            f"task create --title {title} --assignee_id {self.ids['owner']}",
+            who="owner",
+        )
+
+        assert result["success"] is True, f"建单失败：{result}"
+        task_id = result.get("task_id")
+        assert isinstance(task_id, int) and task_id > 0, f"返回体没有 task_id：{result}"
+
+        row = await self._reload(task_id)
+        assert row.title == title
+        # 团队没有部门层级数据时 `create_task` 只允许「分配给自己或直接/间接下属」，
+        # 所以这里的执行人用调用者本人（要测「给别人分配」得先建部门树，属 #187 的
+        # 权限用例面，不在本单）。
+        assert row.assignee_id == self.ids["owner"]
+        assert row.creator_id == self.ids["owner"], "创建人必须是调用者"
+        assert row.status == TaskStatus.TODO
+
+    async def test_task_create_returns_awake_hint(self):
+        """返回体必须带「建单不会自动唤醒执行人」的提示（#222 A6 判据 1）。
+
+        为什么单独立一条：原工具 `create_task` 的返回体**只有**「任务已创建，
+        task_id=…」，唤醒提示只写在它的 docstring 里；命令层若不补，模型建完
+        单就会干等着，执行人永远不醒。这条同时钉住「补在成功体上」与
+        「文案提到 send_chat_msg」。
+        """
+        result = await self._call(
+            f"task create --title 带提示的单 --assignee_id {self.ids['owner']}",
+            who="owner",
+        )
+        assert result["success"] is True, result
+
+        assert "不会自动唤醒" in result["message"], f"message 里没有唤醒提示：{result['message']}"
+        assert "send_chat_msg" in result["message"], result["message"]
+        assert "不会自动唤醒" in result.get("hint", ""), f"缺 hint 字段：{result}"
+
+    async def test_task_create_payload_input(self):
+        """`task create --from payload` 走配置输入（复杂参数推荐路径）也必须能建。"""
+        result = await self._call(
+            "task create --from payload",
+            payload={
+                "title": "从 payload 建的单",
+                "assignee_id": self.ids["owner"],
+                "description": "desc",
+                "priority": "HIGH",
+            },
+            who="owner",
+        )
+        assert result["success"] is True, result
+        row = await self._reload(result["task_id"])
+        assert row.title == "从 payload 建的单"
+        assert row.priority.value == "HIGH"
+
+    async def test_task_create_without_input_is_rejected(self):
+        """裸 `task create` 必须报 `missing_input_source`（不许静默建出空单）。"""
+        result = await self._call("task create", who="owner")
+        assert result["success"] is False
+        assert result["error_code"] == "missing_input_source", result
+
+    async def test_task_create_is_in_command_index(self):
+        """A6 的注册面：`task create` 必须在命令表里（变异删掉这一行即红）。"""
+        assert "task create" in cc.COMMAND_INDEX
+        assert cc.COMMAND_INDEX["task create"].legacy_tool == "create_task"
+
+    # ==================================================================
+    # #222 A3：`task ls --status TODO` 自动补 `--scope self`（真入口）
+    # ==================================================================
+
+    async def test_task_ls_status_only_auto_scopes_to_self(self):
+        """`task ls --status TODO` 不再 `missing_target`；结果收窄到「与我相关」且署名。
+
+        三向对照，避免「恒真」：
+        - 同一命令下，worker 只看到与自己相关的任务；
+        - 显式 `--scope team`（owner 是团队主管，有管理视角）能看到别人的任务；
+        - 返回体 `auto_filled_filters` 只在自动补的那一次出现。
+        """
+        mine = await self._make_task(title="我的待办", status=TaskStatus.TODO)
+        others = await self._make_task(title="别人的待办", status=TaskStatus.TODO)
+        # 让 others 与 worker 无关：改执行人为 rev_b、验收人置空
+        others.assignee_id = self.ids["rev_b"]
+        others.reviewer_id = None
+        await gtAgentTaskManager.save_task(others, only=[GtAgentTask.assignee_id])
+
+        result = await self._call("task ls --status TODO", who="worker")
+
+        assert result["success"] is True, f"`task ls --status TODO` 仍然失败：{result}"
+        assert result["auto_filled_filters"] == {"scope": "self"}, result
+        assert "自动补" in result["message"], result["message"]
+        ids = {t["id"] for t in result["tasks"]}
+        assert mine.id in ids, f"自己的待办没出现：{ids}"
+        assert others.id not in ids, f"自动补 scope 没生效，别人的任务也漏出来了：{ids}"
+
+    async def test_task_ls_explicit_scope_not_annotated(self):
+        """显式给 `--scope self` 时不许再出现 `auto_filled_filters`（不许伪造补参）。"""
+        await self._make_task(title="显式 scope", status=TaskStatus.TODO)
+        result = await self._call("task ls --status TODO --scope self", who="worker")
+        assert result["success"] is True, result
+        assert "auto_filled_filters" not in result, result

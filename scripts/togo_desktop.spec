@@ -28,6 +28,15 @@ import litellm
 LITELLM_PATH = os.path.dirname(litellm.__file__)
 print(f"ℹ️  litellm_path: {LITELLM_PATH}")
 
+# mcp2cli 的包元数据必须一起打进去（#202 接进来的外部调用能力 / #222 B1 补回）。
+#
+# 为什么要 copy_metadata 而不能只靠 hiddenimports：`mcp2cli` 在 import 时用
+# `importlib.metadata.version("mcp2cli")` 取自身版本号，PyInstaller 默认**不收集**
+# 第三方包的 .dist-info ⇒ 打包后 import 直接 `PackageNotFoundError`（源码跑没事，
+# 只有打包形态炸，本地测试发现不了）。copy_metadata 把 dist-info 作为 datas 带进包，
+# 运行期 version() 才找得到。
+from PyInstaller.utils.hooks import copy_metadata  # noqa: E402 —— 依赖 PyInstaller 环境
+
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
 a = Analysis(
@@ -38,6 +47,8 @@ a = Analysis(
         (os.path.join(REPO_ROOT, "assets"), "assets"),
         (os.path.join(REPO_ROOT, "src", "service", "agentService", "templates"), "service/agentService/templates"),
         (LITELLM_PATH, "litellm"),
+        # mcp2cli 运行期要 `importlib.metadata.version("mcp2cli")`（见上方 import 处说明）
+        *copy_metadata("mcp2cli"),
     ],
     hiddenimports=[
         # tornado
