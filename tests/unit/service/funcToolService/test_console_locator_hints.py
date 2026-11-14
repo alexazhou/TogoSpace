@@ -2,17 +2,17 @@
 
 ## 这组判据防的是什么
 
-清单 §A7 实测：`dept get --dept_id 7` → `invalid_argument_count`，报错只说
-「收到 0 个」、一个字不提怎么改；而 help 把 locator 列成 `--dept_id <integer>（可选）`
+清单 §A7 实测：`dept get --dept-id 7` → `invalid_argument_count`，报错只说
+「收到 0 个」、一个字不提怎么改；而 help 把 locator 列成 `--dept-id <integer>（可选）`
 ——第一次使用必踩（与 A1 同为最高优先级）。
 
 两层都只做「说清楚」、不放宽（A7 建议 2 的选项回填不做，见任务边界）：
   1. 报错层：`_check_arity` 发现 options 里有 locator 参数 ⇒ 消息追加等价改写
      （`dept get 7`），错误码沿用 `invalid_argument_count`；
   2. help 层：locator 参数行单独标注「位置参数」，且 **create 不标**
-     （`dept create --dept_id 5` 是合法的更新语义一并传入，标了就是假信息）。
+     （`dept create --dept-id 5` 是合法的更新语义一并传入，标了就是假信息）。
 
-真入口（room/dept 真库、`dept get --dept_id <id>` 实跑）见
+真入口（room/dept 真库、`dept get --dept-id <id>` 实跑）见
 `tests/integration/test_funcToolService/test_console_locator_hint.py`。
 """
 
@@ -52,19 +52,23 @@ def _parsed(command: str) -> cp.ParsedCommand:
 
 class TestLocatorRewriteHint:
     def test_option_form_gets_rewrite_example(self) -> None:
-        """`dept get --dept_id 7` ⇒ invalid_argument_count + 消息含等价写法 `dept get 7`。"""
-        parsed = _parsed("dept get --dept_id 7")
+        """`dept get --dept_id 7`（兼容期旧名）⇒ invalid_argument_count + 等价写法。
+
+        旧名输入也要给改写，且报错展示 **kebab 主形态**（--dept-id）——兼容期两种
+        写法都能走到这条报错，展示面统一。
+        """
+        parsed = _parsed("dept get --dept_id 7")  # 兼容期旧名输入
         with pytest.raises(cp.ConsoleError) as caught:
             ct._check_arity(parsed)
         exc = caught.value
         assert exc.code == "invalid_argument_count", f"错误码不该变（沿用口径）：{exc.code!r}"
         assert "dept get 7" in exc.message, f"没给等价改写示例：{exc.message!r}"
-        assert "--dept_id" in exc.message, f"没点出是定位参数写法问题：{exc.message!r}"
+        assert "--dept-id" in exc.message, f"没点出是定位参数写法问题：{exc.message!r}"
         assert "位置参数" in exc.message, f"没说清定位只接受位置形态：{exc.message!r}"
 
     def test_option_form_via_inline_value(self) -> None:
-        """`--dept_id=7` 同样要拿到改写示例（inline 与分 token 两种写法等价）。"""
-        parsed = _parsed("dept get --dept_id=7")
+        """`--dept-id=7` 同样要拿到改写示例（inline 与分 token 两种写法等价）。"""
+        parsed = _parsed("dept get --dept_id=7")  # 兼容期旧名 inline 值
         with pytest.raises(cp.ConsoleError) as caught:
             ct._check_arity(parsed)
         assert "dept get 7" in caught.value.message
@@ -84,14 +88,14 @@ class TestLocatorRewriteHint:
         assert "role get tester" in caught.value.message
 
     def test_save_command_with_locator_option(self) -> None:
-        """`task update --task_id 187 --note x`（SAVE+accepts_input）同样给改写。"""
+        """`task update --task-id 187 --note x`（SAVE+accepts_input）同样给改写。"""
         spec = cc.COMMAND_INDEX["task update"]
         positional, options, input_source = cp._parse_options(
-            spec, ["--task_id", "187", "--note", "x"]
+            spec, ["--task-id", "187", "--note", "x"]
         )
         parsed = cp.ParsedCommand(
             spec, positional=positional, options=options,
-            input_source=input_source, raw_tokens=["--task_id", "187", "--note", "x"],
+            input_source=input_source, raw_tokens=["--task-id", "187", "--note", "x"],
         )
         with pytest.raises(cp.ConsoleError) as caught:
             ct._check_arity(parsed)
@@ -127,25 +131,25 @@ class TestLocatorRewriteHint:
 
 class TestHelpPositionalLabel:
     def test_get_command_locator_line_is_marked(self) -> None:
-        """`dept get` 的 `--dept_id` 行必须标「位置参数」且含等价写法。"""
+        """`dept get` 的 `--dept-id` 行必须标「位置参数」且含等价写法。"""
         detail = ct.HELP_DETAIL["dept get"]
-        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept_id")]
-        assert line, f"dept get 参数清单里没有 --dept_id 行：\n{detail}"
+        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept-id")]
+        assert line, f"dept get 参数清单里没有 --dept-id 行：\n{detail}"
         assert "位置参数" in line[0], f"locator 行没标位置参数：{line[0]!r}"
         assert "dept get <" in line[0], f"没给等价写法占位：{line[0]!r}"
 
     def test_save_update_locator_line_is_marked(self) -> None:
-        """`task update` 的 `--task_id` 行同样标注（SAVE+needs_target）。"""
+        """`task update` 的 `--task-id` 行同样标注（SAVE+needs_target）。"""
         detail = ct.HELP_DETAIL["task update"]
-        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--task_id")]
-        assert line and "位置参数" in line[0], f"task update 的 --task_id 行没标注：{line!r}"
+        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--task-id")]
+        assert line and "位置参数" in line[0], f"task update 的 --task-id 行没标注：{line!r}"
 
     def test_create_is_not_marked(self) -> None:
-        """`dept create` 的 `--dept_id` 行**不标**——create 里它是合法选项
+        """`dept create` 的 `--dept-id` 行**不标**——create 里它是合法选项
         （更新语义一并传入），标「不接受选项写法」就是假信息（变异 M2' 的反向护栏）。"""
         detail = ct.HELP_DETAIL["dept create"]
-        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept_id")]
-        assert line, f"dept create 参数清单里没有 --dept_id 行：\n{detail}"
+        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept-id")]
+        assert line, f"dept create 参数清单里没有 --dept-id 行：\n{detail}"
         assert "位置参数" not in line[0], f"create 的 locator 行被误标：{line[0]!r}"
 
     def test_non_locator_param_is_not_marked(self) -> None:

@@ -61,25 +61,29 @@ def test_help_keys_match_command_table() -> None:
 
 
 def test_help_lists_exactly_the_schema_params() -> None:
-    """help 里列出的 `--参数` 必须与 schema properties **逐名相同**。
+    """help 里列出的 `--参数` 必须与 schema properties **逐名相同**（#221 起按 kebab 形态）。
 
     这是「选项面从 schema 派生」这件事的**可观测结果**：派生逻辑一旦回退成手抄、
     或者 schema 加了参数但 help 渲染漏了，这里立刻红。别名也要在——用户在 help 上
     看到的写法必须真能用（`--kw` 在 `options` 白名单里）。
+
+    kebab 口径（#221）：help 行展示的是命令行形态（`--clear-fields`），比对时
+    schema 真名先过 `to_kebab`；反向比对用 `display_options`（kebab + 短别名，
+    不含兼容旧名 —— help 不展示旧名，旧名若出现在 help 行反而要红）。
     """
     problems: list[str] = []
 
     for spec in cc.COMMAND_SPECS:
         if not spec.legacy_tool:
             continue
-        props = set(spec.param_names)
+        props = {cc.to_kebab(name) for name in spec.param_names}
         # `HELP_DETAIL[key]` 是**一段文本**（不是行列表）：按行正则捞 `  --name`。
         listed = set(
-            re.findall(r"^  --([A-Za-z_][\w-]*)", ct.HELP_DETAIL[spec.key], flags=re.MULTILINE)
+            re.findall(r"^  --([A-Za-z][\w-]*)", ct.HELP_DETAIL[spec.key], flags=re.MULTILINE)
         )
 
         missing = props - listed
-        extra = listed - set(spec.options)
+        extra = listed - set(spec.display_options)
         if missing:
             problems.append(f"{spec.key}: schema 有但 help 没列 {sorted(missing)}")
         if extra:
@@ -135,7 +139,9 @@ def test_help_detail_covers_every_schema_param_name() -> None:
                     alias for alias, real in spec.alias_map.items() if real == name
                 ),
             )
-            if f"--{name}" not in rendered:
+            # #221：渲染形态是 kebab（--clear-fields），按形态比对；
+            # kebab 双向同形（to_kebab 幂等），无下划线参数不受影响。
+            if f"--{cc.to_kebab(name)}" not in rendered:
                 problems.append(f"{spec.key}: 参数 {name} 未出现在渲染结果里")
     assert not problems, "参数渲染漏项：\n" + "\n".join(problems)
 

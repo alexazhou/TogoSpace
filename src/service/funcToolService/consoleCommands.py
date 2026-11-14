@@ -134,6 +134,29 @@ def _loc(
 #: （`test_console_task` 对 `options["remove-field"]` 是按原名断言的），由
 #: `normalize_option()` 只在需要落到工具参数时归一。
 #:
+#: **kebab-case（#220 A2，任务单 #221）**：命令行选项的展示形态统一 kebab
+#: （`--dry-run` / `--remove-field` / `--clear-fields`），schema 真名（下划线式，
+#: 如 `dry_run`）保持不动 —— 上游工具参数键与 mcp2cli 上游都不碰，只改 console
+#: 的命令行形态与 help 展示。
+#:
+#: **兼容期与移除触发条件**（清单 §A2 建议：旧名保留整整一个版本）：旧下划线名
+#: 在解析层继续被接受（`--dry_run` ≡ `--dry-run`），但 help 只展示 kebab 形式。
+#: 移除触发：当 `src/version.py` 版本号进入 **0.6.0 及以后**（当前 0.5.2-beta1），
+#: 即从 `command_options_map` 里删掉「真名 → 真名」这条兼容映射、并同步删掉
+#: 本文件「旧别名形态」的兼容注册 —— 那时 `--dry_run` 会报 unknown_option，
+#: 属预期行为。写在这里而不是 TODO：版本提升的人一定能看到这条。
+def to_kebab(name: str) -> str:
+    """schema 真名（下划线式）→ 命令行选项名（kebab 式）。幂等、无下划线时原样。
+
+    防御：转换结果出现连续 `-` 或首尾 `-`（如 `a__b` → `a--b`）说明真名里藏着
+    非常规命名 —— 在**派生时**炸掉，而不是让运行时报错文案显示一个打不出来的
+    选项名（M2 的「转换错位」在这条被咬）。
+    """
+    kebab = name.replace("_", "-")
+    if "--" in kebab or kebab.startswith("-") or kebab.endswith("-"):
+        raise ValueError(f"kebab 转换产生非法选项形态：{name!r} -> {kebab!r}")
+    return kebab
+#:
 #: 键是 `CommandSpec.key`（如 `"task ls"`），因为同名别名在不同命令下可能要落到
 #: 不同真名（`name` 对 `role update` 是 `role_name` 的别名，对 `dept update` 就是真名）。
 _OPTION_ALIASES: dict[str, dict[str, str]] = {
@@ -226,14 +249,61 @@ class CommandSpec:
         return tuple(param_schemas(self.legacy_tool))
 
     @property
-    def options(self) -> tuple[str, ...]:
-        """命令行认可的选项名（不带 `--`）：真名 + 该命令的别名。
+    def command_options_map(self) -> dict[str, str]:
+        """命令行选项形态 → 工具真名（#221 kebab 的唯一归一表）。
 
-        「未知选项」报错时给的就是这份清单，所以别名的存在必须在这里体现，否则
-        用户照 help 写 `--kw` 会被自己的白名单拒绝。
+        键的三类来源（**一个真名允许多个命令行形态**，这是兼容期的本义）：
+        - kebab 形态（`--clear-fields` → `clear_fields`）：help 展示的**主形态**；
+        - 真名形态（`--clear_fields` → `clear_fields`）：**兼容期别名**（见
+          `to_kebab` 处的移除触发条件）；
+        - 手写短别名（`--kw` → `title_keyword`、`--remove-field` → `clear_fields`），
+          旧别名含下划线的（`--role_name`）同时注册 kebab 形态 `--role-name`。
+
+        冲突即炸（派生时 ValueError）：两个真名 kebab 后撞键、或别名撞真名，
+        都说明命名出问题了，静默选边只会让其中一种写法悄悄失效。
         """
-        real = self.param_names
-        return real + tuple(alias for alias in self.alias_map if alias not in real)
+        mapping: dict[str, str] = {}
+
+        def _register(form: str, real: str) -> None:
+            existing = mapping.get(form)
+            if existing is not None and existing != real:
+                raise ValueError(
+                    f"选项形态 {form!r} 冲突：{existing!r} vs {real!r}（命令 {self.key}）"
+                )
+            mapping[form] = real
+
+        for real in self.param_names:
+            _register(to_kebab(real), real)
+            _register(real, real)  # 兼容期：旧下划线名（0.6.0 移除，见 to_kebab 注释）
+        for alias, real in self.alias_map.items():
+            _register(alias, real)
+            if "_" in alias:
+                _register(to_kebab(alias), real)
+            if "-" in alias:
+                # 短别名的「下划线直译」形态（--remove_field → remove-field）也放行：
+                # 手写别名与真名之间的形态换算用户记不准，宽容收下、归一同一真名，
+                # 报错与 help 只展示 kebab 形态。
+                _register(alias.replace("-", "_"), real)
+        return mapping
+
+    @property
+    def display_options(self) -> tuple[str, ...]:
+        """选项名的**展示清单**（kebab 形态 + 手写别名），不含兼容旧名。
+
+        「未知选项」报错的可用清单、help 相关推导都从这份走 —— 旧名只是解析层
+        悄悄接受，不该在展示面露脸把用户往旧写法引（需求 3：help 只展示 kebab）。
+        """
+        return tuple(form for form in self.command_options_map if "_" not in form)
+
+    @property
+    def options(self) -> tuple[str, ...]:
+        """命令行认可的选项名（不带 `--`）：kebab + 兼容旧名 + 该命令的别名。
+
+        「未知选项」的**判定**用这份（兼容期内旧名必须放行），报错文案里的
+        可用清单用 `display_options`（只展示 kebab）—— 判定与展示分开是刻意的：
+        白名单若只列 kebab，兼容期里照旧写法敲命令会被自己的白名单拒绝。
+        """
+        return tuple(self.command_options_map)
 
     @property
     def params(self) -> tuple[str, ...]:
@@ -241,33 +311,49 @@ class CommandSpec:
         return self.options
 
     def normalize_option(self, name: str) -> str:
-        """选项名 → 工具真名（别名归一；真名原样返回）。"""
-        return self.alias_map.get(name, name)
+        """命令行选项形态 → 工具真名（kebab / 兼容旧名 / 短别名一律归一）。"""
+        return self.command_options_map.get(name, name)
 
     @property
     def boolean_options(self) -> frozenset[str]:
-        """不带值即可出现的开关选项（schema 里 `type: boolean` 的那批，含别名形态）。
+        """不带值即可出现的开关选项（schema 里 `type: boolean` 的那批，含全部命令行形态）。
 
         P2 之前这是手写的 `frozenset({"recursive"})`：`dry_run` 被加进 schema 后它
         不会自动变成开关，解析器会把 `--dry-run` 的下一个 token 当成它的值吃掉。
+
+        kebab 化（#221）后真名/kebab/别名三种形态都要在集合里：解析层拿**用户写下
+        的形态**来判布尔，`--dry-run`（kebab）必须命中，否则它会被当成带值选项。
         """
         if not self.legacy_tool:
             return frozenset()
         from .consoleSchema import boolean_params
 
         booleans = boolean_params(self.legacy_tool)
-        aliases = {alias for alias, real in self.alias_map.items() if real in booleans}
-        return frozenset(booleans | aliases)
+        result: set[str] = set()
+        for real in booleans:
+            result.add(real)            # 真名形态（兼容期）
+            result.add(to_kebab(real))  # kebab 形态
+        for alias, real in self.alias_map.items():
+            if real in booleans:
+                result.add(alias)
+                if "_" in alias:
+                    result.add(to_kebab(alias))
+        return frozenset(result)
 
     @property
     def option_kinds(self) -> dict[str, str]:
-        """选项名（真名 + 别名）→ 类型类别（`integer` / `boolean` / `array` / ...）。"""
+        """选项形态（kebab / 兼容旧名 / 短别名）→ 类型类别。
+
+        与 `boolean_options` 同理：解析层 `_store` 按**用户写下的形态**查 kind，
+        kebab 形态必须命中，否则会静默退化为 `string`（类型校验整条失效）。
+        """
         if not self.legacy_tool:
             return {}
         from .consoleSchema import param_kinds
 
         kinds = dict(param_kinds(self.legacy_tool))
-        kinds.update({alias: kinds.get(real, "string") for alias, real in self.alias_map.items()})
+        for form, real in self.command_options_map.items():
+            kinds.setdefault(form, kinds.get(real, "string"))
         return kinds
 
     @property

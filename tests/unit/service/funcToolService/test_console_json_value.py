@@ -3,7 +3,7 @@
 ## 这组判据防的是什么
 
 #218 收敛了「重复选项」语义，但值形态仍是**无条件 CSV**：模型把 JSON 数组直接塞进
-选项（`--member_names '["a","b"]'`）会被拆成 `["a` / `"b"]` 两段，报成
+选项（`--member-names '["a","b"]'`）会被拆成 `["a` / `"b"]` 两段，报成
 「未找到成员: ["a」——错得看不出原因（console 工具改进建议清单 §A1 实测）。
 同时 #218 的 `duplicate_option` 报错无条件建议 `--x a,b`，对 integer/object
 **不可执行**（实测：integer ⇒ invalid_target，object ⇒ invalid_option_value）——
@@ -43,7 +43,7 @@ def _convert(kind: str, raw, *, name: str = "x", command: str = "demo"):
 
 class TestArrayJsonValue:
     def test_json_array_literal_parses_to_strings(self) -> None:
-        """`--member_names '["a","b"]'` 必须得到 ['a','b']，而不是拆成 `["a` / `"b"]`。"""
+        """`--member-names '["a","b"]'` 必须得到 ['a','b']，而不是拆成 `["a` / `"b"]`。"""
         assert _convert("array", '["a","b"]', name="member_names", command="room create") == ["a", "b"]
 
     def test_csv_semantics_untouched(self) -> None:
@@ -134,12 +134,12 @@ class TestObjectConsistency:
 
 class TestHelpShapeAnnotation:
     def test_array_param_line_carries_shape_note(self) -> None:
-        """`room create` 的 `--member_names <array>` 行必须写明 CSV / JSON / 重复等价。"""
+        """`room create` 的 `--member-names <array>` 行必须写明 CSV / JSON / 重复等价。"""
         lines = cs.describe_tool_params("save_room")
-        member_lines = [line for line in lines if line.startswith("--member_names")]
+        member_lines = [line for line in lines if line.startswith("--member-names")]
         assert member_lines, f"room create 参数清单里没有 member_names 行：{lines!r}"
         line = member_lines[0]
-        assert "--member_names <array>" in line
+        assert "--member-names <array>" in line
         assert "CSV" in line and "JSON" in line, f"array 行没写传参形态：{line!r}"
         assert "重复" in line, f"array 行没提可重复出现：{line!r}"
 
@@ -165,7 +165,7 @@ class TestHelpShapeAnnotation:
         派生链别处还有第二份参数行渲染。"""
         detail = ct.HELP_DETAIL["room create"]
         assert any(
-            line.lstrip().startswith("--member_names") and "JSON" in line
+            line.lstrip().startswith("--member-names") and "JSON" in line
             for line in detail.splitlines()
         ), f"room create 的 help 详情没带 member_names 形态标注：\n{detail}"
 

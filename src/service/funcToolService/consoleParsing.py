@@ -186,7 +186,9 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
         # help 标注里（consoleSchema.describe_param），那里才匹配 kind。
         raise ConsoleError(
             "duplicate_option",
-            f"--{name} 重复出现：它是 {kind} 型**标量**参数，只能给一次；"
+            # 展示 kebab 归一名（#221）：用户写 `--open_only a --open_only b`（旧名）
+            # 也按主形态 --open-only 提示 —— 兼容期两者都通，报错只认主形态。
+            f"--{cc.to_kebab(target)} 重复出现：它是 {kind} 型**标量**参数，只能给一次；"
             f"后一次会覆盖前一次、静默丢掉数据，因此直接拒绝。"
             f"请检查是否多写（只有数组型参数支持逗号分隔或重复出现并按顺序聚合）。",
             option=target,
@@ -213,9 +215,11 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
                 idx += 1
                 continue
             if name not in allowed:
+                # 可用清单只展示 kebab + 短别名（#221 需求 3：旧名是兼容期别名，
+                # 不在展示面露脸把用户往旧写法引）；**判定**仍用含旧名的白名单。
                 hint = (
-                    f"可用选项：{' | '.join('--' + o for o in allowed)}"
-                    if allowed else "这条命令不接受选项"
+                    f"可用选项：{' | '.join('--' + o for o in spec.display_options)}"
+                    if spec.display_options else "这条命令不接受选项"
                 )
                 raise ConsoleError(
                     "unknown_option",
@@ -238,8 +242,8 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
             if idx + 1 >= len(tokens):
                 raise ConsoleError(
                     "missing_argument",
-                    f"--{name} 需要一个值",
-                    example=f"{spec.key} ... --{name} <值>",
+                    f"--{cc.to_kebab(name)} 需要一个值",
+                    example=f"{spec.key} ... --{cc.to_kebab(name)} <值>",
                 )
             _store(name, tokens[idx + 1])
             idx += 2

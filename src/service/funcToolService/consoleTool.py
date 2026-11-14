@@ -97,7 +97,7 @@ def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str
     # 三句话对应三种类型：数组聚合 / 标量报错 / 布尔幂等 —— 模型据此决定是连写
     # 多次还是用逗号，不需要先试一次错。
     lines.append(
-        "选项重复：数组型（如 --status / --member_names）可重复出现，按出现顺序聚合并去重保序；"
+        "选项重复：数组型（如 --status / --member-names）可重复出现，按出现顺序聚合并去重保序；"
         "数组型的值可用 CSV（a,b）或 JSON 数组（[\"a\",\"b\"]），两种写法等价；"
         "标量型重复出现报 duplicate_option（不会静默只认最后一个）；布尔开关重复无副作用"
     )
@@ -129,23 +129,23 @@ _CLEAR_FIELDS_PLACEHOLDER = "{ALLOWED_CLEAR_FIELDS}"
 _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     # create 与 update 共用同一个原工具，所以**选项面完全相同**（选项面 = schema
     # property，不按命令裁剪）。代价是 create 的参数清单里会出现只对更新有意义的
-    # 选项（--<资源>_id / --clear_fields / --overwrite）。这里不删它们 ——
+    # 选项（--<资源>_id / --clear-fields / --overwrite）。这里不删它们 ——
     # 删了会让「schema 收得下、console 却说不知道」重新出现（那正是本单要消灭的
     # 口径分叉），只用一句话说清各自什么时候有意义。
     "dept create": (
-        "新建必须给 --name / --responsibility / --member_names / --parent_name。",
-        "--dept_id / --clear_fields / --overwrite 属更新语义，可在 create 时一并传入；"
-        "命中已存在组织（含用 --dept_id 指定）时必须同时给 --overwrite true。",
+        "新建必须给 --name / --responsibility / --member-names / --parent-name。",
+        "--dept-id / --clear-fields / --overwrite 属更新语义，可在 create 时一并传入；"
+        "命中已存在组织（含用 --dept-id 指定）时必须同时给 --overwrite true。",
     ),
     "agent create": (
-        "新建必须给 --name / --role_template_name。",
-        "--agent_id / --clear_fields / --overwrite 属更新语义，可在 create 时一并传入；"
-        "命中已存在成员（含用 --agent_id 指定）时必须同时给 --overwrite true。",
+        "新建必须给 --name / --role-template-name。",
+        "--agent-id / --clear-fields / --overwrite 属更新语义，可在 create 时一并传入；"
+        "命中已存在成员（含用 --agent-id 指定）时必须同时给 --overwrite true。",
     ),
     "room create": (
-        "新建必须给 --name / --member_names（至少 2 人）。",
-        "--room_id / --clear_fields / --overwrite 属更新语义，可在 create 时一并传入；"
-        "命中已存在房间（含用 --room_id 指定）时必须同时给 --overwrite true。",
+        "新建必须给 --name / --member-names（至少 2 人）。",
+        "--room-id / --clear-fields / --overwrite 属更新语义，可在 create 时一并传入；"
+        "命中已存在房间（含用 --room-id 指定）时必须同时给 --overwrite true。",
     ),
     "dept update": (
         "PATCH 语义：只改出现的字段；member_names 出现即全量替换。",
@@ -216,10 +216,15 @@ def _usage_line(spec: cc.CommandSpec) -> str:
 
 
 def _alias_reverse(spec: cc.CommandSpec) -> dict[str, tuple[str, ...]]:
-    """「真参数名 → 别名元组」——schema 里只有真名，别名是命令行才有的。"""
+    """「真参数名 → 别名元组」——schema 里只有真名，别名是命令行才有的。
+
+    help 展示用（#221 需求 3）：别名只展示 kebab 形态 —— 旧别名含下划线的
+    （role update 的 `--role_name`）显示为 `--role-name`；解析层两种都接受
+    （command_options_map 同时注册），只是展示不混排。
+    """
     reverse: dict[str, tuple[str, ...]] = {}
     for alias, real in spec.alias_map.items():
-        reverse[real] = reverse.get(real, ()) + (alias,)
+        reverse[real] = reverse.get(real, ()) + (cc.to_kebab(alias),)
     return reverse
 
 
@@ -230,9 +235,9 @@ def _positional_labels(spec: cc.CommandSpec) -> dict[str, str]:
     （`Locator.id_param` / `name_param` + `needs_target`），schema 只有参数类型。
     两个口径要咬住：
     - 只标 **needs_target** 的命令（get/rm/update）：它们的 locator 参数在命令行上
-      真的只接受位置形态（`--dept_id 7` 被 arity 拒、与 target 并存被
+      真的只接受位置形态（`--dept-id 7` 被 arity 拒、与 target 并存被
       ambiguous_input_source 拒）；
-    - **create 不标**（locator=None）：`dept create --dept_id 5` 是合法的「更新语义
+    - **create 不标**（locator=None）：`dept create --dept-id 5` 是合法的「更新语义
       一并传入」（_HELP_OVERLAY 明说），标了「不接受选项写法」就是假信息。
 
     文案含该命令的等价写法占位（`dept get <id|名称>`），与 `_usage_line` 的
@@ -247,7 +252,7 @@ def _positional_labels(spec: cc.CommandSpec) -> dict[str, str]:
         if param_name:
             labels[param_name] = (
                 f"位置参数：值必须写在命令名后面（{spec.key} {target_label}），"
-                f"不接受 --{param_name} 选项写法"
+                f"不接受 --{cc.to_kebab(param_name)} 选项写法"
             )
     return labels
 
@@ -393,7 +398,7 @@ def _parse_array_literal(text: str, *, name: str, command: str) -> list[str]:
     """`[` 开头的值按 **JSON 数组字面量**解析（#219）。
 
     为什么需要它：CSV 是数组型选项的既有形态，但模型经常把 JSON 数组直接塞进
-    选项（`--member_names '["a","b"]'`），被 CSV 拆成 `["a` / `"b"]` 两段，
+    选项（`--member-names '["a","b"]'`），被 CSV 拆成 `["a` / `"b"]` 两段，
     报到下游变成「未找到成员: ["a」——错得看不出原因（清单 §A1 实测）。
 
     两条硬口径：
@@ -515,12 +520,16 @@ def _is_blank(value: Any) -> bool:
 
 
 def _option_args(spec: cc.CommandSpec, parsed: ParsedCommand) -> dict[str, Any]:
-    """已解析选项 → 转发参数（别名归一 + 按类型转换）。"""
+    """已解析选项 → 转发参数（别名归一 + 按类型转换）。
+
+    `_convert_option` 的 `name` 只进报错文案，传 **kebab 形态**（#221：报错里的
+    选项名统一主形态；to_kebab 幂等，用户写 kebab 时原样、写旧名时归一）。
+    """
     args: dict[str, Any] = {}
     for name, raw in parsed.options.items():
         real = spec.normalize_option(name)
         kind = spec.option_kinds.get(real) or spec.option_kinds.get(name) or "string"
-        args[real] = _convert_option(raw, kind=kind, name=name, command=spec.key)
+        args[real] = _convert_option(raw, kind=kind, name=cc.to_kebab(real), command=spec.key)
     return args
 
 
@@ -551,7 +560,7 @@ def _validate_input_keys(spec: cc.CommandSpec, data: dict[str, Any]) -> None:
 def _apply_input_defaults(spec: cc.CommandSpec, data: dict[str, Any]) -> dict[str, Any]:
     """按 `spec.input_defaults` 补「键不存在」的字段（显式 `null` 不覆盖）。
 
-    必须在**冲突检测之后**应用：`dept create --member_names a,b '{...}'` 的 JSON 里
+    必须在**冲突检测之后**应用：`dept create --member-names a,b '{...}'` 的 JSON 里
     没有 `member_names`，补默认值后再比较就会把「选项给了 member_names」误判成
     「两边都给了」——默认值不是调用方提供的输入来源。
     """
@@ -673,8 +682,8 @@ def _handle_save(parsed: ParsedCommand, payload: dict[str, Any] | None = None) -
 
     两种输入来源（`--选项` / 配置 JSON）的契约（#198）：
     - 同名字段**禁止静默覆盖**：别名归一后仍与 JSON 键重名 ⇒ `ambiguous_input_source`；
-    - 目标定位参数（如 `--dept_id`）与位置参数 `<target>` 同时给也判冲突 ——
-      否则 `dept update root --dept_id 5` 会把 5 号部门改名成 root；
+    - 目标定位参数（如 `--dept-id`）与位置参数 `<target>` 同时给也判冲突 ——
+      否则 `dept update root --dept-id 5` 会把 5 号部门改名成 root；
     - `create` 既无有效选项、也无配置输入 ⇒ `missing_input_source`；
     - `update` 没有有效动作（机制参数不算）⇒ `no_update_action`。
     """
@@ -912,13 +921,13 @@ def _parse_command_tokens(
 def _locator_rewrite_hint(spec: cc.CommandSpec, options: dict[str, Any]) -> str:
     """定位参数以 --选项 形态出现时，给**等价的位置参数改写示例**（#220 需求 1）。
 
-    为什么在报错里给改写而不是放行：清单 §A7 实测 `dept get --dept_id 7` 是第一次
-    使用必踩的坑——help 把 locator 列成 `--dept_id <integer>（可选）`，照着敲就被
+    为什么在报错里给改写而不是放行：清单 §A7 实测 `dept get --dept-id 7` 是第一次
+    使用必踩的坑——help 把 locator 列成 `--dept-id <integer>（可选）`，照着敲就被
     `invalid_argument_count` 拒，而报错只说「收到 0 个」，一个字不提怎么改。
     修复只做「说清楚」：等价写法 `dept get 7`，语义不放宽（建议 2 的选项回填另立，
     见任务边界）。错误码沿用 `invalid_argument_count`（不扩错误码面）。
 
-    值取**首个**出现的 locator 选项（kind=both 时同时写了 `--dept_id 7 --name x`
+    值取**首个**出现的 locator 选项（kind=both 时同时写了 `--dept-id 7 --name x`
     的场景，提示改第一个即可，报错文案不承诺处理第二种写法）。
     """
     locator = spec.locator
@@ -936,7 +945,7 @@ def _locator_rewrite_hint(spec: cc.CommandSpec, options: dict[str, Any]) -> str:
     text = str(value).strip()
     quoted = f"'{text}'" if (not text or " " in text) else text
     return (
-        f"。注意：--{matched} 是定位参数，`{spec.key}` 的定位只接受位置参数形态"
+        f"。注意：--{cc.to_kebab(matched)} 是定位参数，`{spec.key}` 的定位只接受位置参数形态"
         f"（不接受 --选项 写法）；等价写法：`{spec.key} {quoted}`"
         f"（其余 --选项 照原样保留在命令尾部）"
     )

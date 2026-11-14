@@ -1,11 +1,11 @@
 """#220 A7 定位参数改写示例的**真入口**判据（单元层见 test_console_locator_hints.py）。
 
 为什么要集成层：改写示例的价值在「模型照着提示改写后真的能走通」——
-`dept get --dept_id 7` 收到的提示里的 `dept get 7` 必须是一条**可执行的命令**，
+`dept get --dept-id 7` 收到的提示里的 `dept get 7` 必须是一条**可执行的命令**，
 且 `dept get <id>` / `dept get <名称>`（D8 双定位）照旧走通（M3：报错不误伤合法
 位置调用）。这三条都必须从唯一执行入口（AgentToolRegistry）走到 DB 才算数。
 
-边界（说清楚、不放宽）：`--dept_id 7` 依旧被拒，只是拒得让人知道怎么改。
+边界（说清楚、不放宽）：`--dept-id 7` 依旧被拒，只是拒得让人知道怎么改。
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ class TestConsoleLocatorHint(ServiceTestCase):
     # ==================================================================
 
     async def test_dept_get_with_locator_option_gets_executable_rewrite(self):
-        """`dept get --dept_id <真实id>` → invalid_argument_count + 含改写示例。
+        """`dept get --dept-id <真实id>` → invalid_argument_count + 含改写示例。
 
         改写示例里写的就是本部门真实 id：提示必须**可执行**，不是示意文案。
         """
@@ -120,11 +120,11 @@ class TestConsoleLocatorHint(ServiceTestCase):
         assert "dept get hint_root" in message, f"名字形态没给改写：{message!r}"
 
     async def test_help_carries_positional_label_via_real_entry(self):
-        """真入口 `help dept get`：--dept_id 行带「位置参数」标注（需求 2）。"""
+        """真入口 `help dept get`：--dept-id 行带「位置参数」标注（需求 2）。"""
         result = await self._call("help dept get")
         assert result["success"] is True, result
         detail = result.get("help", "")
-        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept_id")]
+        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept-id")]
         assert line and "位置参数" in line[0], f"真 help 输出没标位置参数：{detail!r}"
 
     # ==================================================================

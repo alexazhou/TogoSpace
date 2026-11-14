@@ -172,6 +172,19 @@ def _first_clause(description: Any) -> str:
     return text
 
 
+def _kebab(name: str) -> str:
+    """参数真名（下划线式）→ help 展示形态（kebab 式，#221 需求 3）。
+
+    与 `consoleCommands.to_kebab` 同规则（两边各一份是因为包内 import 方向：
+    consoleCommands → consoleSchema 不能反过来模块级依赖，否则成环）。结构判据
+    （test_console_kebab_option.py）会把两份实现对着钉死：同输入必须同输出。
+    """
+    kebab = name.replace("_", "-")
+    if "--" in kebab or kebab.startswith("-") or kebab.endswith("-"):
+        raise ValueError(f"kebab 转换产生非法选项形态：{name!r} -> {kebab!r}")
+    return kebab
+
+
 def _shape_note(kind: str) -> str:
     """按类型类别给「这行参数在命令行上怎么写」的形态标注（#219 需求 2）。
 
@@ -214,7 +227,9 @@ def describe_param(
     """
     kind = param_kind(prop)
     marker = "必填" if required else "可选"
-    head = f"--{name} <{kind}>" if kind != "boolean" else f"--{name}"
+    # #221 需求 3：help 参数行只展示 kebab 形态（--title-keyword），旧下划线名
+    # 是兼容期别名、解析层接受但**不在 help 展示**（包括不混排在别名标注里）。
+    head = f"--{_kebab(name)} <{kind}>" if kind != "boolean" else f"--{_kebab(name)}"
     if aliases:
         head += "（别名 " + " / ".join("--" + alias for alias in aliases) + "）"
     shape = _shape_note(kind)
