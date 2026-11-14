@@ -31,6 +31,13 @@ def _make_collab_context(
     agent_task.assignee_id = assignee_id
     agent_task.reviewer_id = reviewer_id
     agent_task.creator_id = creator_id
+    # v3 接力游标：MagicMock 不设这个属性会返回 MagicMock（恒真/恒不等），
+    # 让 `taskService.can_cancel` 的「当前持棒人」判定失去意义。默认口径与迁移 0022
+    # 一致：REVIEWING 且设有验收人 ⇒ 棒在验收人手上；其余 ⇒ 在执行人手上。
+    agent_task.current_stage = 1 if (agent_task_status == TaskStatus.REVIEWING and reviewer_id is not None) else 0
+    agent_task.current_owner_id = (
+        reviewer_id if (agent_task_status == TaskStatus.REVIEWING and reviewer_id is not None) else assignee_id
+    )
     return ToolCallContext(agent_id=agent_id, team_id=1, chat_room=None, schedule_job=schedule_job), agent_task
 
 
@@ -142,10 +149,12 @@ async def test_finish_collaboration_task_assignee_reviewing_passes() -> None:
 @pytest.mark.asyncio
 async def test_finish_receipt_omits_cancel_command_when_no_permission() -> None:
     """无权取消（任务不是自己建的、也没有验收身份）⇒ 回执不得出现 CANCELLED。"""
-    # 收件人 agent_id=1 是 assignee，创建人是 2，未设验收人 ⇒ 既非创建人也非验收人
+    # v3：多级接力中棒已交到下一个执行节点（持棒人 = 2），收件人 agent_id=1 只是原执行人
+    # ⇒ 无权取消（认领后取消权归当前持棒人，创建人也不行，见 step1 §3.2.4）
     ctx, mock_task = _make_collab_context(
         TaskStatus.IN_PROGRESS, agent_id=1, assignee_id=1, reviewer_id=None, creator_id=2,
     )
+    mock_task.current_owner_id = 2  # 棒不在收件人手上
     with patch("service.funcToolService.tools.gtAgentTaskManager.get_task", AsyncMock(return_value=mock_task)):
         result = await finish_action(_context=ctx)
 
@@ -157,8 +166,11 @@ async def test_finish_receipt_omits_cancel_command_when_no_permission() -> None:
 
 
 @pytest.mark.asyncio
-async def test_finish_receipt_offers_cancel_command_when_creator() -> None:
-    """有权取消（任务是自己建的）⇒ 回执必须给出 CANCELLED 指令（防止「一律删掉」蒙过上面那条）。"""
+async def test_finish_receipt_offers_cancel_command_when_holder() -> None:
+    """有权取消（v3：认领后**当前持棒人**可取消）⇒ 回执必须给出 CANCELLED 指令。
+
+    反向检查：避免用「一律删掉取消指令」的空实现蒙过上面那条用例。
+    """
     ctx, mock_task = _make_collab_context(
         TaskStatus.IN_PROGRESS, agent_id=1, assignee_id=1, reviewer_id=None, creator_id=1,
     )

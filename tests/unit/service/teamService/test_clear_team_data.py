@@ -12,6 +12,8 @@ async def test_clear_team_data_deletes_all_runtime_data(monkeypatch):
     monkeypatch.setattr(teamService, "stop_team_runtime", AsyncMock())
     monkeypatch.setattr(teamService.gtScheduleJobManager, "delete_jobs_by_team", AsyncMock(return_value=3))
     monkeypatch.setattr(teamService.gtAgentTaskManager, "delete_tasks_by_team", AsyncMock(return_value=2))
+    # v3：删任务前先清节点表（避免孤儿节点）
+    monkeypatch.setattr(teamService.gtAgentTaskStageManager, "delete_stages_by_team", AsyncMock(return_value=2))
     monkeypatch.setattr(teamService.gtAgentHistoryManager, "delete_history_by_team", AsyncMock(return_value=5))
     monkeypatch.setattr(teamService.gtRoomMessageManager, "delete_messages_by_team", AsyncMock(return_value=10))
     monkeypatch.setattr(teamService.gtAgentActivityManager, "delete_activities_by_team", AsyncMock(return_value=8))
@@ -37,6 +39,7 @@ async def test_clear_team_data_deletes_non_dept_rooms(monkeypatch):
     monkeypatch.setattr(teamService, "stop_team_runtime", AsyncMock())
     monkeypatch.setattr(teamService.gtScheduleJobManager, "delete_jobs_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtAgentTaskManager, "delete_tasks_by_team", AsyncMock(return_value=0))
+    monkeypatch.setattr(teamService.gtAgentTaskStageManager, "delete_stages_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtAgentHistoryManager, "delete_history_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtRoomMessageManager, "delete_messages_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtAgentActivityManager, "delete_activities_by_team", AsyncMock(return_value=8))
