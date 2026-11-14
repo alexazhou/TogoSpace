@@ -56,14 +56,57 @@ class DesktopParams:
     parent_pid: int | None
 
 
+# ── 输出编码 ─────────────────────────────────────────────────────────────────
+
+def _configure_output_encoding() -> None:
+    """把 stdout/stderr 固定成 UTF-8，并给不可编码字符留兜底（#245）。
+
+    Windows 上冻结体的 stdout 走 ANSI 代码页（控制台/管道默认 cp1252），而 marker 的
+    message 是中文 ⇒ `print` 抛 `UnicodeEncodeError`，错误处理器自己再崩，进程以 1 退出，
+    真实失败原因完全看不到（#243 实测：`encodings\\cp1252.py:19 encode` → exit 1）。
+
+    这里只改「怎么写」，不改「写什么」：
+    - `encoding="utf-8"`：Rust 外壳按 UTF-8 解析 marker 行，中文可读；
+    - `errors="backslashreplace"`：万一终端仍不支持，退化成 `\\uXXXX` 也不抛异常 ——
+      宁可少显示字符，也不能让输出异常吞掉真实错误与退出码语义。
+
+    幂等；在 `main()` 第一行调用，先于任何 marker 输出。流被替换成非 TextIO
+    （测试捕获、`pythonw` 下 stdout 为 None 等）时静默跳过。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError) as exc:  # 流已关闭/不可重配置：保持默认编码
+            _logger.warning("输出流切换 UTF-8 失败（继续用默认编码）: %s", exc)
+
+
 # ── stdout marker 协议 ───────────────────────────────────────────────────────
 
 def _emit_marker(payload: str) -> None:
     """输出单行 marker：固定前缀、不换行拆分、立即 flush。
 
     Rust 侧按行匹配该前缀驱动启动状态机，格式必须保持稳定。
+
+    编码二层兜底（#245）：正常路径已在 `main()` 里把 stdout 切到 UTF-8；万一字符仍编不出来
+    （流不可重配置、终端字符集特殊），退化成 ASCII 转义直接写字节。marker 写失败只记日志、
+    绝不向上抛 —— 否则错误路径的 `return 2` 会被输出异常顶成 exit 1，真实原因反而丢失。
     """
-    print(f"{MARKER_PREFIX}{payload}", flush=True)
+    line = f"{MARKER_PREFIX}{payload}"
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is not None:
+            try:
+                buffer.write(line.encode("ascii", "backslashreplace") + b"\n")
+                buffer.flush()
+            except (OSError, ValueError):
+                pass
+    except (OSError, ValueError):
+        pass
     _logger.info("%s%s", MARKER_PREFIX, payload)
 
 
@@ -200,6 +243,7 @@ async def _run_backend(params: DesktopParams) -> None:
 
 
 def main() -> int:
+    _configure_output_encoding()  # 输出编码：必须先于任何 marker
     try:
         params = _read_desktop_params()
     except DesktopParamError as exc:

@@ -34,6 +34,7 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -495,6 +496,75 @@ def check_installed(root: str, smoke_exe: str | None) -> None:
         )
 
 
+# ── marker 契约变异自证（#245） ──────────────────────────────────────────────
+#
+# PM 要求「加一条断言钉住 marker 能输出且退出码为 2，并对该断言做变异自证：
+# 把编码修复去掉 ⇒ 该断言必红」。做法：在源码形态上跑同一份判据（judge_error_contract），
+# 一次用真源码，一次用「去掉修复调用」的变异体，且都用 PYTHONIOENCODING=cp1252
+# 复刻 Windows 冻结体的 stdout 编码 —— 不依赖 Windows 特有 API，darwin / windows 都能跑。
+
+FIX_CALL_SITE = "_configure_output_encoding()  # 输出编码：必须先于任何 marker"
+MUTANT_CALL_SITE = "pass  # [mutant] 去掉了输出编码修复（变异自证用）"
+
+
+def _run_entry_script(python_exe: str, script: str, repo_root: str) -> tuple[int, str, str]:
+    """用 cp1252 的 stdout 跑 desktopEntry 源码，返回 (exit, stdout, stderr)。"""
+    env = dict(os.environ)
+    for key in ("TOGOSPACE_DESKTOP", "TOGOSPACE_DESKTOP_PORT", "TOGOSPACE_DESKTOP_TOKEN"):
+        env.pop(key, None)
+    env["PYTHONPATH"] = os.path.join(repo_root, "src")
+    env["PYTHONUTF8"] = "0"
+    env["PYTHONIOENCODING"] = "cp1252"
+    try:
+        result = subprocess.run(
+            [python_exe, script], capture_output=True, timeout=300, env=env, cwd=repo_root,
+        )
+    except (subprocess.TimeoutExpired, OSError) as error:
+        return -1, "", f"{type(error).__name__}: {error}"
+    return (
+        result.returncode,
+        (result.stdout or b"").decode("utf-8", "replace"),
+        (result.stderr or b"").decode("utf-8", "replace"),
+    )
+
+
+def check_marker_contract(repo_root: str, python_exe: str) -> None:
+    """修复在场 ⇒ 判据绿；把修复变异掉 ⇒ 同一判据必须红（否则判据没牙）。"""
+    script = os.path.join(repo_root, "src", "desktopEntry.py")
+    print(f"--- marker 契约自证（PYTHONIOENCODING=cp1252 模拟 Windows stdout）: {script}")
+    if not os.path.isfile(script):
+        fail(f"找不到 {script}")
+        return
+    with open(script, encoding="utf-8") as handle:
+        source = handle.read()
+    if FIX_CALL_SITE not in source:
+        fail(f"源码里找不到修复调用点（{FIX_CALL_SITE!r}）⇒ 修复不在场，自证无意义")
+        return
+
+    code, out, err = _run_entry_script(python_exe, script, repo_root)
+    print(f"    修复在场: exit={code} stdout={out.strip()[:200]!r}")
+    failures = judge_error_contract(code, out, err)
+    if failures:
+        for reason in failures:
+            fail(f"修复在场但契约不成立：{reason}")
+    else:
+        ok("修复在场 ⇒ cp1252 下 marker 可读、exit 2")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        mutant_path = os.path.join(tmp, "desktopEntry_mutant.py")
+        with open(mutant_path, "w", encoding="utf-8") as handle:
+            handle.write(source.replace(FIX_CALL_SITE, MUTANT_CALL_SITE, 1))
+        code, out, err = _run_entry_script(python_exe, mutant_path, repo_root)
+    print(f"    变异体（去掉修复）: exit={code} stdout={out.strip()[:200]!r}")
+    mutant_failures = judge_error_contract(code, out, err)
+    if mutant_failures:
+        ok(f"变异体被同一判据判红（{len(mutant_failures)} 条）⇒ 判据有牙，下次坏回去会红")
+        for reason in mutant_failures:
+            print(f"       - {reason[:180]}")
+    else:
+        fail("变异体（去掉编码修复）竟然也过 ⇒ 判据没牙，修没修都绿")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="验证 Togobot Windows 产物（#243）")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -508,6 +578,10 @@ def main() -> int:
     smoke.add_argument("--exe", required=True)
     smoke.add_argument("--skip-startup", action="store_true", help="只跑 B1")
 
+    contract = sub.add_parser("marker-contract", help="错误 marker 契约 + 变异自证（源码形态）")
+    contract.add_argument("--repo-root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    contract.add_argument("--python", default=sys.executable)
+
     installed = sub.add_parser("installed", help="安装树结构检查（+ 可选在安装树上复跑后端）")
     installed.add_argument("--dir", required=True)
     installed.add_argument("--smoke-exe", default=None)
@@ -519,6 +593,8 @@ def main() -> int:
         _run_no_desktop_env(args.exe)
         if not args.skip_startup:
             _run_desktop_startup(args.exe, "构建目录")
+    elif args.command == "marker-contract":
+        check_marker_contract(os.path.abspath(args.repo_root), args.python)
     elif args.command == "installed":
         check_installed(args.dir, args.smoke_exe)
 

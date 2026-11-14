@@ -78,6 +78,51 @@ class TestMarkers:
         assert out == "[TOGO] ERROR code=2 message=第一行 第二行\n"
 
 
+class TestOutputEncoding:
+    """#245：Windows 上 stdout 默认 cp1252，中文 marker 会抛 UnicodeEncodeError 吞掉真实错误。"""
+
+    @staticmethod
+    def _cp1252_stdout() -> tuple[io.BytesIO, io.TextIOWrapper]:
+        raw = io.BytesIO()
+        return raw, io.TextIOWrapper(raw, encoding="cp1252", errors="strict", newline="\n")
+
+    def test_configure_output_encoding_makes_chinese_readable(self, monkeypatch):
+        raw, stream = self._cp1252_stdout()
+        monkeypatch.setattr(desktopEntry.sys, "stdout", stream)
+        monkeypatch.setattr(desktopEntry.sys, "stderr", stream)
+
+        desktopEntry._configure_output_encoding()
+        desktopEntry.emit_error(desktopEntry.ERROR_INVALID_ENV, "TOGOSPACE_DESKTOP 必须为 1")
+        stream.flush()
+
+        text = raw.getvalue().decode("utf-8")  # 真按 UTF-8 写出来了
+        assert "[TOGO] ERROR code=1 message=TOGOSPACE_DESKTOP 必须为 1" in text
+        assert "\\u" not in text  # 不是转义形态：用户看到的是中文
+
+    def test_emit_marker_falls_back_when_stream_cannot_reconfigure(self, monkeypatch):
+        """流没有 reconfigure（pythonw / 特殊重定向）时，marker 仍必须以转义形态送出去。"""
+
+        class ExplodingStream:
+            def __init__(self):
+                self.buffer = io.BytesIO()
+
+            def write(self, _text):  # 模拟 cp1252 strict 下 print 抛错
+                raise UnicodeEncodeError("charmap", "必", 0, 1, "character maps to <undefined>")
+
+            def flush(self):
+                pass
+
+        stream = ExplodingStream()
+        monkeypatch.setattr(desktopEntry.sys, "stdout", stream)
+
+        desktopEntry._configure_output_encoding()  # 无 reconfigure ⇒ 静默跳过
+        desktopEntry.emit_error(desktopEntry.ERROR_INVALID_ENV, "必须为 1")  # 不得抛异常
+
+        written = stream.buffer.getvalue()
+        assert b"[TOGO] ERROR code=1 message=" in written
+        assert b"\\u5fc5" in written  # 中文退化成转义，但 code 已送达外壳
+
+
 class TestApplyDesktopOverrides:
     @staticmethod
     def _make_setting(bind_host="0.0.0.0", bind_port=8180, auth_enabled=False, token=""):

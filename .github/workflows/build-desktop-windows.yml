@@ -166,6 +166,14 @@ jobs:
     - name: "Verify backend executable (B: 空跑 + 真启动 + 真 HTTP + stdin 停机)"
       run: ./.venv/Scripts/python.exe scripts/verify_win_bundle.py backend-smoke --exe tauri/build/backend/Togobot-backend.exe
 
+    # ── marker 契约的变异自证（#245）────────────────────────────────────────────
+    # B1 判「错误 marker 能可读地打出来 + exit 2」；这步证明那条判据有牙：
+    # 同一判据对「去掉编码修复」的变异体必须变红，否则修没修都绿。
+    - name: "Marker contract mutation self-check (#245)"
+      run: |
+        ./.venv/Scripts/python.exe scripts/verify_win_bundle.py marker-contract `
+          --repo-root . --python ./.venv/Scripts/python.exe
+
     # ── C 安装层：静默安装后在安装树里复验 ─────────────────────────────────────
     - name: Silent install (NSIS /S)
       run: |
