@@ -32,6 +32,12 @@ jobs:
     env:
       # scripts/togo_desktop.spec 读 TARGET_ARCH（Windows 上仅用于日志与一致性）
       TARGET_ARCH: x86_64
+      # Windows 上 Python 的 stdout 默认是 cp1252（不是 UTF-8），而构建/验证脚本里有 emoji 与中文
+      # 的 print，会直接 UnicodeEncodeError 炸在构建第一步（run 43617333776 实测：
+      # build_desktop.py:72 print("🚀 ...") → 'charmap' codec can't encode）。
+      # 强制 UTF-8 输出，避免为了「能打印」去改脚本里的文案（那是产品/工具代码，不该为 CI 编码问题让步）。
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
     defaults:
       run:
         shell: pwsh
@@ -170,12 +176,16 @@ jobs:
         Get-Content artifact-digest.txt
 
     - name: Upload installer artifact
-      if: always()   # 构建成功但验证红的场景也要能取到产物来人工分析
+      # 两个条件都要：①always() —— 构建成功但验证红时也要能取到产物人工分析；
+      # ②locate 真的有产物 —— 否则空 path 会让本步骤红，把真正的失败原因（前面的构建/验证步骤）
+      #   埋进「No files were found with the provided path」里（run 43617333776 就是这么被埋的）。
+      if: always() && steps.locate.outputs.path != ''
       uses: actions/upload-artifact@v7
       with:
         name: windows-nsis-installer
         path: |
           ${{ steps.locate.outputs.path }}
           artifact-digest.txt
-        if-no-files-found: error
+        # digest 文件是后面一步才写的：构建早就红了的时候它不存在，不该因此再红一次
+        if-no-files-found: warn
         retention-days: 30
