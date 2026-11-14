@@ -759,6 +759,13 @@ class TestJudgeDebt(_WorkflowCase):
 
         变异（M10g：`_task_lock` 恒返回同一个全局 `_GLOBAL_LOCK`）⇒ 最大并发深度
         恒为 1，本用例必红。
+
+        **深度判据的前提**（#232 / verify-230 记档①）：深度只有在「同一任务一次
+        `update_task` 只进一次临界区」时才有意义——若实现改成嵌套进入，单任务自己
+        就能贡献深度 2，全局单锁也会判绿（假绿）。故这里先把前提本身判掉：时间线上
+        同一 `task_id` 的未配对 `enter` 恒 ≤ 1、且 enter/exit 严格配对收尾。
+        变异（`_load_stages` 读完后嵌套再调自身）⇒ 本不变式必红，且此时深度可能是 2
+        （判据盲区被覆盖）；「嵌套 + 全局单锁」组合下深度判绿、不变式仍红。
         """
         import asyncio
         from unittest import mock
@@ -781,8 +788,10 @@ class TestJudgeDebt(_WorkflowCase):
         SERIALIZED_FALLBACK = 2.0
 
         async def recording_load(task):
-            stages = await real_load(task)
+            # `enter` 记在真实读之前：区间必须**罩住整个临界区调用**，否则区间内的
+            # 嵌套调用会被记到区间外（#232 的不变式就白写了）
             timeline.append(("enter", task.id))
+            stages = await real_load(task)
             if len({tid for kind, tid in timeline if kind == "enter"}) >= 2:
                 both_inside.set()
             try:
@@ -809,8 +818,26 @@ class TestJudgeDebt(_WorkflowCase):
             depth += 1 if kind == "enter" else -1
             depths.append(depth)
         max_depth = max(depths, default=0)
+        open_enters: dict[int, int] = {}
 
         assert all(r.get("success") is True for r in results), f"两路都该成功：{results}"
+
+        # 前提不变式先证：同任务的临界区不得嵌套（否则深度判据会把「单任务自己」
+        # 当成两路并发，全局单锁假绿 —— verify-230 记档①）
+        for kind, tid in timeline:
+            open_enters[tid] = open_enters.get(tid, 0) + (1 if kind == "enter" else -1)
+            assert open_enters[tid] >= 0, (
+                f"同一任务出现未配对的 exit（task {tid}）——时间线不成对：{timeline}"
+            )
+            assert open_enters[tid] <= 1, (
+                f"同一任务的临界区出现**嵌套**（task {tid} 同时有 {open_enters[tid]} 个未配对 enter）："
+                f"深度判据的前提被破坏 —— 此时「全局单锁」也会被算成深度 {max_depth} 而假绿；"
+                f"时间线={timeline}"
+            )
+        assert set(open_enters.values()) <= {0}, (
+            f"enter/exit 未收尾（残留未配对 enter）：{open_enters}；时间线={timeline}"
+        )
+
         assert max_depth >= 2, (
             f"两个不同任务被串行化了（临界区最大并发深度 {max_depth}，按任务分锁应为 2）——"
             f"锁写成了全局锁；临界区时间线={timeline}"
