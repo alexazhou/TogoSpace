@@ -44,7 +44,7 @@ async def get_stages_by_task(task_id: int) -> list[GtAgentTaskStage]:
         await GtAgentTaskStage
         .select()
         .where(GtAgentTaskStage.task_id == task_id)
-        .order_by(GtAgentTaskStage.stage_index.asc())
+        .order_by(GtAgentTaskStage.stage_index.asc())  # type: ignore[attr-defined]
         .aio_execute()
     )
 
@@ -60,8 +60,11 @@ async def get_stages_by_task_ids(task_ids: list[int]) -> dict[int, list[GtAgentT
     rows = await (
         GtAgentTaskStage
         .select()
-        .where(GtAgentTaskStage.task_id.in_(task_ids))
-        .order_by(GtAgentTaskStage.task_id.asc(), GtAgentTaskStage.stage_index.asc())
+        .where(GtAgentTaskStage.task_id.in_(task_ids))  # type: ignore[attr-defined]
+        .order_by(
+            GtAgentTaskStage.task_id.asc(),  # type: ignore[attr-defined]
+            GtAgentTaskStage.stage_index.asc(),  # type: ignore[attr-defined]
+        )
         .aio_execute()
     )
     grouped: dict[int, list[GtAgentTaskStage]] = {}
@@ -214,7 +217,7 @@ async def delete_stages_by_task_ids(task_ids: list[int]) -> int:
     return await (
         GtAgentTaskStage
         .delete()
-        .where(GtAgentTaskStage.task_id.in_(task_ids))
+        .where(GtAgentTaskStage.task_id.in_(task_ids))  # type: ignore[attr-defined]
         .aio_execute()
     )
 
@@ -227,6 +230,6 @@ async def delete_stages_by_team(team_id: int) -> int:
     return await (
         GtAgentTaskStage
         .delete()
-        .where(GtAgentTaskStage.task_id.in_(subquery))
+        .where(GtAgentTaskStage.task_id.in_(subquery))  # type: ignore[attr-defined]
         .aio_execute()
     )

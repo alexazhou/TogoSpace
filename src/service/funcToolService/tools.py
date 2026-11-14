@@ -1801,6 +1801,7 @@ async def create_task(
     assignee_id: int,
     description: str = '',
     reviewer_id: Optional[int] = None,
+    stages: Optional[list[dict | int]] = None,
     priority: str = 'NORMAL',
     parent_id: Optional[int] = None,
     depends_on: Optional[list[int]] = None,
@@ -1816,6 +1817,7 @@ async def create_task(
         assignee_id: 执行人 Agent ID（只能是自己或自己的直接/间接下属）
         description: 任务描述，含上下文、约束和交付标准
         reviewer_id: 完成时若需要他人验收，则设置验收人 Agent ID，不填则无需验收流程；不能与 assignee_id 相同（同一人无需设置验收）
+        stages: 多级工作流节点列表（**与 reviewer_id 互斥**）：每项为 {"owner_id": int, "node_type": "REVIEW"|"EXECUTION", "name": "组长初审"}，也可简写为 owner_id 整数（默认为 REVIEW 审核节点）。节点 0 恒为执行人（assignee_id），无需在 stages 里重复。例：stages=[{"name":"组长初审","owner_id":7},{"name":"总监终审","owner_id":9}] ⇒ 节点链 [执行 → 组长初审 → 总监终审]。每个节点负责人必须是本团队在职成员。
         priority: 优先级，HIGH / NORMAL / LOW，默认 NORMAL
         parent_id: 父任务 ID，用于任务树拆解。除了 Operator 直接下达的任务，其他任务应按拆解关系设置父任务 ID，使所有任务能形成以 Operator 任务为根的任务树
         depends_on: 依赖的任务 ID 列表。非空且其中任一尚未 DONE 时，新任务初始状态为 PENDING（依赖全部 DONE 后自动转 TODO）；为空则初始状态为 TODO
@@ -1836,6 +1838,7 @@ async def create_task(
         assignee_id=assignee_id,
         description=description,
         reviewer_id=reviewer_id,
+        stages=stages,
         priority=priority,
         parent_id=parent_id,
         depends_on=[int(x) for x in (depends_on or [])],
@@ -1851,15 +1854,28 @@ async def update_task(
     note: str = '',
     reviewer_id: Optional[int] = None,
     clear_fields: Optional[list[ClearField]] = None,
+    workflow_action: Optional[Literal["advance", "reject"]] = None,
+    target_stage: Optional[int] = None,
+    append_stages: Optional[list[dict | int]] = None,
+    remove_stage_index: Optional[int] = None,
+    reassign_stage: Optional[dict] = None,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """更新协作任务：流转状态、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。
+    """更新协作任务：交棒/打回、调整工作流节点、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。
+
+    **一次调用只能做一件事**：状态流转（new_status）、workflow_action、节点调整
+    （append_stages / remove_stage_index / reassign_stage）、验收人变更，四类同时给会被拒绝。
 
     Args:
         task_id: 任务 ID
         new_status: 目标状态，可选 TODO、PENDING、IN_PROGRESS、ON_HOLD、REVIEWING、DONE、CANCELLED；省略或等于当前状态表示追加评论。权限：提交验收（→REVIEWING）只能由执行人发起，且任务须设有验收人；通过或打回验收（REVIEWING→DONE、REVIEWING→IN_PROGRESS）只能由验收人操作；取消（→CANCELLED）只能由验收人或创建人操作；其余流转只能由执行人操作。终态 DONE、CANCELLED 不可流转，只能追加评论；设有验收人的任务不能绕过验收直接到 DONE；依赖任务未全部 DONE 时 PENDING 不能转为 IN_PROGRESS。
         note: 本次流转的说明；追加评论时必填，作为评论正文。修改验收人时作为变更原由写入时间线（可选）。
         reviewer_id: 把验收人设为该团队成员（写时间线一条「验收人变更：旧 → 新」）。只有任务创建人或当前验收人可以操作，执行人不能操作；不能设成执行人自己；与当前验收人相同时不写事件。省略表示不改验收人。**不能与状态流转（非自环的 new_status）在同一次调用里做**。
+        workflow_action: 工作流动作（v3 单棒接力）。advance=交棒给下一节点（已是末节点则任务 DONE）；reject=打回任意前序节点（必须同时给 note 说明原因）。只有**当前持棒人**（接力棒现在在谁手上，见 get_task_detail 的 current_owner_id）可以执行。纯顺序推进类任务（只有 1 个节点，或当前在最后一个节点）用 new_status=DONE 等价；其余请优先用本参数，它不需要你猜状态。
+        target_stage: reject 的目标节点序号（0 .. current_stage-1），省略时默认打回节点 0。只能与 workflow_action="reject" 一起用。
+        append_stages: 后置加签：在当前节点链末尾追加节点，格式同 create_task 的 stages。认领后只能由当前持棒人追加（REVIEW 节点允许加签，这是唯一「增加把关」的合法途径）。
+        remove_stage_index: 删除未开始的节点序号。**REVIEW 节点任何情况都不可删除**（防绕过审批红线）；认领后才能删未开始的 EXECUTION 节点，只有当前持棒人可删；不能删当前或已通过的节点。节点 0（执行人）不可删除，换人请用 reassign_stage。
+        reassign_stage: 节点换人：{"stage_index": 1, "owner_id": 9}。用于「当前/后续未完成节点交接换人」，新负责人必须是本团队在职成员。
         clear_fields: 要清除（置空）的字段名列表，白名单当前仅 "reviewer_id"。clear_fields=["reviewer_id"] 表示撤销验收人（置空）：只有任务创建人可以操作，任务处于 REVIEWING 时不允许（会导致无人能通过验收），不能与状态流转或 reviewer_id 同时给。传空数组 [] 视为「未提供」，不会撤销任何字段（注意这与 list_tasks 的 status=[] 语义相反：status=[] 是「过滤条件写了个空的」，意图不明故报错；clear_fields=[] 是「没要清任何字段」，意图明确故等价省略）。白名单之外的字段名会被拒绝并返回 error_code="invalid_clear_field"。
     """
     import service.taskService as taskService
@@ -1876,6 +1892,11 @@ async def update_task(
         note=note,
         reviewer_id=reviewer_id,
         clear_fields=clear_fields,
+        workflow_action=workflow_action,
+        target_stage=target_stage,
+        append_stages=append_stages,
+        remove_stage_index=remove_stage_index,
+        reassign_stage=reassign_stage,
     )
 
 
@@ -1956,9 +1977,11 @@ async def list_tasks(
     title_keyword: Optional[str] = None,
     open_only: bool = True,
     limit: Optional[int] = None,
+    mine: bool = False,
+    include_upcoming: bool = False,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """查询协作任务列表。assignee / reviewer / scope / title_keyword 至少传其一；返回按最新在前，total > count 表示被截断。
+    """查询协作任务列表。assignee / reviewer / scope / title_keyword / mine 至少传其一；返回按最新在前，total > count 表示被截断。
     每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。
 
     Args:
@@ -1969,6 +1992,8 @@ async def list_tasks(
         status: 按状态过滤，传状态数组（如 ["TODO","DONE"]）。有效值（大写）TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED；数组含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效
         open_only: 只返回未完结任务（排除 DONE / CANCELLED），默认 True
         limit: 本次返回条数，默认 20，取值 1-50，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）
+        mine: 「我的待办」视图（v3 推荐写法）：只返回**接力棒当前正轮到我处理**的任务（current_owner_id = 我）。多级工作流下这比 scope="self" 更精确——scope="self" 返回「我参与任一节点」的全部任务，mine=True 只返回现在该我说话的。
+        include_upcoming: 配合 mine=True：除当前待办外，再包含「后续节点有我但还没轮到」的在途任务（提前预知要接手的活）。单独使用会报 invalid_filter_combo。
     """
     import service.taskService as taskService
 
@@ -1979,10 +2004,10 @@ async def list_tasks(
     # 纯空白关键字不算过滤条件：`LIKE '%%'` 会匹配全部任务，等于静默取消过滤。
     title_keyword = (title_keyword or "").strip() or None
 
-    if assignee is None and reviewer is None and scope is None and title_keyword is None:
+    if assignee is None and reviewer is None and scope is None and title_keyword is None and not mine:
         return {
             "success": False,
-            "message": "请通过 assignee / reviewer / scope / title_keyword 指定过滤条件（至少提供一个）",
+            "message": "请通过 assignee / reviewer / scope / title_keyword / mine 指定过滤条件（至少提供一个）",
             "error_code": "missing_target",
         }
 
@@ -1998,6 +2023,8 @@ async def list_tasks(
         limit=_clamp_list_tasks_limit(limit),
         scope=scope,
         caller_id=_context.agent_id if _context is not None else None,
+        mine=mine,
+        include_upcoming=include_upcoming,
     )
 
 

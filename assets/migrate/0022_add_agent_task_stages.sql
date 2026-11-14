@@ -41,7 +41,10 @@ ALTER TABLE agent_task_events ADD COLUMN action_type TEXT;
 ALTER TABLE agent_task_events ADD COLUMN from_stage INTEGER;
 ALTER TABLE agent_task_events ADD COLUMN to_stage INTEGER;
 
--- ④ 存量回填（幂等：全部用 NOT EXISTS / IS NULL 兜住重跑）----------------------
+-- ④ 存量回填。
+-- 关于「重跑」：本文件级不可重放——重跑会在第一条 ALTER 上撞 duplicate column（db 层把
+-- 该错当可忽略并重新记账，整段 executescript 已回滚），真正的重放保护是迁移账本。
+-- 下面的 NOT EXISTS / IS NULL 只是防御性冗余（万一表/列由别的路径先建好），不承担幂等。
 -- 节点 0 = EXECUTION(assignee_id)；有 reviewer_id 时补节点 1 = REVIEW(reviewer_id)。
 INSERT INTO agent_task_stages (task_id, stage_index, node_type, name, owner_id, stage_status, created_at, updated_at)
 SELECT t.id, 0, 'EXECUTION', '', t.assignee_id, 'WAITING', datetime('now'), datetime('now')

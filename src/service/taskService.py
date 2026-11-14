@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import NamedTuple, Optional, Sequence, Union
 
@@ -12,14 +13,24 @@ from constants import (
     ALLOWED_CLEAR_FIELDS,
     EVENT_CONTENT_MAX_CHARS,
     EVENT_TRUNCATED_SUFFIX,
+    MAX_TASK_STAGES,
     EmployStatus,
     SpecialAgent,
+    StageNodeType,
+    StageStatus,
+    TaskEventAction,
     TaskPriority,
     TaskStatus,
 )
-from dal.db import gtAgentManager, gtAgentTaskManager, gtAgentTaskEventManager
+from dal.db import (
+    gtAgentManager,
+    gtAgentTaskManager,
+    gtAgentTaskEventManager,
+    gtAgentTaskStageManager,
+)
 from model.dbModel.base import atomic
 from model.dbModel.gtAgentTask import GtAgentTask
+from model.dbModel.gtAgentTaskStage import GtAgentTaskStage
 from service import deptService
 
 logger = logging.getLogger(__name__)
@@ -52,10 +63,375 @@ def is_task_reviewer(task: GtAgentTask, caller_id: int) -> bool:
 def can_cancel(task: GtAgentTask, caller_id: int) -> bool:
     """单一口径判定：caller 是否有权取消该任务（`update_task` 的 `→CANCELLED` 分支）。
 
-    取消权限 = 创建人或验收人。供唤醒通知 / `finish_action` 提示按权限给出互斥文案，
-    避免各调用点自己重写一遍「creator or reviewer」公式（曾因此产生过两处分叉）。
+    v3 口径（step1 §3.2.4，取代 v2 的「创建人或验收人」）：
+    - **认领之前**（`PENDING` / `TODO`）：仅创建人；
+    - **认领之后**（`IN_PROGRESS` / `REVIEWING` / `ON_HOLD`）：仅**当前持棒人**
+      （`current_owner_id`）；`current_owner_id` 为空时退化到 `assignee_id`
+      （迁移前的行 / 极端脏数据，宁可判给执行人也不判给「谁都能取消」）。
     """
-    return caller_id == task.creator_id or is_task_reviewer(task, caller_id)
+    if task.status in (TaskStatus.PENDING, TaskStatus.TODO):
+        return caller_id == task.creator_id
+    holder = task.current_owner_id if task.current_owner_id is not None else task.assignee_id
+    return caller_id == holder
+
+
+# ---------------------------------------------------------------------------
+# v3 单棒接力：节点链读取与状态映射
+# ---------------------------------------------------------------------------
+
+def _resolve_status_for_stage(node_type: StageNodeType) -> TaskStatus:
+    """节点类型 → 顶层状态（step2 §4.1，**唯一映射口径**）。
+
+    `EXECUTION → IN_PROGRESS`、`REVIEW → REVIEWING`。
+    """
+    return TaskStatus.REVIEWING if node_type == StageNodeType.REVIEW else TaskStatus.IN_PROGRESS
+
+
+def _synth_stages_for(task: GtAgentTask) -> list[dict]:
+    """按 v2 字段合成节点链（**只读兜底**）。
+
+    仅用于「节点链未物化」的任务：正常路径由迁移 0022 回填、并且新建任务一律显式
+    写入节点，所以走到这里说明是历史遗留/异常行。合成口径与迁移回填完全一致：
+    节点 0 = `EXECUTION(assignee_id)`，`reviewer_id` 非空时补节点 1 = `REVIEW(reviewer_id)`。
+    """
+    chain = [{"stage_index": 0, "node_type": StageNodeType.EXECUTION, "owner_id": task.assignee_id,
+              "name": "", "stage_status": StageStatus.ACTIVE}]
+    if task.reviewer_id is not None:
+        chain.append({"stage_index": 1, "node_type": StageNodeType.REVIEW, "owner_id": task.reviewer_id,
+                      "name": "", "stage_status": StageStatus.WAITING})
+    return chain
+
+
+def _stage_field(stage, key: str, default=None):
+    """节点字段兼容读取：ORM 对象与合成 dict 统一成同一套访问方式。"""
+    if isinstance(stage, dict):
+        return stage.get(key, default)
+    return getattr(stage, key, default)
+
+
+async def _load_stages(task: GtAgentTask) -> list:
+    """读取任务节点链（按 `stage_index` 升序）；未物化时返回按 v2 字段合成的链。
+
+    返回元素可能是 `GtAgentTaskStage` 或 `dict`（合成兜底），下游一律用
+    `_stage_field()` 访问，避免两套分支散落各处。
+    """
+    stages = await gtAgentTaskStageManager.get_stages_by_task(task.id)
+    if stages:
+        return list(stages)
+    logger.warning(
+        "任务节点链未物化，按 v2 字段合成只读链（task_id=%s, status=%s）："
+        "正常路径不会出现，若频繁出现请检查迁移 0022 是否执行",
+        getattr(task, "id", None), getattr(task, "status", None),
+    )
+    return _synth_stages_for(task)
+
+
+def _stages_payload(stages: list, names: dict[int, str] | None = None) -> list[dict]:
+    """节点链 → 面向工具/前端的 dict 列表（含 `owner_name`）。"""
+    names = names or {}
+    payload: list[dict] = []
+    for stage in stages:
+        node_type = _stage_field(stage, "node_type")
+        stage_status = _stage_field(stage, "stage_status")
+        owner_id = _stage_field(stage, "owner_id")
+        payload.append({
+            "stage_index": _stage_field(stage, "stage_index"),
+            "node_type": node_type.value if isinstance(node_type, StageNodeType) else node_type,
+            "name": _stage_field(stage, "name", "") or "",
+            "owner_id": owner_id,
+            "owner_name": names.get(owner_id, f"Agent#{owner_id}") if owner_id is not None else None,
+            "stage_status": stage_status.value if isinstance(stage_status, StageStatus) else stage_status,
+        })
+    return payload
+
+
+def _effective_cursor(task: GtAgentTask, stages: list) -> int:
+    """有效游标：主表 `current_stage` 为主，**并用顶层状态纠偏**。
+
+    为什么要纠偏：`current_stage` 是 v3 新增列，迁移会把存量 `REVIEWING` 行回填成
+    1，但「直接用 SQL 插入的测试夹具 / 手工修过的行」可能状态已是 `REVIEWING`
+    而游标仍是 0。这种行若按游标推进，会在末节点判定上误报
+    `non_final_stage_cannot_done`（明明只有 1 个审核节点却说过不去）。
+    纠偏只在「状态与当前节点类型明显矛盾」时生效，正常路径一律以游标为准。
+    """
+    if not stages:
+        return 0
+    cursor = max(0, min(task.current_stage or 0, len(stages) - 1))
+    node_type = _stage_field(stages[cursor], "node_type")
+    if task.status == TaskStatus.REVIEWING and node_type != StageNodeType.REVIEW:
+        review_indexes = [
+            index for index, stage in enumerate(stages)
+            if _stage_field(stage, "node_type") == StageNodeType.REVIEW
+        ]
+        if review_indexes:
+            cursor = review_indexes[0]
+    return cursor
+
+
+def _holder_of(task: GtAgentTask, stages: list) -> int:
+    """当前持棒人：主表 `current_owner_id` 优先，缺失时取（纠偏后的）当前节点 owner。"""
+    if task.current_owner_id is not None:
+        return task.current_owner_id
+    index = _effective_cursor(task, stages)
+    return _stage_field(stages[index], "owner_id")
+
+
+def _is_holder(task: GtAgentTask, stages: list, caller_id: int) -> bool:
+    """「谁拿棒谁说话」：caller 是否为当前持棒人（v2 的 assignee/reviewer 判定被它统一）。"""
+    return _holder_of(task, stages) == caller_id
+
+
+def _review_nodes(stages: list) -> list:
+    """链上所有 `REVIEW` 节点（按序号升序）。"""
+    return [s for s in stages if _stage_field(s, "node_type") == StageNodeType.REVIEW]
+
+
+def _normalize_stage_specs(stages) -> tuple[list[dict], dict | None]:
+    """把 `stages` 参数归一成 `[{owner_id, node_type, name}]`；不合法时返回错误回执。
+
+    接受两种写法（step1 §5.1）：`{"owner_id": 7, "node_type": "REVIEW", "name": "组长初审"}`
+    与简写整数 `7`（等价于 `REVIEW` 节点）。**整数简写默认 REVIEW** 而不是 EXECUTION：
+    多级协作的常见目的是「加把关」，默认可删的执行节点等于默认可绕过审核。
+    """
+    if stages is None:
+        return [], None
+    if not isinstance(stages, (list, tuple)):
+        return [], {
+            "success": False,
+            "message": f"stages 必须是数组（当前 {type(stages).__name__}），每项为 owner_id 整数或 {{owner_id, node_type?, name?}}",
+            "error_code": "invalid_stages",
+        }
+
+    normalized: list[dict] = []
+    for position, raw in enumerate(stages, start=1):
+        if isinstance(raw, bool):
+            return [], {
+                "success": False,
+                "message": f"stages 第 {position} 项非法：布尔值不是 owner_id",
+                "error_code": "invalid_stages",
+            }
+        if isinstance(raw, int):
+            normalized.append({"owner_id": raw, "node_type": StageNodeType.REVIEW, "name": ""})
+            continue
+        if isinstance(raw, dict):
+            owner_id = raw.get("owner_id")
+            if isinstance(owner_id, bool) or not isinstance(owner_id, int):
+                return [], {
+                    "success": False,
+                    "message": f"stages 第 {position} 项缺少合法的 owner_id（收到 {owner_id!r}）",
+                    "error_code": "invalid_stages",
+                }
+            raw_type = raw.get("node_type")
+            node_type = StageNodeType.REVIEW if raw_type is None else StageNodeType.value_of(str(raw_type))
+            if node_type is None:
+                return [], {
+                    "success": False,
+                    "message": f"stages 第 {position} 项的 node_type 非法：{raw_type!r}，有效值为 EXECUTION / REVIEW",
+                    "error_code": "invalid_stages",
+                }
+            normalized.append({"owner_id": owner_id, "node_type": node_type, "name": str(raw.get("name") or "")})
+            continue
+        return [], {
+            "success": False,
+            "message": f"stages 第 {position} 项类型非法：{type(raw).__name__}，只接受整数或对象",
+            "error_code": "invalid_stages",
+        }
+    return normalized, None
+
+
+async def _validate_stage_owners(team_id: int, creator_id: int, owner_ids: list[int]) -> dict | None:
+    """校验后续节点负责人：本团队有效成员且在职（离职者接管节点 = 制造死锁）。
+
+    创建人自己免查（`get_team_agents_by_ids` 不含调用者缓存时的边界，与
+    `_handle_reviewer_change` 的 D4 口径一致）。
+    """
+    candidates = [oid for oid in dict.fromkeys(owner_ids) if oid != creator_id]
+    if not candidates:
+        return None
+    agents = await gtAgentManager.get_team_agents_by_ids(team_id, candidates)
+    found = {a.id: a for a in agents if a.team_id == team_id}
+    for owner_id in candidates:
+        agent = found.get(owner_id)
+        if agent is None:
+            return {
+                "success": False,
+                "message": f"节点负责人必须是本团队成员：agent_id={owner_id} 不存在或不属于当前团队",
+                "error_code": "invalid_stage_owner",
+            }
+        if agent.employ_status == EmployStatus.OFF_BOARD:
+            return {
+                "success": False,
+                "message": f"节点负责人必须是在职成员：agent_id={owner_id} 已离职",
+                "error_code": "invalid_stage_owner",
+            }
+    return None
+
+
+def _compat_reviewer_for(stages: list, cursor: int) -> int | None:
+    """v2 兼容列 `reviewer_id` 的同步口径（step2 §2.3）。
+
+    「当前处于 `REVIEW` 节点 ⇒ 该节点负责人；否则 ⇒ **最后一个** `REVIEW` 节点负责人；
+    无审核节点 ⇒ None」。后两条让 v2 的「最终验收人」语义在多级链里仍然成立。
+    """
+    if cursor < 0 or cursor >= len(stages):
+        cursor = max(0, min(cursor, len(stages) - 1)) if stages else 0
+    if stages and _stage_field(stages[cursor], "node_type") == StageNodeType.REVIEW:
+        return _stage_field(stages[cursor], "owner_id")
+    review_owners = [_stage_field(s, "owner_id") for s in _review_nodes(stages)]
+    return review_owners[-1] if review_owners else None
+
+
+# 单任务写操作互斥（step2 §6.1）：按 task_id 的进程内锁，不同任务互不阻塞。
+# 锁本身不保证跨进程串行，真正的原子性由「持锁 + 单事务」共同兜底。
+_TASK_LOCKS: dict[int, "asyncio.Lock"] = {}
+
+
+def _task_lock(task_id: int) -> "asyncio.Lock":
+    lock = _TASK_LOCKS.get(task_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _TASK_LOCKS[task_id] = lock
+    return lock
+
+
+def _plan_for_compat_transition(
+    task: GtAgentTask, stages: list, old_status: TaskStatus, target: TaskStatus
+) -> tuple[dict | None, dict | None]:
+    """把 **v2 的状态流转**翻译成 v3 的节点动作（同一事务内一起落库）。
+
+    返回 `(transition_kwargs, error)`。error 非空时不写库，直接回执。
+    v2 形状的任务（单节点 / 单审核节点）在这套映射下与旧行为逐字等价：
+    `TODO→IN_PROGRESS` 就是认领、`IN_PROGRESS→REVIEWING` 就是交棒给审核节点、
+    `REVIEWING→DONE` 就是末节点交棒、`REVIEWING→IN_PROGRESS` 就是打回节点 0。
+    """
+    cursor = _effective_cursor(task, stages)
+    last_index = len(stages) - 1
+    owner_now = _stage_field(stages[cursor], "owner_id") if stages else task.assignee_id
+
+    if target == TaskStatus.IN_PROGRESS and old_status in (TaskStatus.PENDING, TaskStatus.TODO):
+        # 认领：游标不动，节点 0 置 ACTIVE
+        return {
+            "action_type": TaskEventAction.CLAIM,
+            "from_stage": cursor,
+            "to_stage": cursor,
+            "stage_updates": {cursor: StageStatus.ACTIVE},
+            "current_stage": cursor,
+            "current_owner_id": owner_now,
+            "reviewer_id": _compat_reviewer_for(stages, cursor),
+            "sync_reviewer": True,
+        }, None
+
+    if target == TaskStatus.REVIEWING and old_status in (TaskStatus.IN_PROGRESS, TaskStatus.ON_HOLD):
+        next_index = cursor + 1
+        if next_index > last_index:
+            return None, {
+                "success": False,
+                "message": "当前已是最后一个节点，无下一节点可交棒；末节点请直接完成（status=DONE）",
+                "error_code": "non_final_stage_cannot_done",
+            }
+        next_type = _stage_field(stages[next_index], "node_type")
+        if next_type != StageNodeType.REVIEW:
+            return None, {
+                "success": False,
+                "message": (
+                    f"下一节点是执行节点（{next_type.value}），交棒后状态为 IN_PROGRESS；"
+                    "多节点链路请用 workflow_action=\"advance\" 交棒"
+                ),
+                "error_code": "invalid_transition",
+            }
+        return {
+            "action_type": TaskEventAction.ADVANCE,
+            "from_stage": cursor,
+            "to_stage": next_index,
+            "stage_updates": {cursor: StageStatus.APPROVED, next_index: StageStatus.ACTIVE},
+            "current_stage": next_index,
+            "current_owner_id": _stage_field(stages[next_index], "owner_id"),
+            "reviewer_id": _compat_reviewer_for(stages, next_index),
+            "sync_reviewer": True,
+        }, None
+
+    if target == TaskStatus.DONE:
+        if cursor < last_index:
+            return None, {
+                "success": False,
+                "message": (
+                    f"当前在节点 {cursor}，后面还有 {last_index - cursor} 个节点未走完，"
+                    "不能直接置 DONE；请用 workflow_action=\"advance\" 逐级交棒"
+                ),
+                "error_code": "non_final_stage_cannot_done",
+            }
+        updates = {index: StageStatus.APPROVED for index in range(len(stages))}
+        return {
+            "action_type": TaskEventAction.ADVANCE,
+            "from_stage": cursor,
+            "to_stage": cursor,
+            "stage_updates": updates,
+            "current_stage": cursor,
+            "current_owner_id": _stage_field(stages[cursor], "owner_id") if stages else owner_now,
+            "reviewer_id": _compat_reviewer_for(stages, cursor),
+            "sync_reviewer": True,
+        }, None
+
+    if target == TaskStatus.IN_PROGRESS and old_status == TaskStatus.REVIEWING:
+        # v2 的「打回」= v3 的 reject 到节点 0
+        return _plan_for_reject(task, stages, cursor, 0, note_ok=True)
+
+    if target == TaskStatus.ON_HOLD:
+        return {
+            "action_type": TaskEventAction.HOLD,
+            "from_stage": cursor,
+            "to_stage": cursor,
+        }, None
+
+    if target == TaskStatus.IN_PROGRESS and old_status == TaskStatus.ON_HOLD:
+        return {
+            "action_type": TaskEventAction.RESUME,
+            "from_stage": cursor,
+            "to_stage": cursor,
+        }, None
+
+    if target == TaskStatus.CANCELLED:
+        return {
+            "action_type": TaskEventAction.CANCEL,
+            "from_stage": cursor,
+            "to_stage": cursor,
+        }, None
+
+    # 其余组合交给上层既有的「合法流转表」判红，这里不产生节点动作
+    return {}, None
+
+
+def _plan_for_reject(
+    task: GtAgentTask, stages: list, cursor: int, target_stage: int, *, note_ok: bool
+) -> tuple[dict | None, dict | None]:
+    """打回计划：目标节点 ACTIVE，区间 `[t+1 .. k]` 全部重置为 WAITING（防跳过重审）。"""
+    if cursor <= 0:
+        return None, {
+            "success": False,
+            "message": "当前在节点 0，没有前序节点可打回",
+            "error_code": "invalid_reject_target",
+        }
+    if target_stage < 0 or target_stage >= cursor:
+        return None, {
+            "success": False,
+            "message": f"打回目标非法：target_stage={target_stage}，有效范围 0..{cursor - 1}",
+            "error_code": "invalid_reject_target",
+        }
+    updates: dict[int, StageStatus] = {target_stage: StageStatus.ACTIVE}
+    for index in range(target_stage + 1, cursor + 1):
+        updates[index] = StageStatus.WAITING
+    return {
+        "action_type": TaskEventAction.REJECT,
+        "from_stage": cursor,
+        "to_stage": target_stage,
+        "stage_updates": updates,
+        "current_stage": target_stage,
+        "current_owner_id": _stage_field(stages[target_stage], "owner_id"),
+        "reviewer_id": _compat_reviewer_for(stages, target_stage),
+        "sync_reviewer": True,
+    }, None
+
+
 
 
 # 事件时间线摘要默认条数
@@ -132,6 +508,12 @@ def _serialize_event(event, *, truncate_content: bool = True) -> dict:
     to_status = getattr(event, "to_status", None)
     data["from_status"] = from_status.value if isinstance(from_status, TaskStatus) else from_status
     data["to_status"] = to_status.value if isinstance(to_status, TaskStatus) else to_status
+    # v3：动作类型同样是枚举，统一转字符串；历史事件为 None（不猜）
+    action_type = getattr(event, "action_type", None)
+    data["action_type"] = action_type.value if isinstance(action_type, TaskEventAction) else action_type
+    for stage_key in ("from_stage", "to_stage"):
+        if stage_key not in data:
+            data[stage_key] = getattr(event, stage_key, None)
     return data
 
 
@@ -369,25 +751,58 @@ async def _transition_with_event(
     from_status: TaskStatus,
     to_status: TaskStatus,
     content: str = '',
+    action_type: TaskEventAction | None = None,
+    from_stage: int | None = None,
+    to_stage: int | None = None,
+    stage_updates: dict[int, StageStatus] | None = None,
+    current_stage: int | None = None,
+    current_owner_id: int | None = None,
+    reviewer_id: int | None = None,
+    sync_reviewer: bool = False,
 ) -> GtAgentTask:
-    """流转任务的唯一写入口：**同一事务**内更新主表状态 + 追加一条流转事件，事务后再推送。
+    """流转任务的唯一写入口：**同一事务**内更新主表状态（+ v3 游标/节点局部状态）
+    + 追加一条流转事件，事务后再推送。
 
     - 事件由 service 构造（actor / from / to / content 都是业务判断），DAL 只负责保存；
     - 任一写入失败即整体回滚，保证「每次成功流转必且仅有一条流转事件」（E1）；
     - 推送放在事务块外，回滚时不会出现「推了但没落库」。
+
+    v3 追加参数（都可省略，省略时行为与 v2 逐字一致）：
+    - `action_type` / `from_stage` / `to_stage`：事件的动作类型与节点游标；
+    - `stage_updates`：`{stage_index: StageStatus}`，同事务内批量改节点局部状态；
+    - `current_stage` / `current_owner_id`：同事务内推进主表接力游标；
+    - `reviewer_id` + `sync_reviewer`：同事务内同步 v2 兼容列 `reviewer_id`
+      （撤销验收人时传 `reviewer_id=None, sync_reviewer=True`）。
     """
+    # 列对象集合（peewee 字段在类型上被当成标量，`save_task(only=...)` 运行时按字段用）
+    save_fields: list = [GtAgentTask.status]
     async with atomic():
         task.status = to_status  # 同步内存态，保证返回体与落库一致
-        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.status])
+        if current_stage is not None:
+            task.current_stage = current_stage
+            save_fields.append(GtAgentTask.current_stage)
+        if current_owner_id is not None:
+            task.current_owner_id = current_owner_id
+            save_fields.append(GtAgentTask.current_owner_id)
+        if sync_reviewer:
+            task.reviewer_id = reviewer_id
+            save_fields.append(GtAgentTask.reviewer_id)
+        await gtAgentTaskManager.save_task(task, only=save_fields)
+        if stage_updates:
+            await gtAgentTaskStageManager.update_stage_statuses(task.id, stage_updates)
         event = await gtAgentTaskEventManager.append_event(
             task.id,
             actor_id,
             from_status=from_status,
             to_status=to_status,
             content=content,
+            action_type=action_type,
+            from_stage=from_stage,
+            to_stage=to_stage,
         )
     _publish_event_appended(team_id, task, event)
     return task
+
 
 
 async def auto_progress_dependents(team_id: int, completed_task_id: int) -> list[int]:
@@ -411,6 +826,9 @@ async def auto_progress_dependents(team_id: int, completed_task_id: int) -> list
                 from_status=TaskStatus.PENDING,
                 to_status=TaskStatus.TODO,
                 content="前置依赖已全部完成，系统自动推进为 TODO",
+                action_type=TaskEventAction.AUTO_TODO,
+                from_stage=dep.current_stage or 0,
+                to_stage=dep.current_stage or 0,
             )
             progressed.append(dep.id)
             logger.info(f"依赖满足自动推进：task_id={dep.id} PENDING → TODO（trigger={completed_task_id}）")
@@ -428,6 +846,7 @@ async def claim_task(caller_id: int, task_id: int) -> dict:
     if task is None or task.status != TaskStatus.TODO or task.assignee_id != caller_id:
         return {"success": True, "action": "skipped"}
 
+    cursor = task.current_stage or 0
     await _transition_with_event(
         task.team_id,
         task,
@@ -435,6 +854,10 @@ async def claim_task(caller_id: int, task_id: int) -> dict:
         from_status=TaskStatus.TODO,
         to_status=TaskStatus.IN_PROGRESS,
         content="执行人认领，系统自动置为 IN_PROGRESS",
+        action_type=TaskEventAction.CLAIM,
+        from_stage=cursor,
+        to_stage=cursor,
+        stage_updates={cursor: StageStatus.ACTIVE},
     )
     logger.info(f"认领置位：task_id={task_id} TODO → IN_PROGRESS（assignee={caller_id}）")
     return {"success": True, "action": "claimed"}
@@ -451,6 +874,7 @@ async def create_task(
     assignee_id: int,
     description: str = '',
     reviewer_id: Optional[int] = None,
+    stages: Optional[list] = None,
     priority: str = 'NORMAL',
     parent_id: Optional[int] = None,
     depends_on: Optional[list[int]] = None,
@@ -465,12 +889,37 @@ async def create_task(
     - `TODO`：与省略等价，由系统按依赖自动判断（无未完成依赖为 TODO，有则为 PENDING）。
     `note` 写入创建事件；创建即搁置时即「当前搁置原因」。
 
+    v3 节点链（step1 §5.1）：
+    - 只传 `assignee_id` ⇒ 单节点 `[EXECUTION(assignee)]`，行为与 v2 完全一致；
+    - 传 `reviewer_id` ⇒ `[EXECUTION(assignee), REVIEW(reviewer)]`，等价 v2 单审核任务；
+    - 传 `stages` ⇒ `[EXECUTION(assignee)] + stages`，每项 `{owner_id, node_type?, name?}`
+      或简写为 `owner_id` 整数（默认 `REVIEW`）。**与 `reviewer_id` 互斥**。
+    节点 0 恒为 `EXECUTION(assignee_id)`，不接受由 `stages` 重新指定。
+
     Returns:
         dict with keys: success, task_id (on success) or message (on failure)
     """
     priority_enum = TaskPriority.value_of(priority.upper())
     if priority_enum is None:
         return {"success": False, "message": f"无效的优先级：{priority}，有效值为 HIGH / NORMAL / LOW"}
+
+    if stages is not None and reviewer_id is not None:
+        return {
+            "success": False,
+            "message": "stages 与 reviewer_id 不能同时传：单级审核用 reviewer_id，多级节点链用 stages",
+            "error_code": "ambiguous_task_stages",
+        }
+
+    # 归一 stage 简写（整数 = REVIEW 节点）并校验节点数上限
+    extra_stages, stage_error = _normalize_stage_specs(stages)
+    if stage_error is not None:
+        return stage_error
+    if len(extra_stages) + 1 > MAX_TASK_STAGES:
+        return {
+            "success": False,
+            "message": f"节点数超过上限：最多 {MAX_TASK_STAGES} 个节点（当前 {len(extra_stages) + 1} 个）",
+            "error_code": "too_many_stages",
+        }
 
     # 显式初始状态只接受 ON_HOLD / TODO：PENDING 及在途状态由系统推导，不接受显式指定，
     # 否则可以绕过「有未完成依赖时初始状态为 PENDING」的约束。
@@ -498,6 +947,39 @@ async def create_task(
                 "error_code": "assignee_not_allowed",
             }
 
+    # v3：后续节点的 owner 必须是本团队有效成员（step2 §5.1）
+    owner_error = await _validate_stage_owners(team_id, creator_id, [s["owner_id"] for s in extra_stages])
+    if owner_error is not None:
+        return owner_error
+
+    # 组装节点链：节点 0 恒为 EXECUTION(assignee)
+    chain: list[dict] = [{
+        "node_type": StageNodeType.EXECUTION,
+        "owner_id": assignee_id,
+        "name": "",
+        "stage_status": StageStatus.ACTIVE,
+    }]
+    for spec in extra_stages:
+        chain.append({
+            "node_type": spec["node_type"],
+            "owner_id": spec["owner_id"],
+            "name": spec["name"],
+            "stage_status": StageStatus.WAITING,
+        })
+    if reviewer_id is not None:
+        chain.append({
+            "node_type": StageNodeType.REVIEW,
+            "owner_id": reviewer_id,
+            "name": "",
+            "stage_status": StageStatus.WAITING,
+        })
+
+    # v2 兼容列 `reviewer_id` 同步口径：取**最后一个** REVIEW 节点负责人
+    # （v2 里 reviewer_id 表示「最终验收人」，与多级场景下的语义最接近）；
+    # 无 REVIEW 节点 ⇒ None，此时执行人可以走「无验收人」路径直接 DONE。
+    review_owners = [c["owner_id"] for c in chain if c["node_type"] == StageNodeType.REVIEW]
+    compat_reviewer_id = review_owners[-1] if review_owners else None
+
     # 验证并解析依赖
     dep_ids: list[int] = list(depends_on or [])
     initial_status = TaskStatus.ON_HOLD if explicit_on_hold else TaskStatus.TODO
@@ -519,23 +1001,32 @@ async def create_task(
         description=description,
         assignee_id=assignee_id,
         creator_id=creator_id,
-        reviewer_id=reviewer_id,
+        reviewer_id=compat_reviewer_id,
         status=initial_status,
         priority=priority_enum,
         parent_id=parent_id,
         depends_on=dep_ids,
         room_id=room_id,
+        current_stage=0,
+        current_owner_id=assignee_id,
     )
     async with atomic():
         await gtAgentTaskManager.save_task(task, force_insert=True)
+        await gtAgentTaskStageManager.create_stages(task.id, chain)
         event = await gtAgentTaskEventManager.append_event(
             task.id,
             creator_id,
             from_status=None,
             to_status=initial_status,
             content=note,
+            action_type=TaskEventAction.CREATED,
+            from_stage=None,
+            to_stage=0,
         )
-    logger.info(f"任务创建：task_id={task.id}, title={title!r}, assignee={assignee_id}, status={initial_status.value}")
+    logger.info(
+        f"任务创建：task_id={task.id}, title={title!r}, assignee={assignee_id}, "
+        f"status={initial_status.value}, stages={len(chain)}"
+    )
 
     # 广播任务创建事件（列表刷新）+ 事件追加（时间线实时）
     from service import messageBus as _mb
@@ -543,7 +1034,313 @@ async def create_task(
     _mb.publish(_MBT.TASK_CREATED, task=task)
     _publish_event_appended(team_id, task, event)
 
-    return {"success": True, "task_id": task.id, "message": f"任务已创建，task_id={task.id}，状态={initial_status.value}"}
+    stage_hint = f"，节点链共 {len(chain)} 个节点" if len(chain) > 1 else ""
+    return {
+        "success": True,
+        "task_id": task.id,
+        "message": f"任务已创建，task_id={task.id}，状态={initial_status.value}{stage_hint}",
+    }
+
+
+async def _apply_workflow_action(
+    team_id: int,
+    task: GtAgentTask,
+    stages: list,
+    *,
+    caller_id: int,
+    action: str,
+    target_stage: Optional[int],
+    note: str,
+) -> dict:
+    """v3 交棒（`advance`）/ 打回（`reject`）：**仅当前持棒人**可执行。
+
+    - `advance`：当前节点 APPROVED；有下一节点则交棒（状态按下一节点类型映射），
+      已是末节点则整单 `DONE`（所有节点 APPROVED，并触发下游依赖自动推进）；
+    - `reject`：`target_stage` 必须是 `0 .. current_stage - 1`（缺省 0），
+      区间 `[t+1 .. k]` 全部重置为 `WAITING`（防跳过重审），`note` 必填。
+    """
+    from playhouse.shortcuts import model_to_dict
+
+    old_status = task.status
+    cursor = _effective_cursor(task, stages)
+    last_index = len(stages) - 1
+    if not _is_holder(task, stages, caller_id):
+        return {
+            "success": False,
+            "message": f"只有当前持棒人（agent_id={_holder_of(task, stages)}）才能交棒/打回",
+            "error_code": "not_current_stage_owner",
+        }
+
+    if action == "advance":
+        if cursor >= last_index:
+            plan = {
+                "action_type": TaskEventAction.ADVANCE,
+                "from_stage": cursor,
+                "to_stage": cursor,
+                "stage_updates": {index: StageStatus.APPROVED for index in range(len(stages))},
+                "current_stage": cursor,
+                "current_owner_id": _stage_field(stages[cursor], "owner_id"),
+                "reviewer_id": _compat_reviewer_for(stages, cursor),
+                "sync_reviewer": True,
+            }
+            new_status = TaskStatus.DONE
+        else:
+            plan = {
+                "action_type": TaskEventAction.ADVANCE,
+                "from_stage": cursor,
+                "to_stage": cursor + 1,
+                "stage_updates": {cursor: StageStatus.APPROVED, cursor + 1: StageStatus.ACTIVE},
+                "current_stage": cursor + 1,
+                "current_owner_id": _stage_field(stages[cursor + 1], "owner_id"),
+                "reviewer_id": _compat_reviewer_for(stages, cursor + 1),
+                "sync_reviewer": True,
+            }
+            new_status = _resolve_status_for_stage(_stage_field(stages[cursor + 1], "node_type"))
+    elif action == "reject":
+        if not (note or '').strip():
+            return {
+                "success": False,
+                "message": "打回（reject）必须填写 note 说明原因，便于被打回的人知道要改什么",
+                "error_code": "reject_note_required",
+            }
+        plan, error = _plan_for_reject(task, stages, cursor, 0 if target_stage is None else target_stage, note_ok=True)
+        if error is not None:
+            return error
+        new_status = _resolve_status_for_stage(_stage_field(stages[plan["to_stage"]], "node_type"))
+    else:  # pragma: no cover - 调用方已校验
+        return {"success": False, "message": f"不支持的 workflow_action：{action}", "error_code": "invalid_workflow_action"}
+
+    updated = await _transition_with_event(
+        team_id,
+        task,
+        actor_id=caller_id,
+        from_status=old_status,
+        to_status=new_status,
+        content=note,
+        **plan,
+    )
+    logger.info(
+        f"任务{'交棒' if action == 'advance' else '打回'}：task_id={task.id}, "
+        f"stage {plan['from_stage']} → {plan['to_stage']}, caller={caller_id}"
+    )
+
+    from service import messageBus as _mb
+    from constants import MessageBusTopic as _MBT
+    _mb.publish(_MBT.TASK_CHANGED, task=updated, old_status=old_status.value)
+
+    if new_status == TaskStatus.DONE:
+        try:
+            await auto_progress_dependents(team_id, task.id)
+        except Exception:
+            logger.exception(f"依赖满足自动推进失败（不影响本次流转）：task_id={task.id}")
+
+    names = await _resolve_display_names(
+        [_stage_field(s, "owner_id") for s in stages]
+    )
+    if new_status == TaskStatus.DONE:
+        message = f"任务已完成（末节点交棒）：{old_status.value} → DONE"
+    elif action == "advance":
+        message = (
+            f"已交棒：节点 {plan['from_stage']} → {plan['to_stage']}，"
+            f"当前持棒人 agent_id={plan['current_owner_id']}，状态={new_status.value}"
+        )
+    else:
+        message = (
+            f"已打回：节点 {plan['from_stage']} → {plan['to_stage']}，"
+            f"当前持棒人 agent_id={plan['current_owner_id']}，状态={new_status.value}"
+            "（后续节点已重置为 WAITING，必须逐级重新推进）"
+        )
+    return {
+        "success": True,
+        "action": "advanced" if action == "advance" else "rejected",
+        "task": model_to_dict(updated, recurse=False),
+        "stages": _stages_payload(stages, names),
+        "message": message,
+    }
+
+
+async def _apply_stage_update(
+    team_id: int,
+    task: GtAgentTask,
+    stages: list,
+    *,
+    caller_id: int,
+    append_stages: Optional[list],
+    remove_stage_index: Optional[int],
+    reassign_stage: Optional[dict],
+    note: str,
+) -> dict:
+    """v3 节点链调整：`append_stages` / `remove_stage_index` / `reassign_stage`。
+
+    权限（step1 §3.2.5 + §3.3）：
+    - 认领前（`PENDING`/`TODO`）：**创建人**可自由增删改未开始的节点（节点 0 除外）；
+    - 认领后：**当前持棒人**可增删**未开始的 `EXECUTION`** 节点；`REVIEW` 节点
+      **任何情况都不可删除**（防绕过红线），只允许后置加签与换人。
+    """
+    from playhouse.shortcuts import model_to_dict
+
+    cursor = _effective_cursor(task, stages)
+    last_index = len(stages) - 1
+    claimed = task.status not in (TaskStatus.PENDING, TaskStatus.TODO)
+    is_creator = caller_id == task.creator_id
+    is_holder = _is_holder(task, stages, caller_id)
+    if claimed and not is_holder:
+        return {
+            "success": False,
+            "message": f"只有当前持棒人（agent_id={_holder_of(task, stages)}）才能调整节点链",
+            "error_code": "not_current_stage_owner",
+        }
+    if not claimed and not is_creator:
+        return {
+            "success": False,
+            "message": "任务尚未认领，只有创建人可以增删改节点",
+            "error_code": "permission_denied",
+        }
+
+    if append_stages is not None:
+        specs, error = _normalize_stage_specs(append_stages)
+        if error is not None:
+            return error
+        if not specs:
+            return {"success": False, "message": "append_stages 不能为空数组", "error_code": "invalid_stages"}
+        if len(stages) + len(specs) > MAX_TASK_STAGES:
+            return {
+                "success": False,
+                "message": f"节点数超过上限：最多 {MAX_TASK_STAGES} 个（当前 {len(stages)} + 新增 {len(specs)}）",
+                "error_code": "too_many_stages",
+            }
+        owner_error = await _validate_stage_owners(team_id, task.creator_id, [s["owner_id"] for s in specs])
+        if owner_error is not None:
+            return owner_error
+        new_stages = await gtAgentTaskStageManager.insert_stages_after(task.id, last_index, specs)
+        action_type = TaskEventAction.STAGE_ADD
+        event = await gtAgentTaskEventManager.append_event(
+            task.id, caller_id,
+            from_status=task.status, to_status=task.status,
+            content=note or f"追加 {len(specs)} 个节点",
+            action_type=action_type, from_stage=cursor, to_stage=last_index + 1,
+        )
+        _publish_event_appended(team_id, task, event)
+        names = await _resolve_display_names([_stage_field(s, "owner_id") for s in new_stages])
+        return {
+            "success": True,
+            "action": "stage_added",
+            "task": model_to_dict(task, recurse=False),
+            "stages": _stages_payload(new_stages, names),
+            "message": f"已追加 {len(specs)} 个节点，当前共 {len(new_stages)} 个节点",
+        }
+
+    if remove_stage_index is not None:
+        if not isinstance(remove_stage_index, int) or isinstance(remove_stage_index, bool):
+            return {"success": False, "message": "remove_stage_index 必须是整数", "error_code": "invalid_stages"}
+        if remove_stage_index < 0 or remove_stage_index > last_index:
+            return {
+                "success": False,
+                "message": f"remove_stage_index 越界：{remove_stage_index}，有效范围 0..{last_index}",
+                "error_code": "invalid_stages",
+            }
+        if remove_stage_index <= cursor:
+            return {
+                "success": False,
+                "message": (
+                    f"不能删除已过或当前节点（stage_index={remove_stage_index}，当前游标 {cursor}）；"
+                    "执行人换人请用 reassign_stage"
+                ),
+                "error_code": "cannot_remove_active_or_past_stage",
+            }
+        target_node_type = _stage_field(stages[remove_stage_index], "node_type")
+        # REVIEW 节点红线（step1 §3.2.5）：**认领之后任何人均不可删除**。
+        # 认领之前创建人仍可自由编排（step1 §3.3 权限矩阵：「删除 REVIEW 节点」一行
+        # 只有「仅认领前允许」这一格是放行的），否则建错流程就永久无法纠正。
+        if target_node_type == StageNodeType.REVIEW and claimed:
+            return {
+                "success": False,
+                "message": (
+                    f"不允许删除审核节点（stage_index={remove_stage_index}）：任务已认领，"
+                    "删除 REVIEW 节点等于绕过审批，这是红线。需要更少审核请换人（reassign_stage），不能删。"
+                ),
+                "error_code": "cannot_remove_review_stage",
+            }
+        if not claimed and remove_stage_index == 0:
+            return {
+                "success": False,
+                "message": "节点 0 是任务主执行人，不能整节点删除；要换人请用 reassign_stage",
+                "error_code": "cannot_remove_active_or_past_stage",
+            }
+        await gtAgentTaskStageManager.delete_stage_and_reindex(task.id, remove_stage_index)
+        remaining = await gtAgentTaskStageManager.get_stages_by_task(task.id)
+        reviewer_id = _compat_reviewer_for(remaining, cursor)
+        task.reviewer_id = reviewer_id
+        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+        event = await gtAgentTaskEventManager.append_event(
+            task.id, caller_id,
+            from_status=task.status, to_status=task.status,
+            content=note or f"删除节点 {remove_stage_index}",
+            action_type=TaskEventAction.STAGE_REMOVE,
+            from_stage=remove_stage_index, to_stage=remove_stage_index,
+        )
+        _publish_event_appended(team_id, task, event)
+        names = await _resolve_display_names([_stage_field(s, "owner_id") for s in remaining])
+        return {
+            "success": True,
+            "action": "stage_removed",
+            "task": model_to_dict(task, recurse=False),
+            "stages": _stages_payload(remaining, names),
+            "message": f"已删除节点 {remove_stage_index}，当前共 {len(remaining)} 个节点",
+        }
+
+    # reassign_stage
+    if not isinstance(reassign_stage, dict):
+        return {"success": False, "message": "reassign_stage 必须是 {stage_index, owner_id} 对象", "error_code": "invalid_stages"}
+    raw_index = reassign_stage.get("stage_index")
+    raw_owner = reassign_stage.get("owner_id")
+    if isinstance(raw_index, bool) or not isinstance(raw_index, int):
+        return {"success": False, "message": f"reassign_stage.stage_index 非法：{raw_index!r}", "error_code": "invalid_stages"}
+    if isinstance(raw_owner, bool) or not isinstance(raw_owner, int):
+        return {"success": False, "message": f"reassign_stage.owner_id 非法：{raw_owner!r}", "error_code": "invalid_stages"}
+    if raw_index < 0 or raw_index > last_index:
+        return {
+            "success": False,
+            "message": f"reassign_stage.stage_index 越界：{raw_index}，有效范围 0..{last_index}",
+            "error_code": "invalid_stages",
+        }
+    if raw_index < cursor:
+        return {
+            "success": False,
+            "message": f"不能更换已完成节点的负责人（stage_index={raw_index} 已 APPROVED）",
+            "error_code": "cannot_reassign_past_stage",
+        }
+    owner_error = await _validate_stage_owners(team_id, task.creator_id, [raw_owner])
+    if owner_error is not None:
+        return owner_error
+    old_owner = _stage_field(stages[raw_index], "owner_id")
+    await gtAgentTaskStageManager.update_stage_owner(task.id, raw_index, raw_owner)
+    stages_after = await gtAgentTaskStageManager.get_stages_by_task(task.id)
+    if raw_index == cursor:
+        task.current_owner_id = raw_owner
+        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.current_owner_id])
+    reviewer_id = _compat_reviewer_for(stages_after, cursor)
+    task.reviewer_id = reviewer_id
+    await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+    event = await gtAgentTaskEventManager.append_event(
+        task.id, caller_id,
+        from_status=task.status, to_status=task.status,
+        content=note or f"节点 {raw_index} 换人：{old_owner} → {raw_owner}",
+        action_type=TaskEventAction.STAGE_REASSIGN,
+        from_stage=raw_index, to_stage=raw_index,
+    )
+    _publish_event_appended(team_id, task, event)
+    names = await _resolve_display_names([_stage_field(s, "owner_id") for s in stages_after] + [old_owner])
+    message = f"节点 {raw_index} 负责人已更换：{old_owner} → {raw_owner}"
+    if raw_index == cursor:
+        message += "（该节点是当前持棒节点，控制权已同时移交）"
+    return {
+        "success": True,
+        "action": "stage_reassigned",
+        "task": model_to_dict(task, recurse=False),
+        "stages": _stages_payload(stages_after, names),
+        "message": message,
+    }
 
 
 async def update_task(
@@ -554,37 +1351,65 @@ async def update_task(
     note: str = '',
     reviewer_id: Optional[int] = None,
     clear_fields: Optional[Sequence[str]] = None,
+    workflow_action: Optional[str] = None,
+    target_stage: Optional[int] = None,
+    append_stages: Optional[list] = None,
+    remove_stage_index: Optional[int] = None,
+    reassign_stage: Optional[dict] = None,
 ) -> dict:
-    """更新协作任务：流转状态（`new_status`）、追加评论（省略 `new_status`），或修改验收人。
+    """更新协作任务：流转状态 / 交棒打回 / 调整节点链 / 追加评论 / 修改验收人。
 
-    - `new_status` 省略、或等于当前状态 ⇒ **评论事件**（`from_status`/`to_status` 均 NULL，PIN-1）；
-    - `new_status` 给定且 ≠ 当前状态 ⇒ 权限校验 + **流转事件**（`from≠to`、`content=note`）；
-    - **评论权限 = 团队内成员皆可**（不限 assignee / reviewer / creator）；
-    - **终态（`DONE`/`CANCELLED`）不可流转；仅允许追加评论**；
-    - `reviewer_id` 给定 ⇒ **修改验收人**；`"reviewer_id" in clear_fields` ⇒ **撤销验收人**。
-      `reviewer_id` 与 `clear_fields` 均省略 = 完全走上面的老路径（行为不变）。验收人变更的权限：
-      **创建人或当前验收人可以改；执行人不能改**（否则验收门失效）；撤销只能由创建人做，
-      且 `REVIEWING` 时不能撤销。变更**不能与状态流转在同一次调用里做**。
+    **意图互斥**：`new_status`（状态流转，非自环）、`workflow_action`、
+    `append_stages` / `remove_stage_index` / `reassign_stage`、以及验收人变更，
+    这四类意图**只能出现一类**，同时给多个返回 `error_code="ambiguous_task_update"`
+    （避免「一次调用里既交棒又换人」这种无法审计的原子动作）。
 
-    `clear_fields` 的三种边界（都是有意设计，不要"顺手统一"）：
+    v3 新参数（step1 §5.2）：
+    - `workflow_action="advance"`：交棒给下一节点（末节点则整单 DONE）；
+    - `workflow_action="reject"` + `target_stage=t`：打回任意前序节点（`note` 必填）；
+    - `append_stages=[...]`：后置加签（追加节点）；
+    - `remove_stage_index=i`：删除未开始的 `EXECUTION` 节点（`REVIEW` 节点禁删）；
+    - `reassign_stage={"stage_index": i, "owner_id": x}`：节点换人。
 
-    1. **空数组 `[]` ⇒ 视为未提供**，不撤销任何字段、不写事件、走老路径。
-       理由：`clear_fields=[]` 的语义是"没要清任何字段"，含义明确，等价省略。
-       ⚠️ 这与 `list_tasks` 的 `status=[]` **相反**（那边报 `invalid_status`）——
-       因为 `status=[]` 是"过滤条件写了个空的"，用户意图不明，报错更安全。
-       两个空数组两种语义是有意的，各自都别改。
-    2. **白名单外的字段名 ⇒ 拒绝**，返回 `error_code="invalid_clear_field"`。
-       schema 里的 `enum` 只是给模型看的声明，**不是运行时校验**（native / tsp 驱动都不按
-       schema 拦），所以这里必须自己校验一遍。
-    3. **`reviewer_id` 与 `"reviewer_id" in clear_fields` 同给 ⇒ 冲突拒绝**
-       （`error_code="ambiguous_reviewer_change"`，不改库）：一个是"改人"、一个是"撤销"，
-       两种意图不可同时成立。
-
-    Returns:
-        dict: success / action（`transitioned` | `commented` | `reviewer_updated` | `reviewer_unchanged`）/ task；
-        失败时 message（+ error_code）。
+    单任务写操作按 `task_id` 加进程内互斥锁（step2 §6.1），保证同一任务不会被
+    并发双推；锁内再走单事务，跨进程由数据库事务兜底。
     """
+    lock = _task_lock(task_id)
+    async with lock:
+        return await _update_task_impl(
+            team_id,
+            caller_id,
+            task_id,
+            new_status=new_status,
+            note=note,
+            reviewer_id=reviewer_id,
+            clear_fields=clear_fields,
+            workflow_action=workflow_action,
+            target_stage=target_stage,
+            append_stages=append_stages,
+            remove_stage_index=remove_stage_index,
+            reassign_stage=reassign_stage,
+        )
+
+
+async def _update_task_impl(
+    team_id: int,
+    caller_id: int,
+    task_id: int,
+    *,
+    new_status: Optional[str] = None,
+    note: str = '',
+    reviewer_id: Optional[int] = None,
+    clear_fields: Optional[Sequence[str]] = None,
+    workflow_action: Optional[str] = None,
+    target_stage: Optional[int] = None,
+    append_stages: Optional[list] = None,
+    remove_stage_index: Optional[int] = None,
+    reassign_stage: Optional[dict] = None,
+) -> dict:
+    """`update_task` 的实现体（已持有任务锁）。"""
     # 先校验状态字符串（非法状态不应触达 DB）
+
     target: Optional[TaskStatus] = None
     if new_status is not None:
         target = TaskStatus.value_of(str(new_status).upper())
@@ -654,6 +1479,73 @@ async def update_task(
 
     old_status = task.status
 
+    # ---- v3 意图归一与互斥（step2 §4.2「非法动作组合」）----
+    # 四类意图只能出现一类：状态流转（非自环 new_status）、workflow_action、
+    # 节点链调整、验收人变更。同时给多个时一律拒绝：一个调用里既交棒又换人，
+    # 时间线上无法审计是哪一步生效。
+    flow_action = (workflow_action or '').strip().lower() or None
+    if flow_action is not None and flow_action not in ('advance', 'reject'):
+        return {
+            "success": False,
+            "message": f"无效的 workflow_action：{workflow_action}，有效值为 advance / reject",
+            "error_code": "invalid_workflow_action",
+        }
+    has_node_op = any(x is not None for x in (append_stages, remove_stage_index, reassign_stage))
+    transition_intent = target is not None and target != old_status
+    intents = {
+        "状态流转 new_status": transition_intent,
+        "workflow_action": flow_action is not None,
+        "节点链调整": has_node_op,
+        "验收人变更": wants_reviewer_change,
+    }
+    given = [name for name, present in intents.items() if present]
+    # 例外：**只有**「状态流转 + 验收人变更」这一对时，沿用 v2 的专用错误码与文案
+    # （`reviewer_change_must_be_separate`，历史用例与文档都按它对齐），
+    # 由 `_handle_reviewer_change` 的 D5 分支给出，比笼统的 ambiguous_task_update 更可解释。
+    only_reviewer_and_transition = set(given) == {"状态流转 new_status", "验收人变更"}
+    if len(given) > 1 and not only_reviewer_and_transition:
+        return {
+            "success": False,
+            "message": (
+                f"一次调用只能做一件事，当前同时给了：{'、'.join(given)}；"
+                "请拆成多次调用（例：先 workflow_action=\"advance\"，再 reassign_stage）"
+            ),
+            "error_code": "ambiguous_task_update",
+        }
+
+    # 终态只允许评论（step2 §4.2 第一道门）
+    if old_status in (TaskStatus.DONE, TaskStatus.CANCELLED) and (flow_action is not None or has_node_op):
+        return {
+            "success": False,
+            "message": f"任务已处于终态（{old_status.value}），不可再交棒/打回/调整节点（仅可追加评论）",
+            "error_code": "task_already_terminal",
+        }
+
+    stages = await _load_stages(task) if (flow_action is not None or has_node_op) else []
+
+    if flow_action is not None:
+        return await _apply_workflow_action(
+            team_id,
+            task,
+            stages,
+            caller_id=caller_id,
+            action=flow_action,
+            target_stage=target_stage,
+            note=note,
+        )
+
+    if has_node_op:
+        return await _apply_stage_update(
+            team_id,
+            task,
+            stages,
+            caller_id=caller_id,
+            append_stages=append_stages,
+            remove_stage_index=remove_stage_index,
+            reassign_stage=reassign_stage,
+            note=note,
+        )
+
     # ---- 验收人变更分支（必须先于评论分支：省略 new_status 时否则会落到「note 必填的评论」）----
     if wants_reviewer_change:
         return await _handle_reviewer_change(
@@ -713,22 +1605,42 @@ async def update_task(
     is_reviewer = is_task_reviewer(task, caller_id)
     is_creator  = (caller_id == task.creator_id)
 
+    # v3：「谁拿棒谁说话」——推进类动作一律按**当前持棒人**裁定。
+    # v2 形状的任务（单节点 / 单审核节点）下与旧口径逐字等价：节点 0 持棒人 =
+    # assignee，节点 1 持棒人 = reviewer。故既有用例的权限结论不变。
+    transition_stages = await _load_stages(task)
+    holder_id = _holder_of(task, transition_stages)
+
     # 权限校验（按顺序命中、先匹配先裁定）
     if target == TaskStatus.REVIEWING:
-        if not is_assignee:
-            return {"success": False, "message": "只有执行人（assignee）才能提交验收", "error_code": "permission_denied"}
+        if caller_id != holder_id:
+            return {"success": False, "message": "只有执行人（当前持棒人）才能提交验收", "error_code": "permission_denied"}
     elif target == TaskStatus.DONE and old_status == TaskStatus.REVIEWING:
-        if not is_reviewer:
-            return {"success": False, "message": "只有验收人（reviewer）才能通过验收", "error_code": "permission_denied"}
+        if caller_id != holder_id:
+            return {"success": False, "message": "只有验收人（当前持棒人）才能通过验收", "error_code": "permission_denied"}
     elif target == TaskStatus.IN_PROGRESS and old_status == TaskStatus.REVIEWING:
-        if not is_reviewer:
-            return {"success": False, "message": "只有验收人（reviewer）才能打回任务", "error_code": "permission_denied"}
+        if caller_id != holder_id:
+            return {"success": False, "message": "只有验收人（当前持棒人）才能打回任务", "error_code": "permission_denied"}
     elif target == TaskStatus.CANCELLED:
-        if not is_reviewer and not is_creator:
-            return {"success": False, "message": "只有验收人或创建人才能取消任务", "error_code": "permission_denied"}
+        # v3（step1 §3.2.4）：认领前仅创建人；认领后仅当前持棒人（创建人不再可直接取消）
+        if not can_cancel(task, caller_id):
+            if old_status in (TaskStatus.PENDING, TaskStatus.TODO):
+                return {
+                    "success": False,
+                    "message": "任务尚未认领，只有创建人才能取消任务",
+                    "error_code": "permission_denied",
+                }
+            return {
+                "success": False,
+                "message": (
+                    f"任务已被认领，创建人不能直接取消；只有当前持棒人（agent_id={holder_id}）有权取消。"
+                    "请用 send_chat_msg 请持棒人处理"
+                ),
+                "error_code": "creator_cannot_cancel_after_claim",
+            }
     else:
-        if not is_assignee:
-            return {"success": False, "message": "只有执行人（assignee）才能更新任务状态", "error_code": "permission_denied"}
+        if caller_id != holder_id:
+            return {"success": False, "message": "只有执行人（当前持棒人）才能更新任务状态", "error_code": "permission_denied"}
 
     # 状态流转合法性（终态 DONE/CANCELLED 出边为空 ⇒ 任何流转在此被拒）
     if target not in _VALID_TRANSITIONS.get(old_status, set()):
@@ -774,7 +1686,13 @@ async def update_task(
             "error_code": "review_required",
         }
 
-    # 执行更新：同一事务内更新主表状态 + 追加一条流转事件（content=note），事务后推送
+    # 执行更新：同一事务内更新主表状态（+ v3 游标/节点局部状态）+ 追加一条流转事件，事务后推送
+    # v3：v2 的状态流转在同一事务里同步节点链（映射见 `_plan_for_compat_transition`）
+    transition_plan, plan_error = _plan_for_compat_transition(
+        task, transition_stages, old_status, target
+    )
+    if plan_error is not None:
+        return plan_error
     updated = await _transition_with_event(
         team_id,
         task,
@@ -782,6 +1700,7 @@ async def update_task(
         from_status=old_status,
         to_status=target,
         content=note,
+        **(transition_plan or {}),
     )
     logger.info(f"任务状态变更：task_id={task_id}, {old_status.value} → {target.value}, caller={caller_id}")
 
@@ -855,6 +1774,19 @@ async def get_task(
     task_dict["current_block_reason"] = await current_block_reason(
         task, truncate_content=truncate_content
     )
+
+    # v3：节点链视图（含各自局部状态与展示名），前端/TUI 据此渲染工作流进度条
+    stages = await _load_stages(task)
+    stage_names = await _resolve_display_names(
+        [task.current_owner_id, *(_stage_field(stage, "owner_id") for stage in stages)]
+    )
+    task_dict["current_stage"] = task.current_stage
+    task_dict["current_owner_id"] = task.current_owner_id
+    task_dict["current_owner_name"] = (
+        stage_names.get(task.current_owner_id, f"Agent#{task.current_owner_id}")
+        if task.current_owner_id is not None else None
+    )
+    task_dict["stages"] = _stages_payload(stages, stage_names)
 
     return {"success": True, "task": task_dict}
 
@@ -1025,6 +1957,8 @@ async def list_tasks(
     caller_id: Optional[int] = None,
     title_keyword: Optional[str] = None,
     order: str = gtAgentTaskManager.ORDER_PRIORITY_FIRST,
+    mine: bool = False,
+    include_upcoming: bool = False,
 ) -> dict:
     """查询协作任务列表。
 
@@ -1111,6 +2045,29 @@ async def list_tasks(
     # 当成过滤条件等于静默取消过滤）。
     title_keyword = (title_keyword or "").strip() or None
 
+    # v3「待办视图」：只看接力棒当前在我手上的任务（`include_upcoming=True` 时并把
+    # 「后续节点有我但还没轮到我」的在途任务一并列出）。
+    # **默认不启用**：v2 的 Web 列表 / 既有 Agent 调用都依赖「不传过滤项 = 看全团队」，
+    # 把默认改成持棒人视图会静默改变既有调用方看到的数据（比多一个参数危险得多）。
+    holder_filter_id: Optional[int] = None
+    upcoming_task_ids: list[int] | None = None
+    if mine:
+        if caller_id is None:
+            return {
+                "success": False,
+                "message": "mine=True 需要调用者身份（caller_id 不可得）",
+                "error_code": "missing_target",
+            }
+        if include_upcoming:
+            upcoming_task_ids = await gtAgentTaskStageManager.get_task_ids_by_upcoming_owner(caller_id)
+        holder_filter_id = caller_id
+    elif include_upcoming:
+        return {
+            "success": False,
+            "message": "include_upcoming 只能与 mine=True 一起用（它表示「除当前待办外，再包含即将轮到我」）",
+            "error_code": "invalid_filter_combo",
+        }
+
     visible_agent_ids: Optional[list[int]] = None
     scope_degraded = False
     if scope == 'self':
@@ -1144,6 +2101,10 @@ async def list_tasks(
         exclude_statuses=exclude_statuses,
         agent_ids=visible_agent_ids,
     )
+    if holder_filter_id is not None:
+        filters["current_owner_id"] = holder_filter_id
+    if upcoming_task_ids:
+        filters["upcoming_task_ids"] = upcoming_task_ids
     if title_keyword is not None:
         filters["title_keyword"] = title_keyword
     tasks = await gtAgentTaskManager.list_tasks(**filters, limit=limit, order=order)
@@ -1158,6 +2119,10 @@ async def list_tasks(
         "total": total,
         "limit": limit,
     }
+    if mine:
+        result["holder_view"] = True
+        if include_upcoming:
+            result["include_upcoming"] = True
     if scope_degraded:
         result["scope_degraded"] = True
         result["message"] = "团队暂无部门层级数据，scope=\"team\" 已降级为「只看与我相关的任务」，结果不代表全团队"

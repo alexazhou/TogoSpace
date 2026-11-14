@@ -74,6 +74,8 @@ def _filtered_task_query(
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
     title_keyword: str | None = None,
+    current_owner_id: int | None = None,
+    upcoming_task_ids: list[int] | None = None,
 ):
     """构造任务过滤条件（`list_tasks` 与 `count_tasks` **共用同一 where 构造**，
 
@@ -111,6 +113,18 @@ def _filtered_task_query(
         query = query.where(GtAgentTask.status.not_in(exclude_statuses))
     if title_keyword is not None:
         query = query.where(GtAgentTask.title.contains(title_keyword))
+    # v3：接力棒当前在谁手上（`list_tasks` 的「待办视图」口径）
+    if current_owner_id is not None:
+        if upcoming_task_ids:
+            # include_upcoming=True：当前持棒 **OR** 后续节点包含我（WAITING 节点）
+            query = query.where(
+                (GtAgentTask.current_owner_id == current_owner_id)
+                | (GtAgentTask.id.in_(upcoming_task_ids))
+            )
+        else:
+            query = query.where(GtAgentTask.current_owner_id == current_owner_id)
+    elif upcoming_task_ids:
+        query = query.where(GtAgentTask.id.in_(upcoming_task_ids))
     return query
 
 
@@ -144,6 +158,8 @@ async def list_tasks(
     agent_ids: list[int] | None = None,
     title_keyword: str | None = None,
     order: str = ORDER_PRIORITY_FIRST,
+    current_owner_id: int | None = None,
+    upcoming_task_ids: list[int] | None = None,
 ) -> list[GtAgentTask]:
     """按条件查询任务列表。
 
@@ -162,7 +178,8 @@ async def list_tasks(
     """
     query = (
         _filtered_task_query(
-            team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword
+            team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword,
+            current_owner_id, upcoming_task_ids,
         )
         .order_by(*_task_ordering(order))
         .limit(limit)
@@ -178,10 +195,13 @@ async def count_tasks(
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
     title_keyword: str | None = None,
+    current_owner_id: int | None = None,
+    upcoming_task_ids: list[int] | None = None,
 ) -> int:
     """统计符合条件的任务**总数**（跨页；不受 `limit` 影响，与 `list_tasks` 同一过滤口径）。"""
     return await _filtered_task_query(
-        team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword
+        team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword,
+        current_owner_id, upcoming_task_ids,
     ).aio_count()
 
 
@@ -210,9 +230,11 @@ async def get_tasks_by_ids(task_ids: list[int]) -> list[GtAgentTask]:
 async def get_first_active_task(agent_id: int) -> GtAgentTask | None:
     """获取 Agent 最早的待处理任务（按 ID 升序）。
 
-    包含两类：
+    包含三类（v3 追加第三类）：
     - 自己作为执行人的 TODO / IN_PROGRESS 任务
     - 自己作为验收人的 REVIEWING 任务
+    - 自己作为**当前持棒人**的在途任务（多级链上的中间节点负责人，v2 的
+      assignee/reviewer 判定看不到他们）
     """
     return await (
         GtAgentTask
@@ -225,6 +247,11 @@ async def get_first_active_task(agent_id: int) -> GtAgentTask | None:
             (
                 (GtAgentTask.reviewer_id == agent_id) &
                 (GtAgentTask.status == TaskStatus.REVIEWING)
+            ) |
+            # v3：多级链上「棒正好在我手上」的任务也要能被调度发现
+            (
+                (GtAgentTask.current_owner_id == agent_id) &
+                (GtAgentTask.status.in_([TaskStatus.IN_PROGRESS, TaskStatus.REVIEWING]))  # type: ignore[attr-defined]
             ),
         )
         .order_by(GtAgentTask.id.asc())  # type: ignore[attr-defined]
