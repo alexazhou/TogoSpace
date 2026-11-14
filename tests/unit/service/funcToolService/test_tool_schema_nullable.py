@@ -79,6 +79,11 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("memory_list", "include_archived"),
     ("memory_search", "limit"),
     ("memory_create", "star_level"),
+    # #224：MCP 注册表三工具里「有默认值、注解不含 None」的参数（+4 ⇒ 23）。
+    ("save_mcp_server", "kind"),
+    ("save_mcp_server", "note"),
+    ("save_mcp_server", "overwrite"),
+    ("list_mcp_servers", "kind"),
 ]
 
 #: 任务单 §4.2 的 41 个 `Optional` 字段 + #196 新增的 21 个 = 62 个，#198 再 +1
@@ -198,6 +203,16 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("update_task", "clear_fields"),
     ("update_task", "new_status"),
     ("update_task", "reviewer_id"),
+    # #224：MCP 注册表三工具的 Optional + None 默认参数（kind/note/overwrite 等
+    # 「有默认值但注解不含 None」的进 NON_OPTIONAL_BUT_DEFAULTED 另一张表）。
+    ("save_mcp_server", "alias"),
+    ("save_mcp_server", "credentials"),
+    ("save_mcp_server", "target"),
+    ("delete_mcp_server", "alias"),
+    ("list_mcp_servers", "alias_or_target"),
+    ("list_mcp_servers", "args"),
+    ("list_mcp_servers", "extra"),
+    ("list_mcp_servers", "tool"),
 ]
 
 
@@ -509,8 +524,8 @@ def test_field_lists_match_signatures() -> None:
         expected = (tool_name, param_name) in OPTIONAL_WITH_DEFAULT
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
-    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 19
-    assert len(OPTIONAL_WITH_DEFAULT) == 71
+    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 23
+    assert len(OPTIONAL_WITH_DEFAULT) == 79
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -723,7 +738,15 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 在教模型用。改后说明写清 `head` 的适用范围与 `raw` / `toon` 的失效，并新增
 #: `mcp_unsupported_extra` / `mcp_invalid_extra` 两个错误码。快照同步用
 #: `python scripts/tool_schema_snapshot.py --update` 更新，diff 应只有 `[mcp_call.extra]` 一项。
-BASELINE_TEXT_DIGEST = "50c763add3c0406cd51e5b8fc9b45fced2b1708c5e0857e5552f7e7a4df846f0"
+#:
+#: #224 重算（`50c763ad…` → `a427b91c…`）：**新增三个工具**（MCP 注册表：
+#: `save_mcp_server` 6 参 / `delete_mcp_server` 1 参 / `list_mcp_servers` 5 参，共 12 参）
+#: + **改写 `mcp_call` 的工具说明**（新增别名解析段：命中替换 target/kind + 注入凭证
+#: 引用、`resolved_from_alias`/`alias` 恒出现、`mcp_alias_kind_conflict`）。既有 40 个
+#: 工具的 description / required **一字未动**（已实测：把三个新工具从现算里剔除后与
+#: 旧基线逐字节比对，差异恰为 `[mcp_call]` description 一项）。工具数 40 → 43、
+#: 参数数 117 → 129。快照同步 `python scripts/tool_schema_snapshot.py --update`。
+BASELINE_TEXT_DIGEST = "a427b91c749638a9c0ffd51d17cc1c7776d08910414c62b0c0bc699a2fa41c5f"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -764,9 +787,10 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
     digest, tools, params = _text_digest()
 
-    # 38 → 39 / 108 → 114：`mcp_call`（#202）。
-    assert tools == 40, tools
-    assert params == 117, params
+    # 38 → 39 / 108 → 114：`mcp_call`（#202）。40 → 43 / 117 → 129：MCP 注册表三工具
+    # （#224，+`mcp_call` 说明改写）。
+    assert tools == 43, tools
+    assert params == 129, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

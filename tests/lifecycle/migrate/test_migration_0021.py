@@ -79,7 +79,11 @@ def test_0021_adds_nullable_note_to_existing_table(tmp_path: Path) -> None:
 
     applied = db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR)
 
-    assert applied == [MIGRATION_0021]
+    # 不再断言「恰好只有 0021」：`up_to` 之后还会追平后续迁移（#224 起 0022_*），
+    # 每加一个迁移都改本条等于让旧迁移测试跟着新单漂。改钉两条不变量：
+    # ① 0021 必须在本次增量里被记账；② 之后的迁移都排在它后面。
+    assert MIGRATION_0021 in applied
+    assert applied.index(MIGRATION_0021) == 0
     columns = _columns(db_path)
     assert "note" in columns
     assert columns["note"] is False, "note 必须可空：存量行与预记录都没有说明"

@@ -1,0 +1,617 @@
+"""MCP 注册表 console/工具层判据（#224，按 #223 设计稿）。
+
+四类判据：
+1. **命令表形态**（不碰库）：add/rm/ls 三条 spec 的转发形态与 arity、三通道等价、
+   `--kind` 重复报 `duplicate_option`（#218 联名）、`--target` 与位置参数冲突报
+   `ambiguous_input_source`（§3.6-5）；
+2. **真入口闭环**（真库）：`mcp add → mcp ls → mcp call → mcp rm`，call 步经
+   `execute_tool_call` 第 2 跳真实执行；mcp2cli 缺席的环境用 **stub `_main_impl`**
+   （捕获 runtime argv），真包路径另由
+   `tests/integration/test_funcToolService/test_mcp_registry_real_loop.py`
+   （`importorskip`）覆盖；
+3. **别名解析语义**（§3.6 / 1337 附加判据 3）：`resolved_from_alias`/`alias` 恒出现、
+   kind 冲突三分支、`mcp ls <别名>` 与 `mcp call` 复用同一 `resolve_alias`；
+4. **权限与凭证**（T6 / 1331）：BASIC 直调与 console 面都给 `admin_denied`+建议；
+   日志只含引用原文、grep 不到解析值（硬条件 ⅱ）；解析失败报
+   `credential_unresolved` 不传空值（B3/B4）。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+from container_db_schema import migrate_all
+from exception import ForwardToolCall
+from model.dbModel.base import bind_database, unbind_database
+from service import mcpRegistryService
+from service.agentService import toolRegistry
+from service.funcToolService import core as func_tool_core
+from service.funcToolService import mcpTool
+from service.funcToolService.consoleTool import console
+from service.funcToolService.tools import (
+    delete_mcp_server,
+    list_mcp_servers,
+    save_mcp_server,
+)
+from service.ormService import AioSqliteDatabase
+from util import llmApiUtil
+
+_SECRET = "sk-super-secret-value-should-never-log"
+_VAR = "GITHUB_TOKEN"
+
+
+# ---------------------------------------------------------------------------
+# fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def mcp_db(tmp_path: Path):
+    db_path = tmp_path / "mcp_registry_console.db"
+    applied = migrate_all(db_path, workspace_root=tmp_path)
+    assert "0022_add_mcp_servers.sql" in applied
+    db = AioSqliteDatabase(str(db_path), pool_params={"timeout": 30})
+    bind_database(db)
+    await db.aio_connect()
+    try:
+        yield db_path
+    finally:
+        await db.aio_close()
+        unbind_database()
+
+
+@pytest.fixture
+def leader_ctx():
+    return toolRegistry.ToolCallContext(agent_id=1, team_id=1, chat_room=None)
+
+
+@pytest.fixture
+def loaded_tools():
+    func_tool_core.load_func_tools()
+    func_tool_core.load_container_func_tools()
+
+
+def _build_registry() -> toolRegistry.AgentToolRegistry:
+    registry = toolRegistry.AgentToolRegistry()
+    for tool in func_tool_core.get_all_tools():
+        registry.register(tool, func_tool_core.run_tool_call)
+    return registry
+
+
+class _StubMcp2Cli(types.ModuleType):
+    """假 mcp2cli：记录 runtime argv（解析后的），回一份合法 JSON。
+
+    只替外部包的执行分派这一跳；解析→argv 构建→日志→解析→分派→返回体整条
+    ToGo 链路都是真的。
+    """
+
+    runtime_argvs: list[list[str]] = []
+
+    @staticmethod
+    def to_kebab(key: str) -> str:
+        return key.replace("_", "-")
+
+    @staticmethod
+    def _main_impl(argv: list[str]) -> None:
+        _StubMcp2Cli.runtime_argvs.append(list(argv))
+        import sys as _sys
+
+        _sys.stdout.write(
+            json.dumps({"stub": True, "argv": list(argv)}, ensure_ascii=False)
+        )
+
+
+@pytest.fixture
+def stub_mcp2cli(monkeypatch):
+    stub = _StubMcp2Cli("mcp2cli")
+    _StubMcp2Cli.runtime_argvs = []
+    monkeypatch.setitem(sys.modules, "mcp2cli", stub)
+    return stub
+
+
+@pytest.fixture
+def secret_env(monkeypatch):
+    monkeypatch.setenv(_VAR, _SECRET)
+    return _SECRET
+
+
+async def _register_alias(
+    alias: str = "ctx7",
+    kind: str = "mcp",
+    target: str = "https://mcp.context7.com/mcp",
+    credentials: dict | None = None,
+    team_id: int = 1,
+) -> dict:
+    return await save_mcp_server(
+        alias=alias,
+        kind=kind,
+        target=target,
+        credentials=credentials,
+        _context=toolRegistry.ToolCallContext(agent_id=1, team_id=team_id),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 1. 命令表形态（不碰库）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_inline_json_forwards_to_save():
+    payload = {"alias": "ctx7", "kind": "mcp", "target": "https://mcp.context7.com/mcp"}
+    with pytest.raises(ForwardToolCall) as excinfo:
+        await console(f"mcp add '{json.dumps(payload)}'")
+    forward = excinfo.value
+    assert forward.tool_name == "save_mcp_server"
+    assert forward.tool_args == payload
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_option_form_forwards_same_shape():
+    with pytest.raises(ForwardToolCall) as excinfo:
+        await console("mcp add --alias ctx7 --kind mcp --target https://mcp.context7.com/mcp")
+    forward = excinfo.value
+    assert forward.tool_args == {
+        "alias": "ctx7",
+        "kind": "mcp",
+        "target": "https://mcp.context7.com/mcp",
+    }
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_from_payload_channel_equivalent():
+    payload = {"alias": "ctx7", "target": "https://x", "note": "n"}
+    with pytest.raises(ForwardToolCall) as excinfo:
+        await console("mcp add --from payload", payload=payload)
+    assert excinfo.value.tool_args == payload
+
+
+async def _console_error(command: str, payload: dict | None = None) -> dict:
+    """console() 对 ConsoleError 的对外契约是失败返回体（不抛），这里取 error_code。"""
+    body = await console(command, payload=payload)
+    assert body.get("success") is False, body
+    return body
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_rejects_two_positional_args():
+    """accepts_input 分支写死的 upper=1 才是真正的拦截（max_args=0 只是同构写法）。"""
+    body = await _console_error("mcp add ctx7 https://x")
+    assert body["error_code"] == "invalid_argument_count"
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_nothing_reports_missing_input_source():
+    body = await _console_error("mcp add")
+    assert body["error_code"] == "missing_input_source"
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_duplicate_kind_reports_duplicate_option():
+    """联名 #218：标量选项重复出现报 duplicate_option，不静默取最后一个。"""
+    body = await _console_error(
+        "mcp add --alias ctx7 --kind mcp --kind openapi --target https://x"
+    )
+    assert body["error_code"] == "duplicate_option"
+
+
+@pytest.mark.asyncio
+async def test_mcp_rm_forwards_alias_and_arity():
+    with pytest.raises(ForwardToolCall) as hit:
+        await console("mcp rm ctx7")
+    assert hit.value.tool_name == "delete_mcp_server"
+    assert hit.value.tool_args == {"alias": "ctx7"}
+
+    body = await _console_error("mcp rm a b")
+    assert body["error_code"] == "invalid_argument_count"
+
+    body = await _console_error("mcp rm")
+    assert body["error_code"] == "invalid_argument_count"
+
+
+@pytest.mark.asyncio
+async def test_mcp_ls_no_arg_and_one_arg_both_reach_the_tool():
+    """§3.3：0 段与 1 段位置参数都要到达工具——这是换 DIRECT 的唯一原因。"""
+    with pytest.raises(ForwardToolCall) as empty:
+        await console("mcp ls")
+    assert empty.value.tool_name == "list_mcp_servers"
+    assert empty.value.tool_args == {}
+
+    with pytest.raises(ForwardToolCall) as one:
+        await console("mcp ls ./openapi.json")
+    assert one.value.tool_args == {"alias_or_target": "./openapi.json"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_positional_and_target_conflict():
+    """§3.6-5：位置参数与 --target 同时给 ⇒ ambiguous_input_source，不新增「别名优先」。"""
+    body = await _console_error("mcp call ctx7 --target https://x")
+    assert body["error_code"] == "ambiguous_input_source"
+
+
+@pytest.mark.asyncio
+async def test_help_overlay_mentions_registry_semantics():
+    """T5 硬性动作：help 必须写「登记到 team 级注册表，非创建业务实体」。"""
+    from service.funcToolService import consoleTool
+
+    overlay = "\n".join(consoleTool._HELP_OVERLAY.get("mcp add", ()))
+    assert "非创建业务实体" in overlay
+    assert "kind 默认 mcp" in overlay
+    ls_overlay = "\n".join(consoleTool._HELP_OVERLAY.get("mcp ls", ()))
+    assert "无参" in ls_overlay
+
+
+# ---------------------------------------------------------------------------
+# 2. 真入口闭环（真库 + stub 外部包）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_closed_loop_add_ls_call_rm(mcp_db, leader_ctx, loaded_tools, stub_mcp2cli):
+    """真入口闭环：add（真写库）→ ls（真读库）→ call（第 2 跳真执行 + 别名解析）
+    → rm（真删库）。每步都是真链路；唯一替身是外部包的分派函数。"""
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute", "Category:Admin"]
+    )
+
+    def _call(name: str, command: str) -> llmApiUtil.OpenAIToolCall:
+        return llmApiUtil.OpenAIToolCall(
+            id=f"tc_{name}",
+            function={"name": "console", "arguments": json.dumps({"command": command})},
+        )
+
+    # add（真写库）
+    added = await registry.execute_tool_call(
+        _call("add", "mcp add --alias ctx7 --kind mcp --target https://mcp.context7.com/mcp"),
+        context=leader_ctx,
+    )
+    body = added.result
+    assert body.get("success") is True, body
+    assert body["server"]["alias"] == "ctx7"
+
+    # ls 无参（真读库，脱敏）
+    listed = await registry.execute_tool_call(_call("ls", "mcp ls"), context=leader_ctx)
+    body = listed.result
+    assert body["success"] is True
+    assert body["count"] == 1
+    assert body["servers"][0]["alias"] == "ctx7"
+    assert body["servers"][0]["target_masked"] == "https://mcp.context7.com/mcp"
+    assert "result" not in body  # 无参分支不套 mcp_call 的返回结构（设计稿 §3.3）
+
+    # call（别名解析 + 第 2 跳真执行）
+    called = await registry.execute_tool_call(
+        _call("call", "mcp call ctx7 --tool list_issues"), context=leader_ctx
+    )
+    body = called.result
+    assert body.get("success") is True, body
+    assert body["resolved_from_alias"] is True
+    assert body["alias"] == "ctx7"
+    assert stub_mcp2cli.runtime_argvs, "call 必须真的分派一次"
+    argv = stub_mcp2cli.runtime_argvs[-1]
+    assert argv[0:3] == ["--mcp", "https://mcp.context7.com/mcp", "--json"], argv
+    assert "list_issues" in argv
+
+    # rm（真删库）
+    removed = await registry.execute_tool_call(_call("rm", "mcp rm ctx7"), context=leader_ctx)
+    body = removed.result
+    assert body["success"] is True
+    assert body["deleted"]["alias"] == "ctx7"
+
+    after = await registry.execute_tool_call(_call("ls2", "mcp ls"), context=leader_ctx)
+    assert after.result["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_rm_missing_alias_reports_not_found(mcp_db, leader_ctx, loaded_tools):
+    result = await delete_mcp_server(alias="ghost", _context=leader_ctx)
+    assert result["success"] is False
+    assert result["error_code"] == "mcp_alias_not_found"
+
+
+# ---------------------------------------------------------------------------
+# 3. 别名解析语义（§3.6 / 1337 附加判据 3）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolved_from_alias_always_present(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
+):
+    await _register_alias()
+
+    hit = await list_mcp_servers(alias_or_target="ctx7", _context=leader_ctx)
+    assert hit["resolved_from_alias"] is True
+    assert hit["alias"] == "ctx7"
+
+    miss = await list_mcp_servers(alias_or_target="https://direct.example.com", _context=leader_ctx)
+    assert miss["resolved_from_alias"] is False
+    assert "alias" not in miss
+
+    # 未命中的 target 原样透传（向后兼容）：argv 用的是传入值本身。
+    assert stub_mcp2cli.runtime_argvs[-1][1] == "https://direct.example.com"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("given_kind", "expect_ok", "expect_error"),
+    [
+        (None, True, None),          # 缺省 ⇒ 放行，kind 取注册值（mcp）
+        ("mcp", True, None),         # 相同 ⇒ 放行（第三支的反向覆盖）
+        ("graphql", False, "mcp_alias_kind_conflict"),
+        ("openapi", True, None),     # 签名默认值与缺省不可区分，视为缺省（§3.6 已承认）
+    ],
+)
+async def test_kind_conflict_three_branches(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, given_kind, expect_ok, expect_error
+):
+    """kind 三分支（1331 批准口径）：命中取注册值；不同 ⇒ conflict；相同/缺省 ⇒ 放行。"""
+    await _register_alias(kind="mcp")
+    kwargs = {}
+    if given_kind is not None:
+        kwargs["kind"] = given_kind
+    from service.funcToolService.tools import mcp_call
+
+    body = await mcp_call(target="ctx7", action="list", tool=None, **kwargs, _context=leader_ctx)
+    if expect_ok:
+        assert body["success"] is True, body
+        assert body["resolved_from_alias"] is True
+        assert stub_mcp2cli.runtime_argvs[-1][0] == "--mcp"  # kind 取了注册值
+    else:
+        assert body["success"] is False
+        assert body["error_code"] == expect_error
+        assert stub_mcp2cli.runtime_argvs == [], "冲突时不得发起调用"
+
+
+@pytest.mark.asyncio
+async def test_ls_and_call_share_one_resolve_alias(mcp_db, leader_ctx, loaded_tools, stub_mcp2cli):
+    """C3：`mcp ls <别名>` 与 `mcp call` 必须复用同一条 resolve_alias（不许第二套）。"""
+    await _register_alias(kind="graphql", target="https://gql.example.com")
+
+    listed = await list_mcp_servers(alias_or_target="ctx7", kind="mcp", _context=leader_ctx)
+    assert listed["success"] is False
+    assert listed["error_code"] == "mcp_alias_kind_conflict", listed
+
+    called = await list_mcp_servers(alias_or_target="ctx7", _context=leader_ctx)
+    assert called["success"] is True
+    assert stub_mcp2cli.runtime_argvs[-1][0] == "--graphql"
+
+
+@pytest.mark.asyncio
+async def test_call_without_team_context_skips_resolution(
+    loaded_tools, stub_mcp2cli, mcp_db
+):
+    """无 team 上下文时按未命中透传（既有调用方行为不变）。"""
+    body = await list_mcp_servers(alias_or_target="ctx7", _context=None)
+    assert body["resolved_from_alias"] is False
+    assert stub_mcp2cli.runtime_argvs[-1][1] == "ctx7"
+
+
+@pytest.mark.asyncio
+async def test_call_without_bound_db_skips_resolution(loaded_tools, stub_mcp2cli):
+    """未绑库（无库环境直调第 2 跳）⇒ 注册表不可用 ⇒ 按未命中透传。
+
+    本用例不挂 `mcp_db` fixture——代理正好是未绑状态；解析跳过后 mcp_call 行为
+    与 #224 之前逐字一致（这正是增量能力不得打死既有用法的判据）。
+    """
+    from model.dbModel.base import database_bound
+
+    assert database_bound() is False, "前置被遮：本用例依赖「未绑库」状态"
+
+    ctx = toolRegistry.ToolCallContext(agent_id=1, team_id=1, chat_room=None)
+    body = await list_mcp_servers(alias_or_target="ctx7", _context=ctx)
+    assert body["resolved_from_alias"] is False
+    assert "alias" not in body
+    assert stub_mcp2cli.runtime_argvs[-1][1] == "ctx7"
+
+
+@pytest.mark.asyncio
+async def test_empty_target_passes_through(mcp_db, leader_ctx, loaded_tools, stub_mcp2cli):
+    """§3.6-6：空 target 不是解析场景，沿用既有 mcp_invalid_target。"""
+    body = await list_mcp_servers(alias_or_target="  ", _context=leader_ctx)
+    # 纯空白 = 无参 → 列注册表分支
+    assert body["success"] is True
+    assert "servers" in body
+
+
+# ---------------------------------------------------------------------------
+# 4. 权限（T6）与凭证纪律（1331 / B3）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_basic_agent_console_add_gets_admin_denied(
+    mcp_db, loaded_tools, stub_mcp2cli
+):
+    """T6：BASIC Agent 经 console 调 mcp add ⇒ admin_denied + 可执行建议（非裸权限错误）。"""
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
+    )
+    ctx = toolRegistry.ToolCallContext(agent_id=2, team_id=1, chat_room=None)
+    call = llmApiUtil.OpenAIToolCall(
+        id="tc_basic_add",
+        function={
+            "name": "console",
+            "arguments": json.dumps({"command": "mcp add --alias ctx7 --target https://x"}),
+        },
+    )
+    result = await registry.execute_tool_call(call, context=ctx)
+    body = result.result
+    assert body["success"] is False
+    assert body["error_code"] == "admin_denied"
+    assert "leader" in body["message"]
+
+
+@pytest.mark.asyncio
+async def test_basic_agent_direct_call_gets_admin_denied(mcp_db, loaded_tools, stub_mcp2cli):
+    """1337 附加判据 1：直调面（绕过 console）同样收到 admin_denied，不许裸权限错误。"""
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
+    )
+    ctx = toolRegistry.ToolCallContext(agent_id=2, team_id=1, chat_room=None)
+    for name in ("save_mcp_server", "delete_mcp_server"):
+        call = llmApiUtil.OpenAIToolCall(
+            id=f"tc_basic_{name}",
+            function={"name": name, "arguments": json.dumps({"alias": "ctx7"})},
+        )
+        result = await registry.execute_tool_call(call, context=ctx)
+        body = result.result
+        assert body["success"] is False, (name, body)
+        assert body["error_code"] == "admin_denied", (name, body)
+        assert "工具无权限使用" not in body["message"]
+
+
+@pytest.mark.asyncio
+async def test_basic_agent_can_list_registry(mcp_db, loaded_tools):
+    """list 归 BASIC：没有 Admin 的 Agent 至少能看。"""
+    await _register_alias()
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
+    )
+    ctx = toolRegistry.ToolCallContext(agent_id=2, team_id=1, chat_room=None)
+    call = llmApiUtil.OpenAIToolCall(
+        id="tc_basic_ls",
+        function={"name": "console", "arguments": json.dumps({"command": "mcp ls"})},
+    )
+    result = await registry.execute_tool_call(call, context=ctx)
+    body = result.result
+    assert body["success"] is True, body
+    assert body["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_credential_refs_logged_as_refs_and_resolved_only_for_dispatch(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, secret_env, caplog
+):
+    """硬条件 ⅱ：日志/返回体只含引用原文；解析后的值只出现在分派 argv 里。"""
+    await _register_alias(
+        target="https://mcp.example.com/mcp",
+        credentials={"headers": {"Authorization": f"env:{_VAR}"}},
+    )
+    with caplog.at_level(logging.INFO, logger="service.funcToolService.mcpTool"):
+        from service.funcToolService.tools import mcp_call
+
+        body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    assert body["success"] is True, body
+
+    returned_argv = body["argv"]
+    assert f"env:{_VAR}" in json.dumps(returned_argv), returned_argv
+    assert _SECRET not in json.dumps(returned_argv), "返回体 argv 不得含解析值"
+
+    log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert f"env:{_VAR}" in log_text
+    assert _SECRET not in log_text, "日志 grep 不到解析后的值（硬条件 ⅱ 判据）"
+
+    # 分派 argv（替身收到的）才是解析后的。
+    dispatch_argv = stub_mcp2cli.runtime_argvs[-1]
+    assert dispatch_argv[dispatch_argv.index("--auth-header") + 1] == f"Authorization:{_SECRET}"
+
+
+@pytest.mark.asyncio
+async def test_stdio_env_credentials_resolved_for_dispatch(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, monkeypatch
+):
+    """env 层（mcp_stdio）：`--env "VAR=env:SRC"` 引用 → 分派时解析为字面值。"""
+    monkeypatch.setenv("API_KEY", "key-value-999")
+    await _register_alias(
+        kind="mcp_stdio",
+        target="npx -y some-server",
+        credentials={"env": {"API_KEY": "env:API_KEY"}},
+    )
+    from service.funcToolService.tools import mcp_call
+
+    body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    assert body["success"] is True, body
+    returned = json.dumps(body["argv"])
+    assert "env:API_KEY" in returned
+    assert "key-value-999" not in returned
+
+    dispatch = stub_mcp2cli.runtime_argvs[-1]
+    value = dispatch[dispatch.index("--env") + 1]
+    assert value == "API_KEY=key-value-999"
+
+
+@pytest.mark.asyncio
+async def test_credential_unresolved_fails_closed_without_call(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, monkeypatch
+):
+    """B3/B4：env 变量缺失 ⇒ credential_unresolved，不传空值、不发起调用。"""
+    monkeypatch.delenv(_VAR, raising=False)
+    await _register_alias(
+        target="https://mcp.example.com/mcp",
+        credentials={"headers": {"Authorization": f"env:{_VAR}"}},
+    )
+    from service.funcToolService.tools import mcp_call
+
+    body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    assert body["success"] is False
+    assert body["error_code"] == "credential_unresolved"
+    assert "目标机器" in body["message"]
+    assert stub_mcp2cli.runtime_argvs == [], "解析失败不得发起调用"
+    assert _SECRET not in json.dumps(body)
+
+
+@pytest.mark.asyncio
+async def test_registry_without_credentials_changes_nothing(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
+):
+    """硬条件 ③ 旁证：零凭证条目不带任何凭证段，extra 通道照旧。"""
+    await _register_alias()
+    from service.funcToolService.tools import mcp_call
+
+    body = await mcp_call(
+        target="ctx7", action="list", extra={"transport": "sse"}, _context=leader_ctx
+    )
+    assert body["success"] is True, body
+    argv = stub_mcp2cli.runtime_argvs[-1]
+    assert "--auth-header" not in argv and "--env" not in argv
+    assert "transport" in json.dumps(argv)
+    assert "--auth-header" not in json.dumps(body["argv"])
+
+
+# ---------------------------------------------------------------------------
+# build_argv 纯函数层（凭证段位置语义）
+# ---------------------------------------------------------------------------
+
+
+def test_build_argv_credential_segments_before_tool_name():
+    argv = mcpTool.build_argv(
+        kind="mcp",
+        target="https://x",
+        action="call",
+        tool="my-tool",
+        args={"a": "1"},
+        extra=None,
+        credential_refs={"headers": {"Authorization": "env:GITHUB_TOKEN"}},
+    )
+    # 全局段（含凭证）必须排在工具名之前（上游 _split_at_subcommand 语义）。
+    assert argv.index("--auth-header") < argv.index("my-tool")
+    assert argv == [
+        "--mcp", "https://x", "--json",
+        "--auth-header", "Authorization:env:GITHUB_TOKEN",
+        "my-tool", "--a", "1",
+    ]
+
+
+def test_resolve_never_touches_non_credential_segments(monkeypatch):
+    """解析定位用「期望段整串相等」：target 里的 env: 字样不得被误伤。"""
+    monkeypatch.setenv(_VAR, _SECRET)
+    argv = [
+        "--mcp", "https://x?ref=env:GITHUB_TOKEN", "--json",
+        "--auth-header", "Authorization:env:GITHUB_TOKEN",
+        "--list",
+    ]
+    resolved = mcpTool._with_resolved_credentials(
+        argv, {"headers": {"Authorization": "env:GITHUB_TOKEN"}}
+    )
+    assert resolved[1] == "https://x?ref=env:GITHUB_TOKEN"  # 原样
+    assert resolved[4] == "Authorization:" + _SECRET  # 只有我们写入的段被替换

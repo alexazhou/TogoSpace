@@ -201,6 +201,21 @@
     },
     "required": []
   },
+  "delete_mcp_server": {
+    "description": "从本团队 MCP 注册表删除一个别名（`mcp rm` 的底层工具）。",
+    "parameters": {
+      "alias": {
+        "description": "要删除的别名（必须与登记时的别名完全一致）。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "required": []
+  },
   "delete_role_template": {
     "description": "删除指定的角色模板。注意：仅能删除由用户创建（USER 类型）且当前未被任何成员使用的模板。",
     "parameters": {
@@ -416,6 +431,54 @@
     "parameters": {},
     "required": []
   },
+  "list_mcp_servers": {
+    "description": "无参列出本团队 MCP 注册表；有参时对别名/完整 target 列工具清单（`mcp ls` 的底层工具）。",
+    "parameters": {
+      "alias_or_target": {
+        "description": "省略 = 列注册表；给出 = 别名或完整 target（对它列工具清单）。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "args": {
+        "description": "（有参分支）预留透传，见 `mcp_call`。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "extra": {
+        "description": "（有参分支）透传 mcp2cli 全局开关，见 `mcp_call`。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "kind": {
+        "description": "（有参分支）来源类型；别名命中时以注册项为准。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tool": {
+        "description": "（有参分支）预留透传，见 `mcp_call`。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "required": []
+  },
   "list_role_templates": {
     "description": "查询全部角色模板列表。\n返回精简字段，不包含 soul；display_name 为当前语言下的名称。",
     "parameters": {
@@ -591,13 +654,13 @@
         }
       },
       "kind": {
-        "description": "来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。",
+        "description": "来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。 别名命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。",
         "schema": {
           "type": "string"
         }
       },
       "target": {
-        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint。",
+        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint； 也可以是注册表别名（`mcp add` 登记的名字，如 `ctx7`）。",
         "schema": {
           "type": "string"
         }
@@ -974,6 +1037,57 @@
       },
       "responsibility": {
         "description": "组织职责描述。新建时必须给；更新时省略表示保持现值。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "required": []
+  },
+  "save_mcp_server": {
+    "description": "把一个外部服务连接描述登记到本团队的 MCP 注册表（`mcp add` 的底层工具）。",
+    "parameters": {
+      "alias": {
+        "description": "别名，小写字母开头、仅含小写字母/数字/下划线/连字符，最长 32 字符（如 `ctx7`）。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "credentials": {
+        "description": "凭证引用，形如 `{\"headers\": {\"Authorization\": \"env:GITHUB_TOKEN\"}}` （headers 配 HTTP 类 kind）或 `{\"env\": {\"API_KEY\": \"env:API_KEY\"}}` （env 配 `mcp_stdio`，注入子进程环境变量）。只存引用，永不存明文。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "kind": {
+        "description": "来源类型，默认 `mcp`（与 `mcp_call` 的默认 `openapi` **有意不同**：注册表 典型用法是 MCP server）；可选 `openapi` / `mcp` / `mcp_stdio` / `graphql`。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "note": {
+        "description": "备注说明（给人看的用途描述）。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "overwrite": {
+        "description": "别名已存在时是否覆盖；默认 false（防误覆盖别人的登记）。",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "target": {
+        "description": "完整连接描述：MCP server URL / spec 路径或 URL / stdio 启动命令 / GraphQL endpoint。",
         "schema": {
           "type": [
             "string",

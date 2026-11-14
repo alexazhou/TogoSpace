@@ -527,15 +527,41 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     # `mcp call` 用 SAVE 只为拿到 `input_defaults`（把 `action` 补成 `call`）；
     # 它不落库、不吃 `overwrite`，`patch_by_name` 保持默认。
     _spec(
-        "mcp", "ls", "mcp_call", verb="GET",
-        needs_target=True, min_args=1, max_args=1,
-        locator=_loc(name_param="target"),
-    ),
-    _spec(
         "mcp", "call", "mcp_call", verb="SAVE",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
         locator=_loc(name_param="target"),
         input_defaults=(("action", "call"),),
+    ),
+    # MCP 注册表（#224，按 #223 设计稿 §3.5）：
+    #
+    # `mcp call <别名>` 与 `mcp call <完整 target>` **无法靠 spec 区分**（一个 spec
+    # 只有一个 legacy_tool），别名解析只能放在工具内部（`tools.mcp_call` 入口的
+    # `resolve_alias`，§3.6）——本表对 `mcp call` 一个字符都不改。
+    #
+    # `add`：照抄 dept create（create 族）的 SAVE 形态。动作词用 `add` 是**有意
+    # 偏离**（§3.2.1 已裁定）：create 建的是 team 内新实体，add 登记的是指向外部
+    # 服务的指针；差异已钉进 `_HELP_OVERLAY`（「登记到 team 级注册表，非创建业务
+    # 实体」）。真正拦住多余位置参数的是 accepts_input 分支写死的 upper=1，不是
+    # `max_args=0`（那只是与 dept create 的写法同构，§3.2/C1）。
+    _spec(
+        "mcp", "add", "save_mcp_server", verb="SAVE",
+        accepts_input=True, max_args=0,
+    ),
+    # `rm`：照抄 dept rm / room rm 的 DELETE 形态；只按别名精确删，不存在时工具层
+    # 返回 mcp_alias_not_found（不静默成功，§5.2）。
+    _spec(
+        "mcp", "rm", "delete_mcp_server", verb="DELETE",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="alias"),
+    ),
+    # `ls`：三条里唯一无法同构的一条（设计稿 §3.3）。需求要求「无参列注册表、
+    # 有参列工具清单」两种形态都到达工具——LIST 丢位置参数、GET 强制 target、
+    # SAVE 的 arity 写死 0~1/1~2，只有 DIRECT 支持 0~1 段位置参数。**这是本设计
+    # 唯一一处新增的机制用法**，三条硬事实见设计稿 §3.3。有参分支由工具委托
+    # `mcp_call`（action=list），别名解析复用同一条 `resolve_alias`（C3）。
+    _spec(
+        "mcp", "ls", "list_mcp_servers", verb="DIRECT",
+        min_args=0, max_args=1,
     ),
 )
 

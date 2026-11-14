@@ -14,6 +14,7 @@ from . import gtAgentTaskEventManager
 from . import gtTeamManager
 from . import gtAgentContainerManager
 from . import gtAgentMemoryManager
+from . import gtMcpServerManager
 
 __all__ = [
     "gtAgentActivityManager",
@@ -30,4 +31,5 @@ __all__ = [
     "gtTeamManager",
     "gtAgentContainerManager",
     "gtAgentMemoryManager",
+    "gtMcpServerManager",
 ]

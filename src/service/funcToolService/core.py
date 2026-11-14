@@ -39,6 +39,8 @@ from .tools import (
     list_task_events,
     list_tasks,
     load_skill,
+    delete_mcp_server,
+    list_mcp_servers,
     mcp_call,
     memory_create,
     memory_list,
@@ -48,6 +50,7 @@ from .tools import (
     reload_team,
     save_agent,
     save_dept,
+    save_mcp_server,
     start_chat,
     save_role_template,
     save_room,
@@ -128,6 +131,12 @@ def load_func_tools() -> dict[str, FuncTool]:
         "webfetch": webfetch,
         # mcp2cli 接入（#202）：任意外部 MCP / OpenAPI / GraphQL 服务的一条统一入口。
         "mcp_call": mcp_call,
+        # MCP 注册表（#224）：登记/删除/列举 + `mcp call` 的别名解析落点。
+        # console 会转发这三个工具 ⇒ `_declared_visibility` 推成 BOTH（设计稿 §3.7
+        # 接受模型同时直调；BASIC 直调会被 ADMIN 类目在 enabled 处以 admin_denied 拒）。
+        "save_mcp_server": save_mcp_server,
+        "delete_mcp_server": delete_mcp_server,
+        "list_mcp_servers": list_mcp_servers,
         "send_chat_msg": send_chat_msg,
         "finish_action": finish_action,
         "get_dept_info": get_dept_info,

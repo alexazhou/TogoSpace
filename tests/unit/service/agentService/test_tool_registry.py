@@ -349,7 +349,7 @@ async def test_forward_target_respects_enabled_flag() -> None:
 # #75：CATEGORY_CONFIG 分类归属的字面量契约
 # ---------------------------------------------------------------------------
 
-# 分类表（37 条 = tools.py 本地 26 + TSP 11），**刻意写死字面量**：
+# 分类表（40 条 = tools.py 本地 26 + TSP 11 + MCP 注册表 3），**刻意写死字面量**：
 # 分类归属决定 `Category:*` 展开出哪些工具（见 `build_runtime_allow_specs`），
 # 把 `update_task` 挪出 BASIC 等于悄悄收走 Agent 的核心协作能力（`Category:Basic`
 # 下模型就看不到任务工具了），而 tool schema 快照对此完全沉默。故这里把归属
@@ -357,9 +357,10 @@ async def test_forward_target_respects_enabled_flag() -> None:
 #
 # 分布（按 `ToolCategory.name` 统计，**不要按 `.value` 反推** ——
 # 枚举声明序是 ADMIN=1 / BASIC=2 / READ=3 / WRITE=4 / EXECUTE=5）：
-#   BASIC 16 / ADMIN 10 / READ 6 / EXECUTE 4 / WRITE 2
+#   BASIC 17 / ADMIN 12 / READ 6 / EXECUTE 4 / WRITE 2
 #   （#154 起 `console` 计入 BASIC：它只是入口；#160 起子命令权限由
-#    `execute_tool_call` 在转发后的第 2 跳按**目标工具自己的** category 判）
+#    `execute_tool_call` 在转发后的第 2 跳按**目标工具自己的** category 判；
+#    #224 起 MCP 注册表三工具入表：list 归 BASIC、save/delete 归 ADMIN）
 EXPECTED_TOOL_CATEGORIES = {
     # 管理控制台（#154）：注册为 BASIC 才不会让没有 Admin 的 Agent 连 `dept ls`
     # 都失去。**子命令级权限由 `execute_tool_call` 在转发后的第 2 跳按目标工具的
@@ -370,6 +371,8 @@ EXPECTED_TOOL_CATEGORIES = {
     "create_task": ToolCategory.BASIC,
     "delete_container": ToolCategory.EXECUTE,
     "delete_dept": ToolCategory.ADMIN,
+    # #224：MCP 注册表三工具（归属理由见 CATEGORY_CONFIG 处注释）。
+    "delete_mcp_server": ToolCategory.ADMIN,
     "delete_role_template": ToolCategory.ADMIN,
     "delete_room": ToolCategory.ADMIN,
     "edit": ToolCategory.WRITE,
@@ -388,6 +391,7 @@ EXPECTED_TOOL_CATEGORIES = {
     "grep_search": ToolCategory.READ,
     "list_dir": ToolCategory.READ,
     "list_containers": ToolCategory.EXECUTE,
+    "list_mcp_servers": ToolCategory.BASIC,
     "list_role_templates": ToolCategory.ADMIN,
     "list_task_events": ToolCategory.BASIC,
     "list_tasks": ToolCategory.BASIC,
@@ -406,6 +410,7 @@ EXPECTED_TOOL_CATEGORIES = {
     "reload_team": ToolCategory.ADMIN,
     "save_agent": ToolCategory.ADMIN,
     "save_dept": ToolCategory.ADMIN,
+    "save_mcp_server": ToolCategory.ADMIN,
     "save_role_template": ToolCategory.ADMIN,
     "save_room": ToolCategory.ADMIN,
     "send_chat_msg": ToolCategory.BASIC,
