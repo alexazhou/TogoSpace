@@ -614,9 +614,18 @@ class TestJudgeDebt(_WorkflowCase):
     async def test_stale_cursor_correction_does_not_apply_to_normal_rows(self):
         """对照组：正常行（游标与状态一致）不受纠偏影响，逐级推进的语义不变。
 
-        纠偏若写成「REVIEWING 就一律跳到首个 REVIEW 节点」，会把**多级链的中间态**
-        也一并改判（在节点 1 初审中却被跳到 1 —— 幸好相同；但在节点 0 打回后重推时
-        会跳级）。这条用例守住「纠偏只在矛盾时生效」。
+        链是 3 节点双 REVIEW：`[bob(EXEC), alice(REVIEW 初审), bob(REVIEW 终审)]`，
+        本用例**必须推到节点 2 再交棒**才有鉴别力：纠偏若写成「只要 `REVIEWING` 就
+        跳到首个 REVIEW 节点」（过度纠偏，去掉 `node_type != REVIEW` 这半个条件），
+        在 0→1、1→2 两步上结果与正常推进**完全相同**（首个 REVIEW 恰好就是节点 1），
+        看不出任何差别；只有在「持棒人已在节点 2、状态仍是 `REVIEWING`」时，游标才被
+        错误地拉回节点 1 —— 那一步末节点交棒会被算成「1 → 2 再交一次」，整单永远
+        到不了 DONE。#229 的旧对照组用 2 节点链（停在节点 1），纠偏在上面是空操作，
+        因此过度纠偏变异下 4/4 全绿，形同虚设。
+
+        变异（过度纠偏：`if task.status == TaskStatus.REVIEWING:` 去掉
+        `and node_type != StageNodeType.REVIEW`）⇒ 本用例末步的 DONE 断言与
+        ADVANCE 事件序列断言必红（红在**本对照组**内）。
         """
         task_id, team_id, alice, bob = await self._create_chain(title="D1-正常行对照")
         await taskService.update_task(
@@ -626,11 +635,45 @@ class TestJudgeDebt(_WorkflowCase):
             team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="交初审"
         )
         assert first["success"] is True, first
-
         task = await self._task(team_id, task_id)
         assert (_status_of(task), task["current_stage"], task["current_owner_id"]) == (
             "REVIEWING", 1, alice,
         ), "正常推进的游标被纠偏改坏了"
+
+        second = await taskService.update_task(
+            team_id=team_id, caller_id=alice, task_id=task_id, workflow_action="advance", note="初审通过，交终审"
+        )
+        assert second["success"] is True, second
+        task = await self._task(team_id, task_id)
+        assert (_status_of(task), task["current_stage"], task["current_owner_id"]) == (
+            "REVIEWING", 2, bob,
+        ), "正常推进到节点 2 的游标被纠偏改坏了"
+
+        # 节点 2 是 REVIEW 节点（不是首个 REVIEW）且状态是 REVIEWING：
+        # 这里交棒必须是「末节点 ⇒整单 DONE」，不能被纠偏拉回节点 1 再交一次
+        third = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="终审通过"
+        )
+        assert third["success"] is True, third
+        task = await self._task(team_id, task_id)
+        assert _status_of(task) == "DONE", (
+            f"过度纠偏：节点 2（非首个 REVIEW）的末节点交棒被拉回节点 1，"
+            f"状态停在 {_status_of(task)}、游标 {task['current_stage']}"
+        )
+        assert await self._stages(task_id) == [
+            (0, "EXECUTION", bob, "APPROVED"),
+            (1, "REVIEW", alice, "APPROVED"),
+            (2, "REVIEW", bob, "APPROVED"),
+        ]
+
+        events = await taskService.list_task_events(team_id=team_id, task_id=task_id)
+        advanced = sorted(
+            (e for e in events["events"] if e["action_type"] == TaskEventAction.ADVANCE.value),
+            key=lambda e: e["id"],
+        )
+        assert [(e["from_stage"], e["to_stage"]) for e in advanced] == [(0, 1), (1, 2), (2, 2)], (
+            "ADVANCE 事件的 from/to 游标序列被纠偏改坏了"
+        )
 
     # ------------------------------------------------------------------
     # D2：同一任务的两路并发写必须串行化
@@ -701,36 +744,56 @@ class TestJudgeDebt(_WorkflowCase):
         """对照组：不同 `task_id` 的两路写**不**互相阻塞（锁是按任务分的，不是全局锁）。
 
         这条防的是「把锁写成全局锁也能过 D2」的错误修法：全局锁同样让并发只成功一次，
-        但会把不相干的任务串成一队。判据用耗时差：两路各睡 0.15s，按任务分锁应接近
-        0.15s，全局锁则接近 0.3s。
+        但会把不相干的任务串成一队。
+
+        **判据不绑墙钟**（#229 记档：旧版断言 `elapsed < 0.27s`，实测 0.160~0.163s，
+        余量仅 0.11s，并行负载下有假红风险）。这里改判**临界区是否真的重叠**：
+        在被锁包住的 `_load_stages` 上记 `enter/exit` 事件序列，算最大并发深度
+        ——按任务分锁时两路能同时停在锁内（深度 2）；全局锁时后一路必须等前一路
+        放锁，深度恒为 1。深度是事件序列算出来的，与机器快慢、负载无关。
+
+        会合点用 `asyncio.Event` 而不是「各自 sleep 固定时长」：Task A 进锁后等
+        Task B 也进锁（两边互相等到对方入内才继续），所以判绿路径上**不存在任何
+        时间阈值**；只有被串行化（错误修法）时先入内的一路才等到 2s 超时后放行，
+        那是失败路径的兜底，不会造成通过路径的假红。
+
+        变异（M10g：`_task_lock` 恒返回同一个全局 `_GLOBAL_LOCK`）⇒ 最大并发深度
+        恒为 1，本用例必红。
         """
         import asyncio
-        import time
         from unittest import mock
 
         team_id, alice, bob = await self._agents()
         ids = []
         for title in ("D2-对照-A", "D2-对照-B"):
-            created = await taskService.create_task(
-                team_id=team_id, creator_id=alice, title=title, assignee_id=bob,
-            )
-            assert created["success"] is True, created
-            ids.append(created["task_id"])
+            # 用 3 节点链（0→1 是真实的一格推进），单节点链会在 advance 时直接 DONE、
+            # 游标不动，那样两路的结构结果区分不出「推了没推」
+            task_id, _team_id, _alice, _bob = await self._create_chain(title=title)
+            ids.append(task_id)
             await taskService.update_task(
-                team_id=team_id, caller_id=bob, task_id=created["task_id"],
-                new_status="IN_PROGRESS",
+                team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS",
             )
 
         real_load = taskService._load_stages
+        timeline: list[tuple[str, int]] = []
+        both_inside = asyncio.Event()
+        # 仅用于「被串行化时别把用例挂死」的兜底；判绿路径不依赖它
+        SERIALIZED_FALLBACK = 2.0
 
-        async def slow_load(task):
+        async def recording_load(task):
             stages = await real_load(task)
-            await asyncio.sleep(0.15)
+            timeline.append(("enter", task.id))
+            if len({tid for kind, tid in timeline if kind == "enter"}) >= 2:
+                both_inside.set()
+            try:
+                await asyncio.wait_for(both_inside.wait(), timeout=SERIALIZED_FALLBACK)
+            except asyncio.TimeoutError:
+                pass  # 另一路在本次进去之前拿不到锁 ⇒ 交给下面的深度断言去判红
+            timeline.append(("exit", task.id))
             return stages
 
-        with mock.patch.object(taskService, "_load_stages", slow_load):
-            started = time.monotonic()
-            await asyncio.gather(
+        with mock.patch.object(taskService, "_load_stages", recording_load):
+            results = await asyncio.gather(
                 *[
                     taskService.update_task(
                         team_id=team_id, caller_id=bob, task_id=tid,
@@ -739,9 +802,29 @@ class TestJudgeDebt(_WorkflowCase):
                     for tid in ids
                 ]
             )
-            elapsed = time.monotonic() - started
 
-        assert elapsed < 0.27, (
-            f"两个不同任务被串行化了（耗时 {elapsed:.2f}s，按任务分锁应 ≈0.15s）——"
-            "锁写成了全局锁"
+        depths = []
+        depth = 0
+        for kind, _tid in timeline:
+            depth += 1 if kind == "enter" else -1
+            depths.append(depth)
+        max_depth = max(depths, default=0)
+
+        assert all(r.get("success") is True for r in results), f"两路都该成功：{results}"
+        assert max_depth >= 2, (
+            f"两个不同任务被串行化了（临界区最大并发深度 {max_depth}，按任务分锁应为 2）——"
+            f"锁写成了全局锁；临界区时间线={timeline}"
         )
+        # 结构正确性：两路各推进一格，且各留 1 条 (0→1) 的 ADVANCE
+        for tid in ids:
+            task = await self._task(team_id, tid)
+            assert (task["current_stage"], task["current_owner_id"]) == (1, alice), (
+                f"任务 {tid} 没被正确推进：游标 {task['current_stage']}、持棒人 {task['current_owner_id']}"
+            )
+            events = await taskService.list_task_events(team_id=team_id, task_id=tid)
+            cursor_seq = sorted(
+                (e["from_stage"], e["to_stage"])
+                for e in events["events"]
+                if e["action_type"] == TaskEventAction.ADVANCE.value
+            )
+            assert cursor_seq == [(0, 1)], f"任务 {tid} 的 ADVANCE 事件异常：{cursor_seq}"
