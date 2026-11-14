@@ -93,12 +93,12 @@ def _status_text(status: TaskStatus | str | None) -> str | None:
 
 
 def _format_time(value: datetime | None) -> str:
-    """时间（应用本地时区）格式化为 YYYY-MM-DD HH:MM。"""
+    """时间（应用本地时区）格式化为 YYYY-MM-DD HH:MM:SS。"""
     if value is None:
         return ""
     if value.tzinfo is not None:
         value = value.astimezone()
-    return value.strftime("%Y-%m-%d %H:%M")
+    return value.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def build_task_event_line(
@@ -111,9 +111,9 @@ def build_task_event_line(
 ) -> str:
     """把一条任务事件渲染成注入通知的单行文本。
 
-    - 流转事件：``- 2026-10-26 02:41 REVIEWING→IN_PROGRESS（李哥）：打回原因``
-    - 评论事件：``- 2026-10-26 02:41 评论（李哥）：备注内容``
-    - 创建事件：``- 2026-10-26 02:44 创建为 TODO（系统）``
+    - 流转事件：``- 2026-10-26 02:41:35 REVIEWING→IN_PROGRESS（李哥）：打回原因``
+    - 评论事件：``- 2026-10-26 02:41:12 评论（李哥）：备注内容``
+    - 创建事件：``- 2026-10-26 02:44:03 创建为 TODO（系统）``
 
     内容先压成单行（换行 / 连续空白折叠为一个空格），再按 ``EVENT_CONTENT_MAX_CHARS``
     截断；内容为空时不追加冒号与正文。

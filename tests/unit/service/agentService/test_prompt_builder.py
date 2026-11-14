@@ -37,22 +37,22 @@ def test_build_turn_update_prompt_contains_intro_text():
 
 def test_build_turn_update_prompt_yaml_format():
     result = promptBuilder.build_turn_update_prompt(
-        "testRoom", [_msg(2, "Alice", "hello", send_time=datetime(2024, 1, 1, 9, 30))], exclude_agent_id=1)
+        "testRoom", [_msg(2, "Alice", "hello", send_time=datetime(2024, 1, 1, 9, 30, 15))], exclude_agent_id=1)
     assert "roomName: testRoom" in result
     assert "sender: Alice" in result
-    assert "sendTime: 2024-01-01 09:30" in result
+    assert "sendTime: '2024-01-01 09:30:15'" in result
     assert "content: hello" in result
 
 
 def test_build_turn_update_prompt_includes_time_for_every_message():
     msgs = [
-        _msg(2, "Alice", "first", send_time=datetime(2024, 1, 1, 9, 30)),
-        _msg(3, "Bob", "second", send_time=datetime(2024, 1, 1, 9, 31)),
+        _msg(2, "Alice", "first", send_time=datetime(2024, 1, 1, 9, 30, 15)),
+        _msg(3, "Bob", "second", send_time=datetime(2024, 1, 1, 9, 31, 42)),
     ]
     result = promptBuilder.build_turn_update_prompt("testRoom", msgs, exclude_agent_id=1)
     assert result.count("sendTime:") == 2
-    assert "sendTime: 2024-01-01 09:30" in result
-    assert "sendTime: 2024-01-01 09:31" in result
+    assert "sendTime: '2024-01-01 09:30:15'" in result
+    assert "sendTime: '2024-01-01 09:31:42'" in result
 
 
 def test_build_turn_update_prompt_filters_own_messages():
@@ -80,10 +80,10 @@ def test_build_turn_update_prompt_multiline_content_uses_block_style():
 
 def test_build_turn_begin_prompt_yaml_format():
     result = promptBuilder.build_turn_begin_prompt(
-        "myRoom", [("Charlie", "hi there", datetime(2024, 1, 1, 12, 34))])
+        "myRoom", [("Charlie", "hi there", datetime(2024, 1, 1, 12, 34, 56))])
     assert "roomName: myRoom" in result
     assert "sender: Charlie" in result
-    assert "sendTime: 2024-01-01 12:34" in result
+    assert "sendTime: '2024-01-01 12:34:56'" in result
     assert "content: hi there" in result
     assert "当前轮到你行动" in result
 
@@ -184,7 +184,7 @@ def test_build_todo_task_turn_prompt_for_review_task():
 # ─── 任务通知注入「最近事件」 ─────────────────────────────────
 
 
-_EVENT_LINE = "- 2026-10-26 02:41 REVIEWING→IN_PROGRESS（李哥）：加密逻辑未覆盖空口令用例"
+_EVENT_LINE = "- 2026-10-26 02:41:35 REVIEWING→IN_PROGRESS（李哥）：加密逻辑未覆盖空口令用例"
 
 
 def test_task_turn_prompt_without_latest_event_has_no_event_section():
@@ -227,27 +227,27 @@ def test_task_turn_prompt_blank_latest_event_hides_section():
 
 
 def test_build_task_event_line_transition_format():
-    """流转事件：`- YYYY-MM-DD HH:MM FROM→TO（actor）：content`。"""
+    """流转事件：`- YYYY-MM-DD HH:MM:SS FROM→TO（actor）：content`。"""
     line = promptBuilder.build_task_event_line(
         actor_name="李哥",
         from_status=TaskStatus.REVIEWING,
         to_status=TaskStatus.IN_PROGRESS,
         content="加密逻辑未覆盖空口令用例",
-        created_at=datetime(2026, 10, 26, 2, 41),
+        created_at=datetime(2026, 10, 26, 2, 41, 35),
     )
     assert line == _EVENT_LINE
 
 
 def test_build_task_event_line_comment_format():
-    """评论事件（to_status 为空）：`- YYYY-MM-DD HH:MM 评论（actor）：content`。"""
+    """评论事件（to_status 为空）：`- YYYY-MM-DD HH:MM:SS 评论（actor）：content`。"""
     line = promptBuilder.build_task_event_line(
         actor_name="小马哥",
         from_status=None,
         to_status=None,
         content="补充：注意兼容旧数据",
-        created_at=datetime(2026, 10, 26, 3, 5),
+        created_at=datetime(2026, 10, 26, 3, 5, 27),
     )
-    assert line == "- 2026-10-26 03:05 评论（小马哥）：补充：注意兼容旧数据"
+    assert line == "- 2026-10-26 03:05:27 评论（小马哥）：补充：注意兼容旧数据"
 
 
 def test_build_task_event_line_creation_event_without_content():
@@ -257,9 +257,9 @@ def test_build_task_event_line_creation_event_without_content():
         from_status=None,
         to_status=TaskStatus.TODO,
         content="",
-        created_at=datetime(2026, 10, 26, 2, 44),
+        created_at=datetime(2026, 10, 26, 2, 44, 3),
     )
-    assert line == "- 2026-10-26 02:44 创建为 TODO（系统）"
+    assert line == "- 2026-10-26 02:44:03 创建为 TODO（系统）"
     assert "：" not in line
 
 
@@ -270,9 +270,9 @@ def test_build_task_event_line_collapses_multiline_content():
         from_status="IN_PROGRESS",
         to_status="REVIEWING",
         content="F4 完成，请验收。\n\n【改动清单】\n1.\tsrc/dal/db/gtAgentTaskManager.py  ",
-        created_at=datetime(2026, 10, 26, 2, 35),
+        created_at=datetime(2026, 10, 26, 2, 35, 48),
     )
-    assert line == "- 2026-10-26 02:35 IN_PROGRESS→REVIEWING（李哥）：F4 完成，请验收。 【改动清单】 1. src/dal/db/gtAgentTaskManager.py"
+    assert line == "- 2026-10-26 02:35:48 IN_PROGRESS→REVIEWING（李哥）：F4 完成，请验收。 【改动清单】 1. src/dal/db/gtAgentTaskManager.py"
     assert "\n" not in line
 
 
@@ -284,9 +284,9 @@ def test_build_task_event_line_truncates_long_content():
         from_status="IN_PROGRESS",
         to_status="REVIEWING",
         content=long_content,
-        created_at=datetime(2026, 10, 26, 4, 0),
+        created_at=datetime(2026, 10, 26, 4, 0, 11),
     )
-    assert line.startswith("- 2026-10-26 04:00 IN_PROGRESS→REVIEWING（李哥）：")
+    assert line.startswith("- 2026-10-26 04:00:11 IN_PROGRESS→REVIEWING（李哥）：")
     assert line.endswith(EVENT_TRUNCATED_SUFFIX)
     body = line.split("：", 1)[1]
     assert body == "长" * EVENT_CONTENT_MAX_CHARS + EVENT_TRUNCATED_SUFFIX
@@ -298,7 +298,7 @@ def test_build_task_event_line_truncates_long_content():
 
 def test_build_task_event_line_time_uses_local_timezone():
     """带时区的时间按应用本地时区展示。"""
-    aware = datetime(2026, 10, 26, 2, 41, tzinfo=timezone.utc)
+    aware = datetime(2026, 10, 26, 2, 41, 22, tzinfo=timezone.utc)
     line = promptBuilder.build_task_event_line(
         actor_name="李哥",
         from_status="TODO",
@@ -306,7 +306,7 @@ def test_build_task_event_line_time_uses_local_timezone():
         content="开工",
         created_at=aware,
     )
-    expected_time = aware.astimezone().strftime("%Y-%m-%d %H:%M")
+    expected_time = aware.astimezone().strftime("%Y-%m-%d %H:%M:%S")
     assert line == f"- {expected_time} TODO→IN_PROGRESS（李哥）：开工"
     # 无时间时不留多余空格
     assert promptBuilder.build_task_event_line(

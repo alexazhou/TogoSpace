@@ -88,7 +88,7 @@ async def test_collect_room_messages_syncs_to_history(turn_runner):
     msg.sender_id = 2  # 非 agent 自身
     msg.sender_display_name = "OtherAgent"
     msg.content = "Hello"
-    msg.send_time = datetime(2024, 1, 1, 9, 30)
+    msg.send_time = datetime(2024, 1, 1, 9, 30, 27)
 
     room.get_unread_messages = AsyncMock(return_value=[msg])
 
@@ -101,7 +101,7 @@ async def test_collect_room_messages_syncs_to_history(turn_runner):
     item = call_args.args[0]  # 第一个位置参数是 GtAgentHistory
     assert item.role == OpenaiApiRole.USER
     assert AgentHistoryTag.ROOM_TURN_BEGIN in item.tags
-    assert "sendTime: 2024-01-01 09:30" in (item.content or "")
+    assert "sendTime: '2024-01-01 09:30:27'" in (item.content or "")
 
 
 @pytest.mark.asyncio
