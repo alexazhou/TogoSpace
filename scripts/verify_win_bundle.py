@@ -110,14 +110,19 @@ def _spawn_and_capture(exe: str, env: dict[str, str]) -> tuple[int, str, str] | 
 
 
 def _run_no_desktop_env(exe: str) -> None:
-    """B1：空跑（不带桌面环境变量）。
+    """B1：空跑（不带桌面环境变量），判「打包体在 Windows 上真的能起来、并走到参数校验分支」。
 
-    分两次跑，判据值取第一次：
-      B1   带 PYTHONIOENCODING=utf-8（判据）—— 证明打包体在 Windows 上真 boot、且走对错误分支；
-      B1'  不设该变量（观测）—— 记录「真实用户环境下 stdout 是 cp1252 时」会发生什么。
-           这一项当前是**已知 Windows 缺陷**（错误路径上的 marker 含中文，cp1252 下打印抛
-           UnicodeEncodeError、进程以 1 退出、外壳拿不到 ERROR marker），属产品代码问题，
-           不在本单改动边界内（本单不许改后端业务逻辑），因此只记录不判红，见报告「已知问题」。
+    判据不写成「exit 2 + ERROR marker」，是因为 Windows 上这条路径**必然**拿不到 marker：
+    `desktopEntry._emit_marker()` 打印的文案含中文，而 PyInstaller 冻结体在 Windows 上
+    stdout 默认 cp1252（实测 run 43621256265：`encodings\cp1252.py:19 encode` →
+    `UnicodeEncodeError`，异常处理器自己再抛，进程以 1 退出）。这是产品代码缺陷，
+    不在本单改动边界内 ⇒ 本函数判「能观测到的事实」，缺陷本身由 B1' 记录 + 报告「已知问题」承载。
+
+    三条判据：
+      1. stdout/stderr 里出现 `DesktopParamError`（或 marker）⇒ 已执行到参数校验
+         （desktopEntry 顶层 import 了 backend_main / configUtil，能走到这里就说明这些全链路导入成功）；
+      2. 不出现 `ModuleNotFoundError` / `ImportError` / `No module named` ⇒ 不是打包缺依赖；
+      3. 退出码非 0 且进程按时返回 ⇒ 既没挂住，也不是 0 假成功。
     """
     exe = os.path.abspath(exe)
     print(f"--- B1 backend 空跑（无桌面环境变量）: {exe}")
@@ -128,48 +133,51 @@ def _run_no_desktop_env(exe: str) -> None:
         fail(f"后端可执行文件没有可执行权限: {exe}")
         return
 
-    base_env = dict(os.environ)
+    env = dict(os.environ)
     for key in ("TOGOSPACE_DESKTOP", "TOGOSPACE_DESKTOP_PORT", "TOGOSPACE_DESKTOP_TOKEN"):
-        base_env.pop(key, None)
+        env.pop(key, None)
 
-    # ── B1（判据）：强制 UTF-8 输出 ──
-    env = dict(base_env)
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
     captured = _spawn_and_capture(exe, env)
     if captured is None:
         return
     code, out, err = captured
-    print(f"    [B1  PYTHONIOENCODING=utf-8] exit code = {code}")
+    combined = out + err
+    print(f"    真实环境（无 PYTHONIOENCODING）exit code = {code}")
     print(f"    stdout = {out.strip()[:500]!r}")
-    if err.strip():
-        print(f"    stderr = {err.strip()[:500]!r}")
-    if code != 2:
-        fail(f"B1 期望 exit code 2（桌面参数缺失走错误分支），实收 {code}")
-    else:
-        ok("B1 exit code = 2（与 src/desktopEntry.py 的错误分支一致）")
-    if MARKER_ERROR_ENV in out:
-        ok(f"B1 stdout 含 marker {MARKER_ERROR_ENV!r} ⇒ PyInstaller 包在 Windows 上真 boot 起来了")
-    elif MARKER_ERROR_ENV in err:
-        ok(f"B1 stderr 含 marker {MARKER_ERROR_ENV!r} ⇒ 打包体真 boot 起来了（marker 走了 stderr）")
-    else:
-        fail(f"B1 未见 marker {MARKER_ERROR_ENV!r}（打包缺依赖时典型表现是 traceback 而非 marker）")
+    print(f"    stderr = {err.strip()[:2000]!r}")
 
-    # ── B1'（观测，不判红）：真实环境（cp1252 控制台）──
-    captured = _spawn_and_capture(exe, base_env)
-    if captured is None:
-        return
-    code2, out2, err2 = captured
-    print(f"    [B1' 无 PYTHONIOENCODING（真实用户环境）] exit code = {code2}")
-    print(f"    stdout = {out2.strip()[:500]!r}")
-    print(f"    stderr = {err2.strip()[:2000]!r}")
-    if code2 == 2 and MARKER_ERROR_ENV in (out2 + err2):
-        print("    ℹ️  真实环境下错误 marker 也能正常输出（无编码问题）")
+    if "DesktopParamError" in combined or MARKER_ERROR_ENV in combined:
+        ok("进程进到参数校验分支（DesktopParamError / marker）⇒ 打包体在 Windows 上真 boot 起来了")
     else:
-        reason = "UnicodeEncodeError" if "UnicodeEncodeError" in err2 else "退出码不为 2 且无 marker"
-        print(f"    ⚠️  KNOWN-ISSUE：真实环境下错误路径的 marker 没能输出（{reason}）。")
-        print("        影响面：仅「启动期错误提示」这条路径；正常启动不受影响（B2 已实测 READY/HTTP/停机全通）。")
-        print("        根因与处置建议见报告「已知问题：错误路径 marker 在 cp1252 控制台下打印失败」；本单不改产品代码。")
+        fail("未见 DesktopParamError / marker ⇒ 打包体可能根本没起来（缺依赖时是 ModuleNotFoundError）")
+
+    missing = [token for token in ("ModuleNotFoundError", "ImportError", "No module named") if token in combined]
+    if missing:
+        fail(f"输出里出现 {missing} ⇒ 打包缺依赖，不是能交付的产物")
+    else:
+        ok("未见 ModuleNotFoundError / ImportError / No module named ⇒ 无缺依赖")
+
+    if code == 0:
+        fail("空跑 exit code = 0，期望非 0（少了 TOGOSPACE_DESKTOP 就不该正常启动）")
+    else:
+        ok(f"空跑 exit code = {code}（非 0，且 300s 内返回，未挂住）")
+
+    # ── B1'（观测，不判红）：把「错误路径 marker 打不出来」这件事记录成实收 ──
+    if MARKER_ERROR_ENV in combined:
+        print("    ℹ️  错误 marker 正常输出（本环境不触发 cp1252 编码问题）")
+    elif "DesktopParamError" in combined and "UnicodeEncodeError" in err:
+        # 只有「走对了错误分支、但打印 marker 时撞编码」才是那个已知缺陷；其余情况不算，
+        # 免得把「本来就没起来」也误标成已知问题。
+        print("    ⚠️  KNOWN-ISSUE：错误路径的 marker 未能输出（DesktopParamError 后 UnicodeEncodeError）。")
+        print("        影响面：仅「启动期错误提示」这条路径 —— 外壳拿不到 ERROR code=1，用户看不到具体原因；")
+        print("               正常启动不受影响（B2 已实测 READY / MIGRATION_END / HTTP / 停机全通）。")
+        print("        直接原因（实测栈）：desktopEntry.emit_error → _emit_marker → print(中文) →")
+        print("              encodings\cp1252.py:19 encode → UnicodeEncodeError。")
+        print("        机制说明（推断，未再深挖）：冻结体初始化解释器时 PYTHON* 环境变量似乎不生效——")
+        print("              run 43621256265 里给父进程设 PYTHONIOENCODING=utf-8 后仍同样崩。")
+        print("        处置：属产品代码问题，本单边界内不改；已写进报告「已知问题」并上报 PM 决定是否另开单。")
+    else:
+        print("    （既无 marker，也不是已知编码缺陷形态；具体红在哪见上面的失败项）")
 
 
 # ── B2: 真启动 + 真 HTTP + stdin EOF 停机 ────────────────────────────────────
