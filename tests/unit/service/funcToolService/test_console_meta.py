@@ -213,3 +213,35 @@ def test_console_registered_as_basic():
     from service.agentService.toolRegistry import CATEGORY_CONFIG
 
     assert CATEGORY_CONFIG["console"] == ToolCategory.BASIC
+
+
+# ---------------------------------------------------------------------------
+# #218：重复选项的新语义必须**写进 help**（模型据此决定写法，不靠试错）
+# ---------------------------------------------------------------------------
+
+def test_help_summary_documents_repeat_option_semantics() -> None:
+    """`help` 摘要里必须写明「数组聚合 / 标量报错 / 布尔幂等」三条（#218 判据 3）。
+
+    钉住的是**可操作的信息**而不是某句固定措辞：数组型必须能看出「可重复 + 聚合」，
+    标量型必须出现新错误码 `duplicate_option`（模型据此改写成逗号形式），布尔开关
+    必须写明重复无害。三条缺一条，模型就会用错写法再撞错。
+    """
+    from service.funcToolService import consoleTool as ct
+
+    summary = ct.HELP_SUMMARY
+    assert "数组" in summary and "聚合" in summary, f"help 没写数组型可重复聚合：{summary}"
+    assert "duplicate_option" in summary, f"help 没写标量重复的新错误码：{summary}"
+    assert "布尔" in summary, f"help 没写布尔开关重复无害：{summary}"
+
+
+def test_help_detail_no_longer_says_only_the_last_wins() -> None:
+    """旧语义文案必须从 `task update` 的 help 里消失（翻案要落到模型可见面）。
+
+    只断「旧文案不在」还不够——空字符串也能让它通过，所以同时断新文案在。
+    """
+    from service.funcToolService import consoleTool as ct
+
+    detail = ct._help_text(["help", "task", "update"])["help"]
+    assert "只有最后一个生效" not in detail, f"#187-④ 的旧语义仍留在 help 里：{detail}"
+    assert "数组型选项可重复出现" in detail, f"新语义没写进 task update 的 help：{detail}"
+    assert "duplicate_option" in detail, f"help 没给出标量重复的错误码：{detail}"

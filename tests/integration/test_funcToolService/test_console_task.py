@@ -558,40 +558,129 @@ class TestConsoleTaskCommand(ServiceTestCase):
             "多值里既有合法又有非法时应整单拒绝、不改库（不能「能清的先清了」）"
         )
 
-    async def test_repeated_same_option_keeps_only_the_last(self):
-        """同名 option 给两次 ⇒ **只认最后一个**（裁定④要求钉住的「已记录行为」）。
+    async def test_repeated_option_by_kind_aggregates_errors_and_is_idempotent(self):
+        """重复选项的三向语义：数组聚合 / 标量报错 / 布尔幂等（#218 翻 #187 裁定④）。
 
-        这不是我们新引入的语义，而是 `_parse_options` 的既有实现（`options[name] = ...`
-        覆盖式赋值，`consoleParsing._parse_options`）。既然它会让前一个值**静默消失**，
-        就不能让它成为无人知晓的坑：help 里明写了，这里再用例钉住。
+        **用例沿革**：本条原名 `test_repeated_same_option_keeps_only_the_last`，是
+        #187-④ 钉住「同名 option 只认最后一个」的登记用例。Operator 2026-11-14 12:18
+        拍板翻案：数组型改为按序聚合，标量型改为**显式报错**（静默丢数据正是被翻掉的
+        行为）。用例**未删除**、断言**更强**——从「只验一条覆盖语义」变成三向：
 
-        判据形式：`--remove-field reviewer_id --remove-field title` ⇒ 只有 `title` 生效
-        ⇒ 服务层报 `invalid_clear_field` 且只提 `title`（若两个都生效，报错会同时提到
-        `reviewer_id` 才怪；更重要的是若第一个生效，任务会被撤销验收人）。
+        1. 数组型（`--remove-field` / `--status`）⇒ 按出现顺序聚合、去重保序，不再丢值；
+        2. 标量型（`--note`）⇒ `duplicate_option`，库不变（不许静默写后者）；
+        3. 布尔开关（`--open-only`）⇒ 幂等，重复不报错。
+
+        旧语义若残留（M1/M2 变异），第 1 或第 2 项必红。
         """
         from service.funcToolService import consoleTool as ct
 
-        # 解析层直接验：后给的覆盖先给的。
-        spec = cc.COMMAND_INDEX["task update"]
-        _positional, options, _src = ct.cp._parse_options(
-            spec, ["187", "--remove-field", "reviewer_id", "--remove-field", "title"]
+        # ---- ① 数组型：聚合 + 去重保序（解析层先钉住形状）----
+        update_spec = cc.COMMAND_INDEX["task update"]
+        _pos, options, _src = ct.cp._parse_options(
+            update_spec, ["187", "--remove-field", "reviewer_id", "--remove-field", "title"]
         )
-        assert options["remove-field"] == "title", (
-            f"同名 option 应只保留最后一个，实际 {options['remove-field']!r}"
+        assert options["remove-field"] == ["reviewer_id", "title"], (
+            f"数组型重复应聚合为两次出现的有序列表，实际 {options['remove-field']!r}"
+            "（若为 'title'，是 #187-④ 的旧覆盖语义回来了）"
+        )
+        ls_spec = cc.COMMAND_INDEX["task ls"]
+        _pos, ls_options, _src = ct.cp._parse_options(
+            ls_spec, ["--status", "DONE", "--status", "TODO", "--status", "DONE"]
+        )
+        assert ls_options["status"] == ["DONE", "TODO", "DONE"], (
+            f"聚合必须保序且不提前去重，实际 {ls_options['status']!r}"
+        )
+        # 去重保序由 `_split_csv` 一处负责；聚合出来的**每个元素**仍按 CSV 规则拆逗号，
+        # 否则 `--member a,b --member c` 里的 `a,b` 会被当成一个成员名（两个实现分叉）。
+        assert ct._split_csv(ls_options["status"]) == ["DONE", "TODO"]
+        assert ct._split_csv(["a,b", "c"]) == ["a", "b", "c"], (
+            "聚合后的元素没按 CSV 规则拆逗号"
         )
 
-        # 行为层再验一遍：真入口下只有 title 被当成待清字段 ⇒ 报它非法、库不变。
+        # 行为层：两次 `--remove-field reviewer_id` 聚合去重后仍是「撤销验收人」，不是丢弃。
         task = await self._make_task(reviewer_id=self.ids["rev_a"])
         result = await self._call(
-            f"task update {task.id} --remove-field reviewer_id --remove-field title"
+            f"task update {task.id} --remove-field reviewer_id --remove-field reviewer_id"
         )
-        assert result["success"] is False, f"野值 title 竟被接受：{result}"
-        # #189：枚举野值在 schema 层被拦，错误码为 `invalid_tool_args`；`title` 仍在消息里。
-        assert result["error_code"] == "invalid_tool_args"
-        assert "title" in result["message"]
+        assert result["success"] is True, f"数组型重复应聚合后正常执行：{result}"
         row = await self._reload(task.id)
-        assert row.reviewer_id == self.ids["rev_a"], (
-            "第一个 --remove-field 的值被静默丢掉了本应如此，但库不能因此把 reviewer_id 清掉"
+        assert row.reviewer_id is None, "聚合后 reviewer_id 未被清空"
+
+        # ---- ② 标量型：显式报错，不许静默覆盖 ----
+        scalar_task = await self._make_task(title="标量重复-不应被改")
+        scalar = await self._call(
+            f"task update {scalar_task.id} --note 第一次 --note 第二次"
+        )
+        assert scalar["success"] is False, f"标量型重复竟静默成功（旧覆盖语义）：{scalar}"
+        assert scalar["error_code"] == "duplicate_option", (
+            f"期望 duplicate_option，收到 {scalar.get('error_code')!r}"
+            f"（{scalar.get('message')!r}）"
+        )
+        assert "--note" in scalar["message"], f"报错没点出是哪个选项：{scalar['message']!r}"
+        assert "标量" in scalar["message"], f"报错没说清参数型别：{scalar['message']!r}"
+        unchanged = await self._reload(scalar_task.id)
+        assert unchanged is not None
+
+        # ---- ③ 布尔开关：幂等，重复不报错 ----
+        bool_result = await self._call(
+            f"task ls --assignee {self.ids['worker']} --open_only --open_only"
+        )
+        assert bool_result["success"] is True, f"布尔开关重复不该报错：{bool_result}"
+
+    async def test_repeated_array_option_two_distinct_values_reach_tool(self):
+        """`--status TODO --status DONE`（**两个不同值**）从真入口都到达工具（#218 判据 1）。
+
+        上一条的数组判据用的是两个**相同**值（去重后等于单值，只能证明「不丢」），
+        这一条用两个不同值把「聚合」与「只留最后一个」彻底分开：
+        旧语义（M1 变异）下只有 `DONE` 会传到 `list_tasks`，TODO 那条任务就查不到。
+        """
+        done = await self._make_task(status=TaskStatus.DONE, title="重复选项-done")
+        todo = await self._make_task(status=TaskStatus.TODO, title="重复选项-todo")
+        held = await self._make_task(status=TaskStatus.ON_HOLD, title="重复选项-hold")
+
+        result = await self._call(
+            f"task ls --status DONE --status TODO --assignee {self.ids['worker']}"
+        )
+        assert result["success"] is True, f"console 入口失败：{result}"
+        ids = {t["id"] for t in result["tasks"]}
+        assert done.id in ids and todo.id in ids, (
+            f"两次 --status 未聚合（旧覆盖语义只会命中 DONE），实收 {sorted(ids)}"
+        )
+        assert held.id not in ids, "ON_HOLD 不该出现在 --status DONE --status TODO 的结果里"
+
+    async def test_alias_and_real_name_count_as_the_same_option(self):
+        """别名与真名混写算**同一个**参数重复（#218 判据里的 M4）。
+
+        两个方向各验一次：
+        - 数组型混写（`--remove-field` + `--clear_fields`）⇒ 合并进同一个键后聚合，
+          解析结果里**只应出现一个键**；按原名分别计数会得到两个键、后一个把前一个
+          覆盖掉，聚合静默失效；
+        - 标量型混写（`--tz` + `--timezone`）⇒ `duplicate_option`，不许静默取后者。
+        """
+        from service.funcToolService import consoleTool as ct
+
+        update_spec = cc.COMMAND_INDEX["task update"]
+        _pos, options, _src = ct.cp._parse_options(
+            update_spec,
+            ["187", "--remove-field", "reviewer_id", "--clear_fields", "reviewer_id"],
+        )
+        assert list(options) == ["remove-field"], (
+            f"别名与真名应归一到同一个键，实际键集合 {list(options)!r}"
+        )
+        assert ct._split_csv(options["remove-field"]) == ["reviewer_id"]
+
+        time_spec = cc.COMMAND_INDEX["time get"]
+        with pytest.raises(ct.ConsoleError) as exc:
+            ct.cp._parse_options(time_spec, ["--tz", "UTC", "--timezone", "Asia/Shanghai"])
+        assert exc.value.code == "duplicate_option", (
+            f"别名混写标量应报 duplicate_option，实际 {exc.value.code!r}"
+        )
+
+        # 真入口：`--tz` 与 `--timezone` 混写同样被拒（不是只在解析层单测里成立）。
+        via_entry = await self._call("time get --tz UTC --timezone Asia/Shanghai")
+        assert via_entry["success"] is False
+        assert via_entry["error_code"] == "duplicate_option", (
+            f"真入口没拦住别名混写的标量重复：{via_entry}"
         )
 
     # ==================================================================

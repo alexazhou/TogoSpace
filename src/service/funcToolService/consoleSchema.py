@@ -172,38 +172,96 @@ def _first_clause(description: Any) -> str:
     return text
 
 
+def _kebab(name: str) -> str:
+    """参数真名（下划线式）→ help 展示形态（kebab 式，#221 需求 3）。
+
+    与 `consoleCommands.to_kebab` 同规则（两边各一份是因为包内 import 方向：
+    consoleCommands → consoleSchema 不能反过来模块级依赖，否则成环）。结构判据
+    （test_console_kebab_option.py）会把两份实现对着钉死：同输入必须同输出。
+    """
+    kebab = name.replace("_", "-")
+    if "--" in kebab or kebab.startswith("-") or kebab.endswith("-"):
+        raise ValueError(f"kebab 转换产生非法选项形态：{name!r} -> {kebab!r}")
+    return kebab
+
+
+def _shape_note(kind: str) -> str:
+    """按类型类别给「这行参数在命令行上怎么写」的形态标注（#219 需求 2）。
+
+    为什么只标 array / object：string / integer / boolean 的形态已经由
+    `<kind>` 或无值开关本身说明了，再注一遍是噪音；而 array / object 的
+    传参形态有真实的分叉经验 —— 模型常把 JSON 数组塞给 CSV 语义的选项
+    （`--member_names '["a","b"]'` 被拆坏，清单 §A1），也常在标量上用
+    CSV 写法（#219 D2：对 integer/object 不可执行）。help 是模型选写法
+    的依据，形态必须写在参数行上、不能只写在实现里。
+
+    文案须与解析行为一致：数组型逗号/JSON/重复三种写法等价
+    （consoleTool._split_option_values），object 只收 JSON object 字面量。
+    """
+    if kind == "array":
+        return "（形态：CSV（a,b）、JSON 数组（[\"a\",\"b\"]）或重复出现，三种写法等价；复杂结构建议 --from payload）"
+    if kind == "object":
+        return "（形态：JSON object（{\"k\":\"v\"}）；复杂结构建议 --from payload）"
+    return ""
+
+
 def describe_param(
     name: str,
     prop: dict,
     *,
     required: bool,
     aliases: tuple[str, ...] = (),
+    positional_label: str = "",
 ) -> str:
     """把一个参数渲染成 help 里的一行（名字 / 类型 / 别名 / 必填 / 一句说明）。
 
     `aliases` 是该参数的**短别名**（`--kw` 之于 `title_keyword`）。别名必须显式标注：
     否则 help 里只出现真名，照旧习惯敲 `--kw` 的人会以为它不存在；反过来若 help 里
     只写别名，模型又会以为工具参数就叫那个名字。
+
+    `positional_label` 是「该参数在 console 命令行上是**位置参数**」的标注（#220 需求 2）。
+    为什么必须有：locator 参数同时是 schema 参数（如 `dept get` 的 `--dept_id`），照着
+    help 敲 `dept get --dept_id 7` 会被 `invalid_argument_count` 拒（清单 §A7 实测第一次
+    使用必踩）。标注文案由调用方（命令表派生，含命令名与等价写法）传入，本函数只负责
+    单点渲染 —— 文案里说的形态必须与解析行为一致（只说清、不放宽，A7 建议 2 不做）。
     """
     kind = param_kind(prop)
     marker = "必填" if required else "可选"
-    head = f"--{name} <{kind}>" if kind != "boolean" else f"--{name}"
+    # #221 需求 3：help 参数行只展示 kebab 形态（--title-keyword），旧下划线名
+    # 是兼容期别名、解析层接受但**不在 help 展示**（包括不混排在别名标注里）。
+    head = f"--{_kebab(name)} <{kind}>" if kind != "boolean" else f"--{_kebab(name)}"
     if aliases:
         head += "（别名 " + " / ".join("--" + alias for alias in aliases) + "）"
+    shape = _shape_note(kind)
+    positional = f"（{positional_label}）" if positional_label else ""
     note = _first_clause(prop.get("description"))
     tail = f"（{marker}）" + (f" {note}" if note else "")
-    return f"{head}{tail}"
+    return f"{head}{shape}{positional}{tail}"
 
 
-def describe_tool_params(tool_name: str, *, aliases: dict[str, tuple[str, ...]] | None = None) -> list[str]:
+def describe_tool_params(
+    tool_name: str,
+    *,
+    aliases: dict[str, tuple[str, ...]] | None = None,
+    positional_labels: dict[str, str] | None = None,
+) -> list[str]:
     """某工具全部参数的 help 行（schema 顺序）；schema 取不到返回空列表。
 
     `aliases` 是「真名 → 别名元组」的反向映射（命令行才有别名，schema 里没有），
-    由命令表按 `CommandSpec.key` 提供。
+    由命令表按 `CommandSpec.key` 提供。`positional_labels` 同理：真名 → 「位置参数」
+    标注文案（#220），由 consoleTool 按命令表派生；schema 层不知道命令表，
+    所以由调用方传进来而不是在这里再查一份。
     """
     alias_map = aliases or {}
+    label_map = positional_labels or {}
     required = set(required_params(tool_name))
     return [
-        describe_param(name, prop, required=name in required, aliases=alias_map.get(name, ()))
+        describe_param(
+            name,
+            prop,
+            required=name in required,
+            aliases=alias_map.get(name, ()),
+            positional_label=label_map.get(name, ""),
+        )
         for name, prop in param_schemas(tool_name).items()
     ]
