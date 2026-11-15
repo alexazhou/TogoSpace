@@ -293,6 +293,26 @@ def _secret_values(credentials: dict[str, Any] | None) -> list[str]:
     return secrets
 
 
+def _secret_mask_forms(secrets: list[str]) -> list[str]:
+    """打码靶子全集 = 原始值 + **repr 转义形态**（38 二轮 F6）。
+
+    值经 `repr` / `str(list)` 渲染进异常文案或日志时（如上游回显 argv、
+    `f"...argv={argv}"`），`\\` → `\\\\`、引号按分隔符规则改写，明文串不再
+    **字面**出现 ⇒ `_mask_deep` 的精确子串匹配只搜原始值会漏，留下可还原明文。
+    repr 形态由 Python 对该值确定性生成（分隔符选择随值内容而定），把两种形态
+    都列为 replace 靶子，即同时覆盖「值直接拼进文本」与「值经 repr 渲染进文本」
+    两类出口；判据对**原始 / repr / 去转义（逐轮）三形态**全搜（任一命中即失败）。
+    """
+    forms: list[str] = []
+    for value in secrets:
+        if value not in forms:
+            forms.append(value)
+        escaped = repr(value)[1:-1]
+        if escaped != value and escaped not in forms:
+            forms.append(escaped)
+    return forms
+
+
 def _mask_deep(value: Any, secrets: list[str]) -> Any:
     """递归打码：str 里出现的任何凭证明文值替换为 `***`（只打我们自己的靶子）。"""
     if not secrets:
@@ -467,9 +487,17 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
             "stderr": _truncate(stderr.getvalue())[0],
         }
     except Exception as exc:  # noqa: BLE001 —— 任何异常都转结构化失败，不往上冒
-        # 出口打码（#277 F2）：`%r(exc)` 可能带上游回显的完整 argv（明文凭证），
-        # 日志出口必须自己打码（F2 判据：异常日志 0 命中明文）。
-        logger.warning("mcp2cli 调用异常: %r", _mask_deep(repr(exc), secrets or []))
+        # 出口打码（#277 F2/F6）：打码必须作用在**日志最终输出的形态**上。
+        # 不用 `%r`+先 repr：repr 先转义（' → \'、\ → \\、换行/制表同理），明文串
+        # 不再字面出现 ⇒ `_mask_deep` 的精确子串匹配落空，日志留下**可还原明文**
+        # （38 二轮 F6 实测：`sk-ab'cd-…` ⇒ `sk-ab\'cd-…`，去反斜杠即还原）。
+        # `%s` 直接插值、输出前无再变换 ⇒ `_mask_deep(str)` 的结果就是最终形态；
+        # 靶子含 repr 形态（_secret_mask_forms），连异常文案里 repr 渲染过的
+        # argv（上游回显）也一并打掉。
+        logger.warning(
+            "mcp2cli 调用异常: %s",
+            _mask_deep(f"{type(exc).__name__}: {exc}", secrets or []),
+        )
         return {
             "success": False,
             "error_code": "mcp2cli_error",
@@ -552,7 +580,9 @@ async def call_mcp(
     返回体（含 argv / stderr / raw_excerpt / result 嵌套）里的明文值一律替换为
     `***`（`_mask_deep`）——旧「先放引用、日志之后再解析」的时序保护已删。
     """
-    secrets = _secret_values(credentials)
+    # 出口打码（#277 F2/F6）：靶子=原始值+repr 转义形态（值经 repr 渲染进文本的
+    # 出口靠原始值匹配不到，见 _secret_mask_forms）。
+    secrets = _secret_mask_forms(_secret_values(credentials))
     try:
         argv = build_argv(
             kind=kind, target=target, action=action, tool=tool, args=args, extra=extra,

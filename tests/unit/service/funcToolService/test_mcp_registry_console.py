@@ -44,6 +44,33 @@ from util import llmApiUtil
 
 _SECRET = "sk-super-secret-value-should-never-log"
 _VAR = "GITHUB_TOKEN"
+#: F6 靶值：含 `'` 与 `\` —— repr 转义后明文串不再字面出现，「只搜字面量」会假绿。
+_TRICKY = "sk-a'b\\cd-1234567890"
+
+
+def _repr_form(value: str) -> str:
+    """值在 repr 输出里的形态（去外层引号）：' → \\'、\\ → \\\\。"""
+    return repr(value)[1:-1]
+
+
+def _unescape(text: str) -> str:
+    """日志文本的去转义形态（判据第三形态）。
+
+    逐轮去转义至稳定（最多 4 轮）：「先 repr 再打码」型缺陷会把明文转义后还可能
+    被 `%r` **再转义一层**（MUT-11 实测：单轮去转义搜不到 ⇒ 假绿）。`\\\\` 先收敛、
+    再收 `\\'`，两规则反复套用直到文本不再变化。
+    """
+    for _ in range(4):
+        nxt = text.replace("\\\\", "\\").replace("\\'", "'")
+        if nxt == text:
+            break
+        text = nxt
+    return text
+
+
+def _secret_forms(value: str) -> tuple[str, str]:
+    """反向判据必搜的形态：原始值 + repr 转义形态（任一命中即失败）。"""
+    return (value, _repr_form(value))
 
 
 # ---------------------------------------------------------------------------
@@ -534,15 +561,19 @@ async def test_basic_agent_can_list_registry(mcp_db, loaded_tools):
 async def test_exception_log_exit_masks_secret(
     mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, monkeypatch, caplog
 ):
-    """#277 F2（38 打回）：异常日志出口 `logger.warning("mcp2cli 调用异常: %r", exc)`。
+    """#277 F2+F6（38 二轮打回）：异常日志出口的打码必须在**最终输出形态**上。
 
     上游把完整 argv 回显进异常文案是最常见泄漏形态：返回体走了 `_mask_deep`
     是干净的，但这条 warning 在 `_run_argv_sync` **内部**、外层打码管不到。
-    判据：同一次调用里，异常日志行**存在**（正向取证，防假绿）且明文 0 命中。
+    F6 窄口径：先 repr 再打码时，值里的 `'`/`\\` 被转义，字面匹配落空 ⇒ 日志
+    留可还原明文。判据（38 定）：同一次调用里，异常日志行**存在**（正向取证），
+    且对日志文本的**原始、repr 转义、去转义三形态**全部 0 命中——只搜字面量会假绿。
+    本用例同时钉住两条日志出口的次序：argv info 行（先打码后 repr，掩码后无明文
+    可转义）与异常 warning 行（打码=最终形态）。
     """
     await _register_server(
         target="https://mcp.example.com/mcp",
-        credentials={"headers": {"Authorization": _SECRET}},
+        credentials={"headers": {"Authorization": _SECRET, "X-Api-Key": _TRICKY}},
     )
 
     def _explode(argv: list[str]) -> None:
@@ -555,12 +586,16 @@ async def test_exception_log_exit_masks_secret(
     assert body["error_code"] == "mcp2cli_error", body
 
     log_text = "\n".join(rec.getMessage() for rec in caplog.records)
-    # 正向：这条异常日志确实写了（否则 0 命中只是「没记」）
-    assert "mcp2cli 调用异常" in log_text, log_text
     assert "--auth-header" in log_text, log_text  # argv 结构可见
-    # 反向：明文值在日志里 0 命中（F2 判据）
-    assert _SECRET not in log_text, log_text
-    assert f"Authorization:{_SECRET}" not in json.dumps(body), body
+    # 反向（F6 判据）：原始值 + repr 形态，在日志原文与去转义文本里都 0 命中
+    for value in (_SECRET, _TRICKY):
+        for form in _secret_forms(value):
+            assert form not in log_text, (value, form, log_text)
+            assert form not in _unescape(log_text), (value, form, _unescape(log_text))
+    # 返回体同样三形态 0 命中
+    for value in (_SECRET, _TRICKY):
+        for form in _secret_forms(value):
+            assert form not in json.dumps(body), (value, form, body)
 
 
 @pytest.mark.asyncio
