@@ -6,8 +6,10 @@
 注册表**不分 team**（Operator：「mcp 录入之后，不需要分团队，先设计成全局的」）；
 `created_by` 仅审计。`enable=0` 的条目禁用但保留（ls 仍可见），工具列表不出现。
 
-`credentials` 只存**引用**（`env:VAR` 形态），永不存明文（设计稿 §4：明文入 DB 不成立，
-日志回显与 Agent 主动读两条路径都与部署形态无关）。`created_by` 仅审计。
+`credentials` **原样存值**（#277，Operator 2026-11-15 20:21 需求变更，覆盖 #273 的
+「只存引用」）：明文直接入库，无前缀校验。脱敏全部改为**展示面**：`to_json()`、
+`ls` 摘要、日志与异常文案在输出前打码（保留少量前缀便于识别、主体 `***`）。
+`created_by` 仅审计。
 
 ## 脱敏为什么放在模型层
 
@@ -26,9 +28,8 @@ from .base import DbModelBase, JsonField
 #: 「形如长 token 的段」（设计稿 §4.5-2）：连续 token 字符 ≥ 32 位即视为疑似内嵌凭证。
 _LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9_\-]{32,}")
 
-#: 引用前缀白名单（设计稿 §4.3 B1）。首版只实现 `env:`；`file:`/`keychain:` 校验在
-#: service 层报「未实现」，这里只负责展示面打码。
-_CREDENTIAL_REF_PREFIXES = ("env:", "file:", "keychain:")
+#: 凭证值展示时保留的识别前缀上限（#277：少量前缀便于识别、主体打码）。
+_CREDENTIAL_VISIBLE_PREFIX = 8
 
 
 def mask_target(target: str) -> str:
@@ -46,13 +47,19 @@ def mask_target(target: str) -> str:
 
 
 def mask_credential_value(value: str) -> str:
-    """单个凭证值的展示形态（设计稿 §4.5-1）：`env:VAR` 原样露引用；其余打码。"""
+    """单个凭证值的展示形态（#277）：保留识别前缀 + `***`（值已明文存储）。
+
+    识别前缀取第一个空格/冒号前的 token（如 `Bearer`、`sk-TESTO`），上限 8 字符；
+    值不比前缀长（短值）整段打码，不露任何完整值。
+    """
     text = str(value or "")
-    if text.startswith("env:"):
-        return text  # 引用原文允许展示
-    if text.startswith("file:") or text.startswith("keychain:"):
-        return f"{text.split(':', 1)[0]}:***"
-    return f"{text.split(':', 1)[0]}:***" if ":" in text else "***"
+    if not text:
+        return "***"
+    token = re.split(r"[\s:]", text, maxsplit=1)[0]
+    prefix = token[:_CREDENTIAL_VISIBLE_PREFIX]
+    if len(text) <= len(prefix):
+        return "***"
+    return f"{prefix}***"
 
 
 def mask_credentials_for_display(credentials: dict) -> dict:
@@ -72,7 +79,7 @@ class GtMcpServer(DbModelBase):
     kind:        str   = peewee.CharField(default="mcp")   # openapi/mcp/mcp_stdio/graphql
     target:      str   = peewee.TextField()
     note:        str   = peewee.TextField(default="")
-    credentials: dict  = JsonField(default=dict)           # {"headers":{名:引用},"env":{变量:引用}}；空凭证统一 {}
+    credentials: dict  = JsonField(default=dict)           # {"headers":{名:值},"env":{变量:值}}；#277 起原样存值（明文）
     enable:      int   = peewee.IntegerField(default=1)    # 1=启用；0=禁用（禁用≠删除，ls 仍可见；#273 新增）
     created_by:  int   = peewee.IntegerField(default=0)    # 登记的 agent_id，仅审计（注册表全局共享，不做隔离）
 
@@ -81,7 +88,7 @@ class GtMcpServer(DbModelBase):
         indexes = ((("name",), True),)
 
     def to_json(self) -> dict:
-        """脱敏序列化（设计稿 §4.5）：任何拿到模型对象转 JSON 的路径都不泄值。"""
+        """脱敏序列化：任何拿到模型对象转 JSON 的路径都不泄**完整**值（保留前缀掩码）。"""
         data = super().to_json()
         data["target_masked"] = mask_target(str(data.get("target") or ""))
         data.pop("target", None)

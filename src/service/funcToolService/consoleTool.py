@@ -176,28 +176,29 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     # 必须明写。#273：注册表改全局（不分 team）、alias 改 name、新增 enable。
     "mcp add": (
         "登记到全局注册表（不分 team），非创建业务实体（动作词 add 而非 create 是有意的）。"
-        "登记后所有团队都可用 `mcp call <name>` 复用；写入需 leader/根主管权限（普通成员会收到 admin_denied）。",
+        "登记后所有团队都可用 `mcp call <name>` 复用；写入不要求管理员权限（#277）。",
         "kind 默认 mcp（注意：`mcp call` 直接调用的默认是 openapi，两者有意不同；"
         "spec 文件请显式 --kind openapi）。stdio 启动命令含空格必须加引号，如 "
         "--target \"npx -y @browserbasehq/mcp\"。",
         "默认 insert-only：name 已存在会报 mcp_name_exists，覆盖必须显式 --overwrite true。"
-        "凭证只收引用（如 --credentials '{\"headers\":{\"Authorization\":\"env:GITHUB_TOKEN\"}}'），不接受明文。",
+        "凭证原样存值（#277：明文直接入库，不再要求 env: 引用；如 --credentials "
+        "'{\"headers\":{\"Authorization\":\"Bearer sk-...\"}}'）；查看面只见掩码。",
     ),
     "mcp rm": (
         "只按 name 精确删（不支持按 target 或前缀匹配）；name 不存在报 mcp_name_not_found，不静默成功。"
-        "返回体带被删条目的脱敏摘要（target 已打码）。",
+        "返回体带被删条目的脱敏摘要（target/凭证已打码）。",
     ),
     "mcp enable / mcp disable": (
         "启用/禁用一个登记项（禁用≠删除：`mcp ls` 仍列出并标注 enable=false；"
         "禁用后 `mcp call` 报 mcp_server_disabled；注册表本身不进 Agent 工具列表）。"
-        "用法：mcp enable ctx7 / mcp disable ctx7；写入需 leader/根主管权限。",
+        "用法：mcp enable ctx7 / mcp disable ctx7；写入不要求管理员权限（#277）。",
     ),
     "mcp ls": (
         "无参 = 列全局注册表（忽略一切选项，返回 servers/count；禁用条目仍列出并标注 enable=false）；"
         "有参 = 对 name 或完整 target 列工具清单（name 命中用注册项的 target/kind，未命中原样透传）。",
         "有参列的是 openapi spec 时：⚠️ 若 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发）；"
         "此时请改用完整 URL 的 target，或在该 spec 里补 servers。",
-        "count 超过 20 时返回体会建议收窄；写入需 leader/根主管权限。",
+        "count 超过 20 时返回体会建议收窄；写入不要求管理员权限（#277）。",
     ),
     "task ls": (
         "只列未完结任务（要含已完结请用 --status 显式列出，如 --status DONE,CANCELLED）。",

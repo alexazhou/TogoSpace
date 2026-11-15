@@ -762,7 +762,12 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 无结构落地；三处：`set_mcp_server_enabled` / `mcpRegistryService.set_enabled` /
 #: console help `mcp enable/disable`），改为如实写「禁用的落地语义=`mcp_call` 报
 #: `mcp_server_disabled`」。工具数 44、参数数 139 不变。
-BASELINE_TEXT_DIGEST = "adbf048afa58a65a5224edab117a614e8262eb829f9492b35401ff1ea45e8f49"
+#:
+#: #277 重算（`adbf048a…` → 见下）：凭证改**原样存值**（Operator 20:21 需求）——
+#: `save_mcp_server` 的 `credentials` 说明改写（不再要求 env: 引用、明文直接入库、
+#: 查看面只见掩码）；`mcp_call` 注册表解析段说明同步（凭证值明文注入、出口打码）。
+#: 工具数 44、参数数 139 不变。
+BASELINE_TEXT_DIGEST = "39e8272abef7f5e4a7a292367a71dbc531065a1f91f277e3ed593819dba705e1"
 
 
 def _text_digest() -> tuple[str, int, int]:
