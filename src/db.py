@@ -25,6 +25,51 @@ class Migration:
     applied_at: str | None = None
 
 
+class DatabaseAheadOfCodeError(RuntimeError):
+    """数据库比当前代码新：账本里存在本代码没有的迁移（#270）。
+
+    为什么必须 fail fast：#270 的真实事故是 `0022` 已入库、但 5 小时里跑的是旧代码，
+    那段时间写入的任务缺少节点链与 `current_owner_id`，界面用 fallback 合成假节点链，
+    把「数据不存在」掩盖成「看起来有」。所以「库比代码新」时宁可拒绝启动，
+    也不能让旧代码继续往一个新结构的库里写数据。
+
+    属性：`missing` 列出「库中已执行、当前代码缺失」的迁移名（已排序），
+    `code_latest` / `db_latest` 分别给出代码侧与库侧的最新迁移，便于一眼定位差距。
+    """
+
+    def __init__(
+        self,
+        missing: list[str],
+        *,
+        code_latest: str | None,
+        db_latest: str | None,
+        db_path: str | Path = "",
+    ) -> None:
+        self.missing = sorted(missing)
+        self.code_latest = code_latest
+        self.db_latest = db_latest
+        self.db_path = str(db_path)
+        super().__init__(self._build_message())
+
+    def _build_message(self) -> str:
+        missing = "、".join(self.missing)
+        code_latest = self.code_latest or "无"
+        db_latest = self.db_latest or "无"
+        return (
+            f"数据库比当前代码新，拒绝启动：库中已执行但当前代码缺失的迁移 = [{missing}]；"
+            f"当前代码最新迁移 = {code_latest}，数据库最新迁移 = {db_latest}"
+            f"{f'（{self.db_path}）' if self.db_path else ''}。\n"
+            "这说明该库曾被**更新的代码**迁移过，用当前（较旧）的代码连它会写出不完整的数据。\n"
+            "请任选一种方式自救：\n"
+            "  1) 升级到包含这些迁移的代码后再启动（git pull / 切到最新主干）；\n"
+            "  2) 若你在较旧的 worktree 上开发，改用独立数据目录（设置 STORAGE_ROOT 指向自己的目录），"
+            "不要与共享库共用；\n"
+            "  3) 确认这些迁移确实该丢弃时，走人工评审后重建数据库。\n"
+            "禁止：删除 `_migrations` 账本记录、手工回退表结构、或用旧版本直接读写该库——"
+            "那会让数据结构与代码再次不一致。"
+        )
+
+
 def resolve_db_path(db_path: str) -> Path:
     path = Path(db_path)
     if path.is_absolute():
@@ -88,6 +133,45 @@ def fetch_applied_migrations(conn: sqlite3.Connection) -> list[Migration]:
 def _is_ignorable_migration_error(exc: sqlite3.OperationalError) -> bool:
     msg = str(exc).lower()
     return "duplicate column name" in msg or "already exists" in msg
+
+
+def missing_migrations_in_code(
+    applied_names: set[str] | list[str],
+    code_names: list[str],
+) -> list[str]:
+    """返回「库中已执行、当前代码缺失」的迁移名（#270）。
+
+    反向差集：`applied - code`。反过来（`code - applied`）是待补执行的迁移，
+    那是既有行为（自动补执行），不在本函数语义内。
+    """
+    code_set = set(code_names)
+    return sorted(name for name in applied_names if name not in code_set)
+
+
+def _ensure_db_not_ahead_of_code(
+    applied_names: set[str],
+    code_names: list[str],
+    db_path: Path,
+) -> None:
+    """库比代码新 ⇒ 直接拒绝，不写库、不跳过（#270）。
+
+    放在「应用待执行迁移」之前：拒绝启动时库必须保持原样，一个字节都不动。
+    """
+    missing = missing_migrations_in_code(applied_names, code_names)
+    if not missing:
+        return
+    logger.error(
+        "数据库比当前代码新，拒绝启动：缺失迁移 = %s（代码最新=%s，库最新=%s）",
+        missing,
+        code_names[-1] if code_names else "无",
+        max(applied_names) if applied_names else "无",
+    )
+    raise DatabaseAheadOfCodeError(
+        missing,
+        code_latest=code_names[-1] if code_names else None,
+        db_latest=max(applied_names) if applied_names else None,
+        db_path=db_path,
+    )
 
 
 def _rollback_if_in_transaction(conn: sqlite3.Connection) -> None:
@@ -191,6 +275,15 @@ def migrate_database(
         ensure_migrations_table(conn)
         applied_names = {m.name for m in fetch_applied_migrations(conn)}
         migration_files = list_migration_files(resolved_migrations_dir)
+
+        # ── 闸门（#270）：库比代码新 ⇒ 拒绝启动，且在应用任何迁移之前判 ──────────
+        # 反向差集非空意味着这个库被更新的代码迁过；旧代码继续跑会把数据写成
+        # 「结构新、写入旧」的半残状态（#270 的真实事故），所以这里 fail fast。
+        _ensure_db_not_ahead_of_code(
+            applied_names,
+            [p.name for p in migration_files],
+            resolved_db_path,
+        )
 
         pending = [p for p in migration_files if p.name not in applied_names]
         if up_to is not None:
@@ -412,6 +505,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "DatabaseAheadOfCodeError",
     "Migration",
     "check_database_initialized",
     "clear_database",
@@ -419,4 +513,5 @@ __all__ = [
     "main",
     "migrate_database",
     "migration_status",
+    "missing_migrations_in_code",
 ]

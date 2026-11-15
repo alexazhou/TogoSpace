@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -190,8 +191,13 @@ def test_0018_rolls_back_entirely_when_last_statement_fails(tmp_path: Path) -> N
     _seed(db_path)
     before = _snapshot(db_path)
 
+    # 目录必须是**完整**迁移集合的副本、只把 0018 换成坏脚本（#270 起启动校验会把
+    # 「库里有、目录里没有」的迁移判为「库比代码新」并拒绝启动，子集目录会撞上）；
     broken_dir = tmp_path / "broken_migrations"
     broken_dir.mkdir()
+    for migration in MIGRATIONS_DIR.iterdir():
+        if migration.is_file():
+            shutil.copy(migration, broken_dir / migration.name)
     (broken_dir / MIGRATION_0018).write_text(
         _make_broken_sql(), encoding="utf-8"
     )

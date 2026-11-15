@@ -26,7 +26,7 @@ from service import (
 import service.skillService as skillService
 import appPaths
 import route
-from db import has_pending_migrations, migrate_database
+from db import DatabaseAheadOfCodeError, has_pending_migrations, migrate_database
 from version import __version__
 from dal.db import gtTeamManager
 
@@ -261,5 +261,11 @@ if __name__ == "__main__":
     
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
     signal.signal(signal.SIGINT, _handle_shutdown_signal)
-    
-    asyncio.run(main(config_dir=args.config_dir, port=args.port))
+
+    try:
+        asyncio.run(main(config_dir=args.config_dir, port=args.port))
+    except DatabaseAheadOfCodeError as exc:
+        # 库比代码新（#270）：拒绝启动，不进入服务状态。用非 0 退出码 + 可读信息，
+        # 而不是让它掉进通用异常里变成一段 traceback（信息在、但不便于人看）。
+        print(f"[TOGO] ERROR {exc}", file=sys.stderr)
+        sys.exit(2)
