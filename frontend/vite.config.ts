@@ -141,6 +141,7 @@ export default defineConfig({
       '/config/skills/': createApiProxy(backendTarget),
       '/config/tools/': createApiProxy(backendTarget),
       '/config/quick_init.json': createApiProxy(backendTarget),
+      '/mcp/': createApiProxy(backendTarget),
       '/system/status.json': createApiProxy(backendTarget),
       '/system/check_update.json': createApiProxy(backendTarget),
       '/system/update_config.json': createApiProxy(backendTarget),
