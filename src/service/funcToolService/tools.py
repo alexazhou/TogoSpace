@@ -138,9 +138,10 @@ async def mcp_call(
     时**不下发 `result`**，只给 `raw_excerpt` + `original_chars`，需缩小查询范围后重试。
     失败时 `error_code` 取 `mcp_invalid_kind` / `mcp_invalid_target` / `mcp_missing_tool` /
     `mcp_invalid_action` / `mcp_invalid_extra` / `mcp_unsupported_extra` /
-    `mcp_call_timeout` / `mcp2cli_exit` / `mcp2cli_error` / `mcp2cli_empty_output` /
-    `mcp2cli_bad_json`，其中 `mcp2cli_exit` 说明参数或目标有误（附 `stderr`），可直接
-    按提示改参数重试。
+    `mcp_call_timeout` / `mcp2cli_exit` / `mcp2cli_error` / `mcp2cli_empty_output`，
+    其中 `mcp2cli_exit` 说明参数或目标有误（附 `stderr`），可直接按提示改参数重试。
+    （`mcp2cli_bad_json` 自 #282 起**不再产生**：非 JSON 输出按退出码判成败；#284 已从
+    本列举中移除，勿再据此写用例。）
 
     **注册表解析（#273，全局注册表）**：target 若命中全局 MCP 注册表的 name
     （`mcp add` 登记），则自动替换为注册项的 target/kind，并注入其凭证值
