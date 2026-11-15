@@ -162,6 +162,10 @@ async def mcp_call(
             `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql`
             生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）；
             `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。
+            **不支持 session 开关**：`--session` / `--session-start` / `--session-stop` /
+            `--session-list` 一律不可用——它们依赖 mcp2cli 起会话 daemon（`sys.executable -c`），
+            而打包产物里没有 Python 解释器 ⇒ 会话起不来；传了直接给 `mcp_unsupported_extra`，
+            不要重试。每次 `mcp call` 直连即可，调用功能不受影响。
     """
     # ---- 注册表解析（#273：唯一插入点；`mcp ls <name>` 经 list_mcp_servers 复用本入口）----
     registry_name: str | None = None
@@ -229,6 +233,18 @@ async def mcp_call(
         config=config,
         protocol=protocol,
     )
+    # #281 P4：按默认 `openapi` 解析 http(s) URL 失败时，提示「若目标是 MCP server，
+    # 请加 --kind mcp」。只在**确实可能踩默认值差异**时加：未命中注册表（命中则 kind
+    # 取自注册项、不会踩）、kind 仍是默认 openapi、target 是 http(s) URL、且已失败。
+    # 不新增错误码、不改原 message，只追加一段固定示例。
+    if (
+        not result.get("success")
+        and not resolved_from_registry
+        and kind == _MCP_CALL_DEFAULT_KIND
+        and _looks_like_http_url(target)
+    ):
+        base = str(result.get("message") or "").rstrip()
+        result["message"] = f"{base}{MCP_KIND_SUGGESTION}" if base else MCP_KIND_SUGGESTION.lstrip("\n")
     # 恒出现（沿 1337 附加判据 3）：命中 true + name 字段，未命中恒 false；不做条件字段。
     result["resolved_from_registry"] = resolved_from_registry
     if registry_name is not None:
@@ -245,6 +261,37 @@ def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:
 #: `mcp_call` 签名的 kind 默认值（#224 kind 冲突判定用它当「缺省」标记——缺省与显式
 #: 同值在签名层不可区分，设计稿 §3.6 已承认）。
 _MCP_CALL_DEFAULT_KIND = "openapi"
+
+#: `mcp ls` 无参时的固定提示（#281 P3）。一段话**同时覆盖「有配置 / 无配置」**两种状态
+#: —— 这正是 Operator 02:12 否掉动态拼装的理由之一：没有任何 server 时拼不出真实名称。
+MCP_LS_HINT: str = (
+    "mcp ls 列出已配置的 MCP server。看某个 server 的工具清单：mcp ls <名称>。\n"
+    "还没有 server 时先登记，例如：\n"
+    "  mcp add --name ctx7 --kind mcp --target https://mcp.context7.com/mcp"
+)
+
+#: `mcp ls <名称>` 有参时的固定调用模板（#281 P5）：`--tool` 取返回项里的 `name` 字段，
+#: `--args` 的键名抄该工具的 `parameters`。不按 parameters 生成骨架（那是动态拼装）。
+MCP_LS_CALL_HINT: str = (
+    "调用工具：mcp call <名称> --tool <工具名> --args '{\"参数名\":\"值\"}'"
+    "   （--tool 取上面的 name 字段，参数名见各工具的 parameters）"
+)
+
+#: `mcp call` / `mcp ls <URL>` 按默认 `openapi` 解析失败时的 kind 提示（#281 P4）：
+#: `mcp ls` 与 `mcp call` 的默认 kind 不同（前者 mcp、后者 openapi），直接传 URL 时
+#: 最容易踩到。固定两步示例，不解析用户输入。
+MCP_KIND_SUGGESTION: str = (
+    "\n若目标是 MCP server，请加 --kind mcp：\n"
+    "  mcp ls <URL> --kind mcp\n"
+    "  mcp call <URL> --kind mcp --tool <工具名> --args '{\"键\":\"值\"}'"
+)
+
+
+def _looks_like_http_url(target: str) -> bool:
+    """target 是否是 http(s) URL（#281 P4 的触发条件之一，纯字面判断）。"""
+    text = str(target or "").strip().lower()
+    return text.startswith("http://") or text.startswith("https://")
+
 
 
 async def save_mcp_server(
@@ -364,7 +411,9 @@ async def list_mcp_servers(
         tool: （有参分支）预留透传，见 `mcp_call`。
         args: （有参分支）预留透传，见 `mcp_call`。
         kind: （有参分支）来源类型；name 命中时以注册项为准。
-        extra: （有参分支）透传 mcp2cli 全局开关，见 `mcp_call`。
+        extra: （有参分支）透传 mcp2cli 全局开关，见 `mcp_call`。**不支持 session 开关**
+            （`--session` / `--session-start` / `--session-stop` / `--session-list`）：
+            依赖 mcp2cli 起会话 daemon，打包产物无 Python 解释器 ⇒ 起不来，传了直接拒。
     """
     name = str(name_or_target or "").strip()
     if not name:
@@ -377,6 +426,9 @@ async def list_mcp_servers(
             "servers": servers,
             "count": len(servers),
             "resolved_from_registry": False,
+            # #281 P3：无参时给「下一步」。固定文案，有/无配置同一段（有配置的人看
+            # 第一句就知道怎么下钻，没配置的人看第二句就知道怎么登记）。
+            "hint": MCP_LS_HINT,
         }
         if len(servers) > 20:
             # 沿设计稿 T2：条目超过 20 条时建议收窄（不改任何条款，只加一句提示）。
@@ -388,7 +440,7 @@ async def list_mcp_servers(
 
     # 有参分支**必须真委托 mcp_call**：--tool/--args/--extra 若「接受但忽略」属静默
     # 无效（比报错更坏）；name 解析也因此天然复用同一条 resolve_name。
-    return await mcp_call(
+    body = await mcp_call(
         target=name,
         action="list",
         tool=tool,
@@ -397,6 +449,11 @@ async def list_mcp_servers(
         extra=extra,
         _context=_context,
     )
+    # #281 P5：工具清单拿到了，但「下一步怎么调」原本要靠猜（`--tool` 取哪个字段、
+    # `--args` 键名从哪抄）。成功时补一行固定模板；失败时不动（失败已有自己的指路）。
+    if body.get("success"):
+        body["hint"] = MCP_LS_CALL_HINT
+    return body
 
 
 async def set_mcp_server_enabled(

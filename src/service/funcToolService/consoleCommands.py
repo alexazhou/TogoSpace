@@ -224,6 +224,16 @@ class CommandSpec:
             一步必须人做」的场合（建单后要另发消息通知执行人），免得模型以为发完就算了。
             走 `post_process` 追加，**不改原工具的 message**（服务层语义不动）。
 
+        example: 该命令的**正确调用示例**（#281 P1，固定文案 + `<占位符>`，不做动态拼装）。
+            未知选项 / 「位置参数被写成选项」这类报错里直接给这一行，取代「可用选项」清单：
+            使用者复制即可执行，不必照着词汇表自己再拼一遍。
+            **只有确实有示例可给的命令才填**（目前是 `mcp call`）——没填的命令报错只给
+            「未知选项：--x。」，绝不借用别的命令的文案（`task ls --bogus` 弹 MCP 的
+            「参数请放进 --args」是笑话，参见 #281 单的污染判据）。
+
+        option_tip: 该命令未知选项时追加的一句**领域说明**（#281 P1）。与 `example` 配套：
+            `mcp call` 用它说「MCP 工具的参数请放进 --args」。空串 = 不加。
+
     选项面（`options` / `param_names` / `boolean_options` / `option_kinds`）**不是字段**：
     它们从 `legacy_tool` 的 schema 派生（`consoleSchema`），访问时才 import。
     这样一来「加了参数但命令行不认」这种漂移在结构上就不可能发生。
@@ -245,6 +255,9 @@ class CommandSpec:
     fallback_options: tuple[tuple[str, object], ...] = ()
     empty_target_hint: tuple[str, ...] = ()
     success_hint: str = ""
+
+    example: str = ""
+    option_tip: str = ""
 
     @property
     def key(self) -> str:
@@ -305,12 +318,36 @@ class CommandSpec:
 
     @property
     def display_options(self) -> tuple[str, ...]:
-        """选项名的**展示清单**（kebab 形态 + 手写别名），不含兼容旧名。
+        """选项名的**展示清单**（kebab 形态 + 手写别名），不含兼容旧名、**不含位置参数**。
 
         「未知选项」报错的可用清单、help 相关推导都从这份走 —— 旧名只是解析层
         悄悄接受，不该在展示面露脸把用户往旧写法引（需求 3：help 只展示 kebab）。
+
+        #281 P1：**位置参数承载的那个工具参数必须排除**。`target` / `name` 在
+        `mcp call` / `mcp rm` 等命令里是位置参数，但因为选项面是从工具签名派生的，
+        它们也会出现在这份清单里 —— 把 `--target` 摆在「可用选项」里，等于主动
+        教人写错形态（#281 P1/P2 的现场就是这么来的）。
         """
-        return tuple(form for form in self.command_options_map if "_" not in form)
+        positional = set(self.positional_param_names)
+        return tuple(
+            form
+            for form, real in self.command_options_map.items()
+            if "_" not in form and real not in positional
+        )
+
+    @property
+    def positional_param_names(self) -> tuple[str, ...]:
+        """位置参数承载的**工具参数真名**（来自 `locator` 的声明）。
+
+        `mcp call` ⇒ `("target",)`；`mcp rm` / `dept get` ⇒ `("name",)`；无 locator ⇒ `()`。
+        只用于把「位置参数」和「真选项」区分开，不参与解析判定（判定仍走 `options`，
+        兼容期旧名照旧放行）。
+        """
+        if self.locator is None:
+            return ()
+        return tuple(
+            param for param in (self.locator.id_param, self.locator.name_param) if param
+        )
 
     @property
     def options(self) -> tuple[str, ...]:
@@ -397,6 +434,8 @@ def _spec(
     fallback_options: tuple[tuple[str, object], ...] = (),
     empty_target_hint: tuple[str, ...] = (),
     success_hint: str = "",
+    example: str = "",
+    option_tip: str = "",
 ) -> CommandSpec:
     return CommandSpec(
         resource=resource,
@@ -415,6 +454,8 @@ def _spec(
         fallback_options=fallback_options,
         empty_target_hint=empty_target_hint,
         success_hint=success_hint,
+        example=example,
+        option_tip=option_tip,
     )
 
 
@@ -429,6 +470,19 @@ MCP_KIND_HINT: tuple[str, ...] = (
     "  --kind graphql          GraphQL endpoint",
     "示例：mcp ls ./openapi.json ｜ mcp ls http://127.0.0.1:8000/mcp --kind mcp ｜ mcp ls \"npx -y server\" --kind mcp --protocol stdio",
 )
+
+
+#: `mcp call` 的**正确调用示例**（#281 P1）：固定文案 + `<占位符>`，不做动态拼装
+#: （Operator 02:10/02:12 明确否掉拼装：要处理值是否存在、引号怎么写，脆且必须多一层
+#: 分支）。P1（未知选项）与 P2（`--target` 被写成选项）**共用这一处实现**
+#: （Operator 02:13 定）：示例行只有一份，避免两份文案各自漂移。
+MCP_CALL_EXAMPLE: str = "mcp call <名称> --tool <工具名> --args '{\"键\":\"值\"}'"
+
+#: `mcp call` 未知选项时的一句领域说明（#281 P1）。**只挂 mcp 命令** ——
+#: `unknown_option` 是所有 console 命令共用的，把 MCP 专属文案全局套上会让
+#: `task ls --bogus` 弹出「MCP 工具的参数请放进 --args」（#281 单里专门有这条
+#: 「非 mcp 命令不被污染」判据）。
+MCP_OPTION_TIP: str = "MCP 工具的参数请放进 --args。"
 
 
 #: 全部 console 子命令。**这张表是权限校验、命令解析与 help 的唯一事实源。**
@@ -590,6 +644,8 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         locator=_loc(name_param="target"),
         input_defaults=(("action", "call"),),
         empty_target_hint=MCP_KIND_HINT,
+        example=MCP_CALL_EXAMPLE,
+        option_tip=MCP_OPTION_TIP,
     ),
     # MCP 注册表（#224，按 #223 设计稿 §3.5）：
     #
