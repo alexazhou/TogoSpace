@@ -245,7 +245,7 @@ function isConnectorCompleted(node: WorkflowNode): boolean {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px dashed color-mix(in srgb, var(--panel-border-strong) 78%, var(--muted) 22%);
+  border: 1px dashed color-mix(in srgb, var(--panel-border-strong) 78%, var(--muted) 22%);
   background: var(--panel-bg);
   color: var(--text-secondary);
   transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
@@ -276,9 +276,9 @@ function isConnectorCompleted(node: WorkflowNode): boolean {
 .task-workflow-graph__node[data-state='hold'] .task-workflow-graph__vertex {
   position: relative;
   border-style: solid;
-  border-width: 2px;
+  border-width: 1px;
   border-color: var(--state-info);
-  background: color-mix(in srgb, var(--state-info) 18%, var(--panel-bg) 82%);
+  background: color-mix(in srgb, var(--state-info) 16%, var(--panel-bg) 84%);
   color: var(--state-info);
 }
 
@@ -287,13 +287,13 @@ function isConnectorCompleted(node: WorkflowNode): boolean {
 .task-workflow-graph__node[data-state='hold'] .task-workflow-graph__vertex::after {
   content: '';
   position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 9px;
-  height: 9px;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   background: var(--state-info);
-  border: 2px solid var(--panel-bg);
+  border: 1.5px solid var(--panel-bg);
 }
 
 .task-workflow-graph__node[data-state='active'] .task-workflow-graph__owner,
@@ -345,7 +345,7 @@ function isConnectorCompleted(node: WorkflowNode): boolean {
 .task-workflow-graph__line {
   flex: 1;
   height: 0;
-  border-top: 1.5px dashed color-mix(in srgb, var(--panel-border-strong) 72%, transparent);
+  border-top: 1px dashed color-mix(in srgb, var(--panel-border-strong) 72%, transparent);
 }
 
 .task-workflow-graph__arrow {
