@@ -79,6 +79,49 @@ def _run(args: list[str], tmp_path: Path, timeout: int = 120) -> subprocess.Comp
     )
 
 
+def _collect_until(
+    proc: "subprocess.Popen[str]",
+    needles: str | tuple[str, ...],
+    timeout: float = 120.0,
+) -> list[str]:
+    """把进程输出逐行收下来，直到出现任一 `needles`、进程退出或超时（超时也返回已收行）。
+
+    `needles` 给多个是为了**快速失败**：等待「已监听」的同时也等「阶段 4/4 完成」，
+    后者是 bind 前最后一条日志，日志被删掉的假修会在这里就停下，不必空等超时。
+    """
+    targets = (needles,) if isinstance(needles, str) else needles
+    import threading
+    import time
+
+    lines: list[str] = []
+
+    def _reader() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            lines.append(line)
+
+    thread = threading.Thread(target=_reader, daemon=True)
+    thread.start()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if any(t in line for line in lines for t in targets):
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.2)
+    return lines
+
+
+def _stop(proc: "subprocess.Popen[str]") -> None:
+    if proc.poll() is None:
+        proc.terminate()
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:  # pragma: no cover - 兜底
+        proc.kill()
+        proc.wait(timeout=10)
+
+
 # ── N-2：改名误判的提示 ─────────────────────────────────────────────────────
 
 
@@ -181,6 +224,46 @@ def test_backend_refusal_prints_no_listening_line(tmp_path: Path) -> None:
     assert "9999_migration_from_newer_code.sql" in combined, f"没点名缺失迁移：\n{combined}"
     for misleading in ("监听", "已就绪", "Uvicorn running", "Application startup complete"):
         assert misleading not in combined, f"拒绝路径不该出现「{misleading}」：\n{combined}"
+
+
+def test_success_path_logs_listening_after_bootstrap_phase(tmp_path: Path) -> None:
+    """成功启动必须**打出**「已监听…（HTTP 服务已就绪）」，且行序在 `阶段 1/4 完成` 之后。
+
+    为什么需要这条（38 在 #274 打回时用「假修」抓出来的）：只钉「拒绝时不许出现」
+    是**单向**判据 —— 把 `logger.info("[启动] 已监听…")` 整行删掉，那不是挪位置、
+    而是日志没了，单向判据照样全绿，分不出「挪到 bind 之后」与「干脆不打印」。
+    N-3 的要求是两半：该消失的消失 + 不该消失的还在，且顺序对。
+    """
+    db_path = _fully_migrated_db(tmp_path)
+    cfg_dir = _config_dir(tmp_path, db_path, port=0)  # 端口 0 = 由内核分配，避免撞端口
+
+    proc = subprocess.Popen(
+        [sys.executable, str(SRC_DIR / "backend_main.py"), "--config-dir", str(cfg_dir)],
+        cwd=str(REPO_ROOT),
+        env=_subprocess_env(tmp_path),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        lines = _collect_until(proc, ("已监听", "阶段 4/4 完成"))
+    finally:
+        _stop(proc)
+
+    tail = "".join(lines[-40:])
+    phase_markers = [i for i, line in enumerate(lines) if "阶段 1/4 完成" in line]
+    listen_markers = [i for i, line in enumerate(lines) if "已监听" in line]
+
+    assert phase_markers, f"成功路径没有出现「阶段 1/4 完成」：\n{tail}"
+    assert listen_markers, (
+        f"成功路径没有出现「已监听」（可能被整行删掉了——这是「删日志冒充修好」的形态）：\n{tail}"
+    )
+    listen_line = lines[listen_markers[0]]
+    assert "HTTP 服务已就绪" in listen_line, f"「已监听」那行缺少就绪语义：{listen_line}"
+    assert listen_markers[0] > phase_markers[0], (
+        "「已监听」必须出现在「阶段 1/4 完成」**之后**（之前打印=还没 bind 就宣称可服务）"
+        f"：phase@{phase_markers[0]} listen@{listen_markers[0]}\n{tail}"
+    )
 
 
 # ── N-4：CLI 撞守卫不得打裸 traceback、退出码与后端统一 ─────────────────────
