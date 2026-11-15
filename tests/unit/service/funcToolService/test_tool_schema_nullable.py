@@ -75,6 +75,8 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("update_task", "note"),
     ("get_task_detail", "event_limit"),
     ("list_task_events", "limit"),
+    ("list_tasks", "include_upcoming"),
+    ("list_tasks", "mine"),
     ("list_tasks", "open_only"),
     ("memory_list", "include_archived"),
     ("memory_search", "limit"),
@@ -129,6 +131,7 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("create_task", "parent_id"),
     ("create_task", "reviewer_id"),
     ("create_task", "room_id"),
+    ("create_task", "stages"),
     ("create_task", "status"),
     ("delete_container", "container_id"),
     ("delete_container", "record_id"),
@@ -195,9 +198,14 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("save_room", "member_names"),
     ("save_room", "name"),
     ("save_room", "room_id"),
+    ("update_task", "append_stages"),
     ("update_task", "clear_fields"),
     ("update_task", "new_status"),
+    ("update_task", "reassign_stage"),
+    ("update_task", "remove_stage_index"),
     ("update_task", "reviewer_id"),
+    ("update_task", "target_stage"),
+    ("update_task", "workflow_action"),
 ]
 
 
@@ -509,8 +517,8 @@ def test_field_lists_match_signatures() -> None:
         expected = (tool_name, param_name) in OPTIONAL_WITH_DEFAULT
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
-    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 19
-    assert len(OPTIONAL_WITH_DEFAULT) == 71
+    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 21
+    assert len(OPTIONAL_WITH_DEFAULT) == 77
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -723,7 +731,13 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 在教模型用。改后说明写清 `head` 的适用范围与 `raw` / `toon` 的失效，并新增
 #: `mcp_unsupported_extra` / `mcp_invalid_extra` 两个错误码。快照同步用
 #: `python scripts/tool_schema_snapshot.py --update` 更新，diff 应只有 `[mcp_call.extra]` 一项。
-BASELINE_TEXT_DIGEST = "50c763add3c0406cd51e5b8fc9b45fced2b1708c5e0857e5552f7e7a4df846f0"
+#: #227（task system v3）重算：`50c763ad…` → `24bedf14…`。**唯一原因**是新增参数
+#: 的说明文字（`create_task.stages`、`update_task.workflow_action` / `target_stage` /
+#: `append_stages` / `remove_stage_index` / `reassign_stage`、`list_tasks.mine` /
+#: `include_upcoming`），参数数 117 → 125、工具级 required **一字未变**（40 个工具
+#: 的 required 列表与旧基线逐字相同，可用 `git diff` 该文件确认只动了这一个常量与
+#: 两处计数）。既有 40 个工具的 description 也未改。
+BASELINE_TEXT_DIGEST = "24bedf14cfc9a7e59a391571858ebdda809b85c29a60492eaa99fb94db025217"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -766,7 +780,7 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
     # 38 → 39 / 108 → 114：`mcp_call`（#202）。
     assert tools == 40, tools
-    assert params == 117, params
+    assert params == 125, params  # v3：+6 个可选参数（stages / workflow_action / target_stage / append_stages / remove_stage_index / reassign_stage）+ 2 个 bool（mine / include_upcoming）
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

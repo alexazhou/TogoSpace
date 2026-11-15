@@ -64,6 +64,25 @@ def event_manager_mock():
 
 
 @pytest.fixture(autouse=True)
+def stage_manager_mock():
+    """v3 节点链 DAL 的测试替身。
+
+    默认返回**空链** ⇒ `taskService._load_stages()` 按 v2 字段（assignee/reviewer）
+    合成只读节点链，于是「单执行人 / 单审核人」的老用例无需感知节点表即可照旧跑。
+    需要验证多级链行为的用例自行覆写 `get_stages_by_task` 的返回值。
+    """
+    with patch("service.taskService.gtAgentTaskStageManager") as mock_stages:
+        mock_stages.get_stages_by_task = AsyncMock(return_value=[])
+        mock_stages.get_task_ids_by_upcoming_owner = AsyncMock(return_value=[])
+        mock_stages.update_stage_statuses = AsyncMock()
+        mock_stages.create_stages = AsyncMock(return_value=[])
+        mock_stages.insert_stages_after = AsyncMock(return_value=[])
+        mock_stages.delete_stage_and_reindex = AsyncMock()
+        mock_stages.update_stage_owner = AsyncMock()
+        yield mock_stages
+
+
+@pytest.fixture(autouse=True)
 def publish_mock():
     """统一 mock 消息总线，避免推送链路在单元测试里真实调度回调。"""
     with patch("service.messageBus.publish") as mock_publish:
@@ -88,6 +107,8 @@ def mock_model_to_dict():
             "status": status.value if isinstance(status, TaskStatus) else status,
             "priority": priority.value if isinstance(priority, TaskPriority) else priority,
             "depends_on": list(getattr(task, "depends_on", []) or []),
+            "current_stage": getattr(task, "current_stage", 0),
+            "current_owner_id": getattr(task, "current_owner_id", None),
         }
 
     with patch("playhouse.shortcuts.model_to_dict", side_effect=_fake_model_to_dict):
@@ -124,6 +145,16 @@ def _build_task(**overrides):
     task.status = overrides.get("status", TaskStatus.TODO)
     task.priority = overrides.get("priority", TaskPriority.NORMAL)
     task.depends_on = overrides.get("depends_on", [])
+    # v3 接力游标：MagicMock(spec=...) 不会自动给默认值，漏设会让 `current_stage or 0`
+    # 拿到一个 MagicMock（恒真）从而把游标算错——所以这里显式给「默认停在节点 0、
+    # 持棒人 = 执行人」，与 v2 形状任务的真实取值一致。
+    # 与迁移 0022 的回填口径一致：REVIEWING 且设有验收人 ⇒ 棒在节点 1（验收人手上）；
+    # 其余 ⇒ 停在节点 0（执行人手上）。
+    reviewing = overrides.get("status") == TaskStatus.REVIEWING and overrides.get("reviewer_id") is not None
+    task.current_stage = overrides.get("current_stage", 1 if reviewing else 0)
+    task.current_owner_id = overrides.get(
+        "current_owner_id", task.reviewer_id if reviewing else task.assignee_id
+    )
     return task
 
 
@@ -465,14 +496,24 @@ async def test_update_task_assignee_cannot_cancel(task_manager_mock):
 
 
 @pytest.mark.asyncio
-async def test_update_task_manager_can_cancel(task_manager_mock):
+async def test_update_task_manager_cannot_cancel_before_claim(task_manager_mock):
+    """**v3 语义变更（step1 §3.2.4）**：认领前只有创建人能取消，验收人也不行。
+
+    v2 里「创建人或验收人」都能取消；v3 把取消权收成两段——认领前归创建人、
+    认领后归当前持棒人。验收人在任务还是 TODO 时并不是持棒人，故被拒。
+    （认领后验收人作为当前持棒人仍可取消，见 `test_update_task_reviewing_to_cancelled_by_reviewer`。）
+    """
     task = _build_task(status=TaskStatus.TODO, assignee_id=11, creator_id=30, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    
+
     result = await taskService.update_task(team_id=1, caller_id=20, task_id=1, new_status="CANCELLED")
 
-    assert result["success"] is True
-    assert result["task"]["status"] == "CANCELLED"
+    assert result["success"] is False
+    assert result["error_code"] == "permission_denied"
+
+    ok = await taskService.update_task(team_id=1, caller_id=30, task_id=1, new_status="CANCELLED")
+    assert ok["success"] is True
+    assert ok["task"]["status"] == "CANCELLED"
 
 
 @pytest.mark.asyncio

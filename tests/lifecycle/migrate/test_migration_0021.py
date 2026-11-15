@@ -79,7 +79,10 @@ def test_0021_adds_nullable_note_to_existing_table(tmp_path: Path) -> None:
 
     applied = db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR)
 
-    assert applied == [MIGRATION_0021]
+    # 0021 是此刻唯一「待应用」的最早一条；此后新增的迁移（0022…）会跟在后面一起应用，
+    # 故断言「首条是 0021」+「其后都是更晚的迁移」，既不放松也不必每来一条迁移改一次。
+    assert applied[0] == MIGRATION_0021, applied
+    assert all(name > MIGRATION_0021 for name in applied[1:]), applied
     columns = _columns(db_path)
     assert "note" in columns
     assert columns["note"] is False, "note 必须可空：存量行与预记录都没有说明"

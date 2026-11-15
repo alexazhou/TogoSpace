@@ -698,7 +698,8 @@ async def test_element_null_rejected_for_all_array_params() -> None:
             if "array" in _declared_types(prop):
                 array_params.append((name, param_name))
 
-    assert len(array_params) == 13, array_params
+    # v3 新增两个数组参数：create_task.stages（多级节点链）、update_task.append_stages（后置加签）
+    assert len(array_params) == 15, array_params
 
     blocked = 0
     for name, param_name in array_params:
@@ -714,7 +715,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
         assert _LEGACY_MESSAGE_MARK not in result["message"], (name, param_name, result)
         blocked += 1
 
-    assert blocked == 13
+    assert blocked == 15
 
 
 @pytest.mark.asyncio
@@ -956,12 +957,18 @@ async def test_null_injection_exhaustive_table() -> None:
     #      `test_tool_schema_nullable.NON_OPTIONAL_BUT_DEFAULTED` 注释）
     #   · `p1_optional` = 108 - 43 = 65（#196 前 100 - 55 = 45）
     # 114 = 全部参数数（39 工具，含容器组）。#196 前为 100、#202 前为 108。
-    assert p1_required + p1_optional == 117, (p1_required, p1_optional)
-    assert p1_required == 46, p1_required
-    assert p1_optional == 71, p1_optional
-    assert p2 == 13, f"P2={p2}"
+    # v3 新增 6 个可选参数（create_task.stages；update_task 的 workflow_action /
+    # target_stage / append_stages / remove_stage_index / reassign_stage）
+    # ⇒ p1_optional 71→77、p2（数组型）13→15、p3_fields 6→7（`reassign_stage` 是
+    # 裸 `{"type":"object"}`，与 `mcp_call.args` 同形态：既算 P1 也算 P3）。
+    # v3：`list_tasks.mine` / `include_upcoming` 是 bool（注解不含 None）⇒ 归 P1-required，
+    # 故 46→48；另 6 个 `Optional[...]` 新参数进 P1-optional（71→77）。
+    assert p1_required + p1_optional == 125, (p1_required, p1_optional)
+    assert p1_required == 48, p1_required
+    assert p1_optional == 77, p1_optional
+    assert p2 == 15, f"P2={p2}"
     # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
-    assert p3_fields == 6, f"P3字段={p3_fields}"
+    assert p3_fields == 7, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
@@ -970,7 +977,7 @@ async def test_null_injection_exhaustive_table() -> None:
     # P2 恒 13 —— `mcp_call.args`/`extra` 是裸 `{"type":"object"}`，被计入 P1 与 P3，
     # 不进 P2）。
     # （#196 前 148 = 38 + 55 + 45 + 10 + 0；#189 时 146 = 37 + 35 + 64 + 10 + 0）
-    assert total == 170, total
+    assert total == 180, total  # 40 + 48 + 77 + 15 + 0（40 = P0 根节点 + P3 可枚举）
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

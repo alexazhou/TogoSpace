@@ -15,7 +15,11 @@ def test_update_task_signature_uses_new_status_and_note():
     """update_task 入参 = task_id / new_status / note / reviewer_id / clear_fields；无 result / block_reason / status。"""
     params = list(inspect.signature(tools.update_task).parameters)
     assert params == [
-        "task_id", "new_status", "note", "reviewer_id", "clear_fields", "_context",
+        "task_id", "new_status", "note", "reviewer_id", "clear_fields",
+        # v3 单棒接力（step1 §5.2）：交棒/打回 + 节点链调整，全部可选
+        "workflow_action", "target_stage", "append_stages", "remove_stage_index",
+        "reassign_stage",
+        "_context",
     ]
     assert "result" not in params
     assert "block_reason" not in params
@@ -89,7 +93,10 @@ def test_list_tasks_exposes_limit_with_none_default():
     params = list(inspect.signature(tools.list_tasks).parameters)
     assert params == [
         "assignee", "reviewer", "scope", "status", "title_keyword",
-        "open_only", "limit", "_context",
+        "open_only", "limit",
+        # v3 待办视图（step1 §5.3）：mine / include_upcoming
+        "mine", "include_upcoming",
+        "_context",
     ]
     assert inspect.signature(tools.list_tasks).parameters["limit"].default is None
 
@@ -119,6 +126,8 @@ def test_list_tasks_metadata_exposes_open_only_and_limit():
     props = meta["parameters"]["properties"]
     assert set(props) == {
         "assignee", "reviewer", "status", "title_keyword", "open_only", "scope", "limit",
+        # v3 待办视图：mine = 只看当前持棒人；include_upcoming 需与 mine 同用
+        "mine", "include_upcoming",
     }
     assert props["open_only"]["type"] == "boolean"
     assert props["open_only"].get("description")
@@ -126,6 +135,10 @@ def test_list_tasks_metadata_exposes_open_only_and_limit():
     assert props["limit"].get("description")
     assert props["title_keyword"]["type"] == ["string", "null"]
     assert props["title_keyword"].get("description")
+    # v3：mine / include_upcoming 是 bool（非 Optional）⇒ type 单值 "boolean"
+    assert props["mine"]["type"] == "boolean"
+    assert props["include_upcoming"]["type"] == "boolean"
+    assert props["mine"].get("description")
     assert meta["parameters"]["required"] == []
 
 

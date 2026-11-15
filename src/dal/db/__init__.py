@@ -11,6 +11,7 @@ from . import gtRoomMessageManager
 from . import gtSystemConfigManager
 from . import gtAgentTaskManager
 from . import gtAgentTaskEventManager
+from . import gtAgentTaskStageManager
 from . import gtTeamManager
 from . import gtAgentContainerManager
 from . import gtAgentMemoryManager
@@ -27,6 +28,7 @@ __all__ = [
     "gtSystemConfigManager",
     "gtAgentTaskManager",
     "gtAgentTaskEventManager",
+    "gtAgentTaskStageManager",
     "gtTeamManager",
     "gtAgentContainerManager",
     "gtAgentMemoryManager",

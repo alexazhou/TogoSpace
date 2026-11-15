@@ -90,6 +90,18 @@ def _is_ignorable_migration_error(exc: sqlite3.OperationalError) -> bool:
     return "duplicate column name" in msg or "already exists" in msg
 
 
+def _rollback_if_in_transaction(conn: sqlite3.Connection) -> None:
+    """把连接从「事务未结束」状态拉回干净状态（#253 M-1）。
+
+    为什么需要：`executescript()` 会**先隐式 COMMIT 当前事务**、再逐条执行脚本内容，
+    完全绕过 `with conn:` 的事务管理。若迁移脚本自带 `BEGIN; … COMMIT;` 且中途报错，
+    连接会停在「事务已开、尚未提交」的状态；此时若再走进 `with conn:`（例如把该
+    迁移记为已应用），就会把**半个脚本**提交掉。故在异常分支的最前面先兜底回滚。
+    """
+    if conn.in_transaction:
+        conn.rollback()
+
+
 def _run_python_migration(
     migration_file: Path,
     workspace_root: str,
@@ -141,6 +153,8 @@ def apply_migration(
                 (migration_file.name,),
             )
     except sqlite3.OperationalError as exc:
+        # 先兜底回滚：否则下面「记账」的 `with conn:` 会把脚本已执行的部分提交掉
+        _rollback_if_in_transaction(conn)
         if not _is_ignorable_migration_error(exc):
             raise
         if verbose:
@@ -153,6 +167,10 @@ def apply_migration(
                 f"INSERT OR IGNORE INTO {MIGRATIONS_TABLE} (name) VALUES (?)",
                 (migration_file.name,),
             )
+    except BaseException:
+        # 非 OperationalError（如 IntegrityError / 中断）同样要保证连接不带事务残留
+        _rollback_if_in_transaction(conn)
+        raise
 
 
 def migrate_database(

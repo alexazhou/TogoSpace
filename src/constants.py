@@ -297,6 +297,54 @@ class TaskPriority(EnhanceEnum):
     LOW    = "LOW"
 
 
+# ---------------------------------------------------------------------------
+# 任务系统 v3：单棒接力工作流（节点链）
+# ---------------------------------------------------------------------------
+
+class StageNodeType(EnhanceEnum):
+    """工作流节点类型（v3）。
+
+    顶层 `TaskStatus` 枚举**不变**，只由「棒落在哪类节点」映射得出：
+    `EXECUTION → IN_PROGRESS`、`REVIEW → REVIEWING`。见
+    `docs/design/2026-11-14-agent-task-system-v3/step2_technical.md` §4.1。
+    """
+    EXECUTION = "EXECUTION"   # 执行节点（映射 IN_PROGRESS）
+    REVIEW    = "REVIEW"      # 审核节点（映射 REVIEWING；认领后任何人均不可删除）
+
+
+class StageStatus(EnhanceEnum):
+    """工作流节点**局部**状态（与顶层 TaskStatus 正交）。"""
+    WAITING  = "WAITING"    # 尚未轮到（stage_index > current_stage）
+    ACTIVE   = "ACTIVE"     # 当前持棒中（stage_index == current_stage）
+    APPROVED = "APPROVED"   # 本轮已交棒通过（stage_index < current_stage，或全部完成）
+
+
+class TaskEventAction(EnhanceEnum):
+    """任务事件的动作类型（v3 新增列 `agent_task_events.action_type`）。
+
+    为什么要单独一列：`from_status`/`to_status` 无法区分同态流转
+    （`REVIEWING → REVIEWING` 的「打回到前一个审核节点」与「交棒给下一个审核节点」
+    四个字段完全一样），时间线读起来是歧义句。历史事件该列为 NULL。
+    """
+    CREATED        = "CREATED"
+    CLAIM          = "CLAIM"
+    ADVANCE        = "ADVANCE"
+    REJECT         = "REJECT"
+    HOLD           = "HOLD"
+    RESUME         = "RESUME"
+    CANCEL         = "CANCEL"
+    AUTO_TODO      = "AUTO_TODO"
+    STAGE_ADD      = "STAGE_ADD"
+    STAGE_REMOVE   = "STAGE_REMOVE"
+    STAGE_REASSIGN = "STAGE_REASSIGN"
+    COMMENT        = "COMMENT"
+
+
+# 单任务节点数上限：防止 Agent 异常循环「后置加签」把工作流撑到无法收敛
+# （step2_technical.md §6.2）。超限时由 taskService 拒绝 `append_stages`。
+MAX_TASK_STAGES = 20
+
+
 # `update_task(clear_fields=[...])` 可清除字段的**唯一事实源**（#181）。
 #
 # 为什么是「Literal → frozenset」这个方向：工具层签名要给模型看到 `enum: ["reviewer_id"]`

@@ -750,17 +750,20 @@ async def test_run_task_turn_todo_task_injects_exec_notice_for_assignee_in_progr
 
 @pytest.mark.asyncio
 async def test_exec_notice_for_task_from_others_has_no_cancel_command(turn_runner):
-    """上级派给本 agent 的任务（creator=9 ≠ agent.id=1）⇒ 执行通知不得给出取消指令。
+    """**棒不在收件人手上**时 ⇒ 执行通知不得给出取消指令。
 
-    取消权限属于创建人与验收人（`taskService.update_task` 的 `→CANCELLED` 分支），
-    执行通知的收件人是执行人，照旧文案去调用只会拿到 `permission_denied`，
+    v3（step1 §3.2.4）把取消权收成两段：认领前归创建人、**认领后归当前持棒人**。
+    本用例构造 `REVIEWING` + 持棒人是验收人（agent_id=2），收件人 agent_id=1 只是
+    执行节点负责人 ⇒ 无权取消。照旧文案去调用只会拿到 `permission_denied`，
     随后 `finish_action` 因任务仍非终态被拒，重试耗尽后 Agent 被打成 FAILED。
-    故 `agentTurnRunner` 传给 `build_todo_task_turn_prompt` 的 `can_cancel` 必须是
-    「creator == 收件人」，而不是「assignee == 收件人」（恒真，等于没判）。
+    故 `can_cancel` 必须按 `taskService.can_cancel`（持棒人/创建人）判，不能恒给。
     """
     _use_host_managed_driver(turn_runner)
-    # _make_agent_task 默认 creator_id=9（上级），assignee_id=1 == turn_runner 的 gt_agent.id
+    # 多级接力：棒已交到下一个执行节点（owner=2），原执行人（agent_id=1）被唤醒
+    # 但已不是持棒人 ⇒ 无权取消
     agent_task = _make_agent_task(assignee_id=1, status=TaskStatus.IN_PROGRESS)
+    agent_task.current_owner_id = 2
+    agent_task.current_stage = 1
     assert agent_task.creator_id != turn_runner.gt_agent.id, "本用例前提：任务非本 agent 创建"
 
     await _run_todo_turn(turn_runner, agent_task)

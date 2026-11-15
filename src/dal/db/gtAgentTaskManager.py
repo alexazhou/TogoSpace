@@ -74,6 +74,8 @@ def _filtered_task_query(
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
     title_keyword: str | None = None,
+    current_owner_id: int | None = None,
+    upcoming_task_ids: list[int] | None = None,
 ):
     """构造任务过滤条件（`list_tasks` 与 `count_tasks` **共用同一 where 构造**，
 
@@ -111,6 +113,18 @@ def _filtered_task_query(
         query = query.where(GtAgentTask.status.not_in(exclude_statuses))
     if title_keyword is not None:
         query = query.where(GtAgentTask.title.contains(title_keyword))
+    # v3：接力棒当前在谁手上（`list_tasks` 的「待办视图」口径）
+    if current_owner_id is not None:
+        if upcoming_task_ids:
+            # include_upcoming=True：当前持棒 **OR** 后续节点包含我（WAITING 节点）
+            query = query.where(
+                (GtAgentTask.current_owner_id == current_owner_id)
+                | (GtAgentTask.id.in_(upcoming_task_ids))
+            )
+        else:
+            query = query.where(GtAgentTask.current_owner_id == current_owner_id)
+    elif upcoming_task_ids:
+        query = query.where(GtAgentTask.id.in_(upcoming_task_ids))
     return query
 
 
@@ -144,6 +158,8 @@ async def list_tasks(
     agent_ids: list[int] | None = None,
     title_keyword: str | None = None,
     order: str = ORDER_PRIORITY_FIRST,
+    current_owner_id: int | None = None,
+    upcoming_task_ids: list[int] | None = None,
 ) -> list[GtAgentTask]:
     """按条件查询任务列表。
 
@@ -162,7 +178,8 @@ async def list_tasks(
     """
     query = (
         _filtered_task_query(
-            team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword
+            team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword,
+            current_owner_id, upcoming_task_ids,
         )
         .order_by(*_task_ordering(order))
         .limit(limit)
@@ -178,10 +195,13 @@ async def count_tasks(
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
     title_keyword: str | None = None,
+    current_owner_id: int | None = None,
+    upcoming_task_ids: list[int] | None = None,
 ) -> int:
     """统计符合条件的任务**总数**（跨页；不受 `limit` 影响，与 `list_tasks` 同一过滤口径）。"""
     return await _filtered_task_query(
-        team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword
+        team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword,
+        current_owner_id, upcoming_task_ids,
     ).aio_count()
 
 
@@ -210,21 +230,45 @@ async def get_tasks_by_ids(task_ids: list[int]) -> list[GtAgentTask]:
 async def get_first_active_task(agent_id: int) -> GtAgentTask | None:
     """获取 Agent 最早的待处理任务（按 ID 升序）。
 
-    包含两类：
-    - 自己作为执行人的 TODO / IN_PROGRESS 任务
-    - 自己作为验收人的 REVIEWING 任务
+    口径（#253 S-5 收紧）：
+    - `TODO`：还没认领，按 v2 的 `assignee_id` 判定；
+    - `IN_PROGRESS` / `REVIEWING`（在途）：**以 `current_owner_id` 为唯一真值** ——
+      多级链上「棒」可能已经不在 assignee/reviewer 手里了；
+    - 仅当 `current_owner_id IS NULL`（v3 之前的历史行，防御性分支）才退化到 v2 的
+      `assignee_id` / `reviewer_id` 两列。
+
+    原缺陷：把 v2 的 `(assignee_id=我 & status IN [TODO, IN_PROGRESS])` 与
+    `current_owner_id=我` 直接 `OR` 起来 —— 多级 EXECUTION 链 `[EXEC(A), EXEC(B), …]`
+    棒已传到 B（`status=IN_PROGRESS, current_owner_id=B, assignee_id=A`）时，
+    A 仍会被命中并拿到一个「幽灵待办」被调度唤醒。
     """
     return await (
         GtAgentTask
         .select()
         .where(
+            # TODO：未认领，按 v2 的 assignee 口径
             (
                 (GtAgentTask.assignee_id == agent_id) &
-                (GtAgentTask.status.in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS]))  # type: ignore[attr-defined]
+                (GtAgentTask.status == TaskStatus.TODO)
             ) |
+            # 在途：当前持棒人是唯一真值（多级链上 A 已交棒给 B 后，A 不该再被唤醒）
             (
-                (GtAgentTask.reviewer_id == agent_id) &
-                (GtAgentTask.status == TaskStatus.REVIEWING)
+                (GtAgentTask.current_owner_id == agent_id) &
+                (GtAgentTask.status.in_([TaskStatus.IN_PROGRESS, TaskStatus.REVIEWING]))  # type: ignore[attr-defined]
+            ) |
+            # 兼容退化：仅当游标列为空（历史行）时才看 v2 两列
+            (
+                (GtAgentTask.current_owner_id.is_null()) &
+                (
+                    (
+                        (GtAgentTask.assignee_id == agent_id) &
+                        (GtAgentTask.status == TaskStatus.IN_PROGRESS)
+                    ) |
+                    (
+                        (GtAgentTask.reviewer_id == agent_id) &
+                        (GtAgentTask.status == TaskStatus.REVIEWING)
+                    )
+                )
             ),
         )
         .order_by(GtAgentTask.id.asc())  # type: ignore[attr-defined]

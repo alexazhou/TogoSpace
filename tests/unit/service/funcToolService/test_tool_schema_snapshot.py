@@ -75,7 +75,8 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     # 管理控制台（#154）：`command` 必填在前，`payload` 可选在后。
     # 顺序有意固定——把 `payload` 放前面会让模型先想配置再想命令，实测更易生成错命令。
     "console": ["command", "payload"],
-    "create_task": ["title", "assignee_id", "description", "reviewer_id", "priority", "parent_id", "depends_on", "room_id", "status", "note"],
+    # #227（v3）：`stages` 紧跟 `reviewer_id`（两者互斥，放在一起便于模型二选一）。
+    "create_task": ["title", "assignee_id", "description", "reviewer_id", "stages", "priority", "parent_id", "depends_on", "room_id", "status", "note"],
     # #196：`dry_run` 追加在末尾（只预演不落库），老参数位置不动。
     "delete_dept": ["name", "dept_id", "recursive", "dry_run"],
     "delete_role_template": ["role_name"],
@@ -91,7 +92,8 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "get_time": ["timezone"],
     "list_role_templates": ["keywords"],
     "list_task_events": ["task_id", "limit", "before_id"],
-    "list_tasks": ["assignee", "reviewer", "scope", "status", "title_keyword", "open_only", "limit"],
+    # #227（v3）：`mine` / `include_upcoming` 追加在末尾（老参数位置不动）。
+    "list_tasks": ["assignee", "reviewer", "scope", "status", "title_keyword", "open_only", "limit", "mine", "include_upcoming"],
     "load_skill": ["skill_name"],
     # #202 mcp2cli 接入：`target` 必填在前（spec 路径 / MCP URL），其余按「动作 → 工具 →
     # 参数 → 来源类型 → 透传」排列；`kind` 放在 tool/args 之后是因为绝大多数调用只改
@@ -116,6 +118,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     # （老参数的位置与顺序一律不动，避免影响既有调用方的填充习惯）。
     "update_task": [
         "task_id", "new_status", "note", "reviewer_id", "clear_fields",
+        "workflow_action", "target_stage", "append_stages", "remove_stage_index", "reassign_stage",
     ],
     "wake_up_agent": ["agent_name"],
     "web_search": ["query"],
