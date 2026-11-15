@@ -49,6 +49,11 @@ def _build_task(**overrides):
     task.status = overrides.get("status", TaskStatus.IN_PROGRESS)
     task.priority = overrides.get("priority", TaskPriority.NORMAL)
     task.depends_on = []
+    # v3 单棒接力列（#253 S-1 起 `_handle_reviewer_change` 会读节点链/游标/持棒人）：
+    # 给成**真类型**默认值，否则 MagicMock 自动值会在 `min()` / `or` 里炸出 TypeError
+    # 或让「是否正停在审核节点」的判定随机成立。0 / None 即 v2 语义（尚未接力）。
+    task.current_stage = overrides.get("current_stage", 0)
+    task.current_owner_id = overrides.get("current_owner_id", None)
     return task
 
 
@@ -84,10 +89,27 @@ def _simple_model_to_dict():
 
 @pytest.fixture
 def dal():
-    """统一替身：任务 DAL / 事件 DAL / Agent DAL / 事务边界 / 消息总线。"""
+    """统一替身：任务 DAL / 事件 DAL / Agent DAL / 节点 DAL / 事务边界 / 消息总线。
+
+    节点 DAL（`gtAgentTaskStageManager`）是 #253 S-1 起新增的依赖：`_handle_reviewer_change`
+    要先读节点链判断「是不是多级任务」。本文件是 **v2 二元链语义**的单元测试，因此让
+    `get_stages_by_task` 返回空 ⇒ `_load_stages` 按 `task.assignee_id` / `task.reviewer_id`
+    合成 `[EXECUTION, REVIEW]`，行为与 v2 一致；节点写操作只做占位替身。
+    真库上的节点链断言（换人/撤销/补设真的改了节点表）在
+    `tests/integration/test_task_workflow_v3/test.py::TestReviewFix253`。
+    """
+    stage_dal = MagicMock()
+    stage_dal.get_stages_by_task = AsyncMock(return_value=[])
+    for _name in (
+        "create_stages", "delete_stage_and_reindex", "insert_stages_after",
+        "update_stage_owner", "update_stage_statuses", "get_task_ids_by_upcoming_owner",
+    ):
+        setattr(stage_dal, _name, AsyncMock(return_value=None))
+
     with patch("service.taskService.gtAgentTaskManager") as task_dal, \
             patch("service.taskService.gtAgentTaskEventManager") as event_dal, \
             patch("service.taskService.gtAgentManager") as agent_dal, \
+            patch("service.taskService.gtAgentTaskStageManager", new=stage_dal), \
             patch("service.taskService.atomic", new=_passthrough_atomic), \
             patch("service.messageBus.publish") as publish:
         task_dal.save_task = AsyncMock(side_effect=_save_task_side_effect)
