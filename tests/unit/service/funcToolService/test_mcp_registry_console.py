@@ -615,3 +615,61 @@ def test_resolve_never_touches_non_credential_segments(monkeypatch):
     )
     assert resolved[1] == "https://x?ref=env:GITHUB_TOKEN"  # 原样
     assert resolved[4] == "Authorization:" + _SECRET  # 只有我们写入的段被替换
+
+
+# ---------------------------------------------------------------------------
+# 5. enable 落地语义（#273 打回补判据——此前两条核心语义零断言，实测变异全绿）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_disabled_server_call_reports_mcp_server_disabled(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
+):
+    """禁用后 `mcp call` 必须报 `mcp_server_disabled`，且不发起真实调用。
+
+    打回补判据：`tools.mcp_call` 的 `if not entry.enable:` 拦截段此前无任何测试
+    断言钉住（全仓 grep 仅 1 处注释）。M 变异（删拦截段）⇒ 本用例红：调用照常
+    分派、返回 stub 结果、error_code 缺失。
+    """
+    from service.funcToolService.tools import mcp_call, set_mcp_server_enabled
+
+    await _register_server(kind="mcp")
+    disabled = await set_mcp_server_enabled(name="ctx7", enable=False, _context=leader_ctx)
+    assert disabled["success"] is True, disabled
+
+    body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    assert body["success"] is False, body
+    assert body["error_code"] == "mcp_server_disabled", body
+    assert body["resolved_from_registry"] is True
+    assert body["name"] == "ctx7"
+    assert stub_mcp2cli.runtime_argvs == [], "禁用项不得发起真实调用"
+
+    # 重新启用后同一入口恢复可用（拦截是 enable 态的函数，不是一次性的）。
+    await set_mcp_server_enabled(name="ctx7", enable=True, _context=leader_ctx)
+    revived = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    assert revived["success"] is True, revived
+    assert stub_mcp2cli.runtime_argvs, "重新启用后必须恢复分派"
+
+
+@pytest.mark.asyncio
+async def test_disabled_entry_ls_body_says_enable_false(mcp_db, leader_ctx, loaded_tools):
+    """无参 `mcp ls` 返回体的 `enable` 字段必须如实反映两态（可区分）。
+
+    打回补判据：`entry_summary` 的 `"enable": bool(entry.enable)` 此前无断言钉住
+    （旧用例只断 DB 列与「仍在列表」）。M 变异（改恒 True）⇒ 本用例红。
+    """
+    from service.funcToolService.tools import set_mcp_server_enabled
+
+    await _register_server(kind="mcp")
+
+    enabled = await list_mcp_servers(name_or_target=None, _context=leader_ctx)
+    assert enabled["success"] is True
+    assert enabled["servers"][0]["name"] == "ctx7"
+    assert enabled["servers"][0]["enable"] is True
+
+    await set_mcp_server_enabled(name="ctx7", enable=False, _context=leader_ctx)
+    listed = await list_mcp_servers(name_or_target=None, _context=leader_ctx)
+    assert listed["success"] is True
+    assert [s["name"] for s in listed["servers"]] == ["ctx7"], "禁用条目必须仍可见"
+    assert listed["servers"][0]["enable"] is False, "返回体 enable 必须如实反映禁用态"

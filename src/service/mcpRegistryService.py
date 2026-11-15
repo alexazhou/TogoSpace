@@ -4,8 +4,9 @@
 工具薄壳只做上下文提取、参数转发、异常转 `toolResult`。
 
 #273 相对 #224 半成品的三处变更：①去 team_id（全局共享，唯一约束=全局唯一 name）；
-②alias → name（不留兼容别名，功能从未发布）；③新增 enable（禁用≠删除：工具列表
-不出现、`mcp call` 报「已禁用」、`mcp ls` 仍列出并标注）。
+②alias → name（不留兼容别名，功能从未发布）；③新增 enable（禁用≠删除：`mcp call`
+报「已禁用」、`mcp ls` 仍列出并标注；注册表本身不进 Agent 工具列表，「禁用⇒工具
+列表消失」无结构落地）。
 
 凭证纪律（设计稿 §4，1337 附加判据 2）：
 - 注册表只存**引用**（`env:VAR` 形态），明文一律拒绝（`mcp_inline_credential_refused`）；
@@ -279,8 +280,9 @@ async def delete_server(name: str) -> GtMcpServer:
 async def set_enabled(name: str, enable: bool) -> GtMcpServer:
     """启用 / 禁用一个注册项（#273）。
 
-    禁用 ≠ 删除：条目保留，`mcp ls` 仍列出并标注；禁用后其工具不出现在 Agent 可用
-    列表、`mcp call` 报 `mcp_server_disabled`（不是「不存在」）。不存在抛
+    禁用 ≠ 删除：条目保留，`mcp ls` 仍列出并标注；禁用后 `mcp call` 明确报
+    `mcp_server_disabled`（不是「不存在」）。注意：注册表本身不进 Agent 可用工具
+    列表，「禁用⇒工具从列表消失」无结构落地（#273 未做）。不存在抛
     `mcp_name_not_found`。
     """
     name_n = validate_name(name)

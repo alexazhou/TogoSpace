@@ -472,7 +472,7 @@
         }
       },
       "kind": {
-        "description": "（有参分支）来源类型；别名命中时以注册项为准。",
+        "description": "（有参分支）来源类型；name 命中时以注册项为准。",
         "schema": {
           "type": "string"
         }
@@ -685,13 +685,13 @@
         }
       },
       "kind": {
-        "description": "来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。 别名命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。",
+        "description": "来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。 name 命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。",
         "schema": {
           "type": "string"
         }
       },
       "target": {
-        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint； 也可以是注册表别名（`mcp add` 登记的名字，如 `ctx7`）。",
+        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint； 也可以是注册表 name（`mcp add` 登记的名字，如 `ctx7`）。",
         "schema": {
           "type": "string"
         }
@@ -1112,7 +1112,7 @@
         }
       },
       "overwrite": {
-        "description": "别名已存在时是否覆盖；默认 false（防误覆盖别人的登记）。",
+        "description": "name 已存在时是否覆盖；默认 false（防误覆盖别人的登记）。",
         "schema": {
           "type": "boolean"
         }

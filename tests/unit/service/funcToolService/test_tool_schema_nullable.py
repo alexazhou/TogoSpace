@@ -755,7 +755,14 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: `mcp_name_kind_conflict` / `mcp_server_disabled`）。既有 40 个工具的
 #: description / required 一字未动（快照结构化 diff 应只含 4 个新工具 + `mcp_call`）。
 #: 工具数 40 → 44、参数数 125 → 139。快照同步 `python scripts/tool_schema_snapshot.py --update`。
-BASELINE_TEXT_DIGEST = "1bb20f8b6a83b29aca1d02373538efbceb471e90419c979f70250eaaef079379"
+#:
+#: #273 打回修复（`1bb20f8b…` → 见下）：措辞修正——①「注册表别名」全部改「注册表
+#: name」（`mcp_call.target`/`kind`、`save_mcp_server.overwrite`、`list_mcp_servers.kind`）；
+#: ②删除「禁用⇒该 server 工具从可用工具列表消失」的不实描述（注册表从不进工具列表，
+#: 无结构落地；三处：`set_mcp_server_enabled` / `mcpRegistryService.set_enabled` /
+#: console help `mcp enable/disable`），改为如实写「禁用的落地语义=`mcp_call` 报
+#: `mcp_server_disabled`」。工具数 44、参数数 139 不变。
+BASELINE_TEXT_DIGEST = "adbf048afa58a65a5224edab117a614e8262eb829f9492b35401ff1ea45e8f49"
 
 
 def _text_digest() -> tuple[str, int, int]:

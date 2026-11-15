@@ -189,7 +189,7 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     ),
     "mcp enable / mcp disable": (
         "启用/禁用一个登记项（禁用≠删除：`mcp ls` 仍列出并标注 enable=false；"
-        "禁用后该 server 的工具不出现在可用列表，`mcp call` 报 mcp_server_disabled）。"
+        "禁用后 `mcp call` 报 mcp_server_disabled；注册表本身不进 Agent 工具列表）。"
         "用法：mcp enable ctx7 / mcp disable ctx7；写入需 leader/根主管权限。",
     ),
     "mcp ls": (

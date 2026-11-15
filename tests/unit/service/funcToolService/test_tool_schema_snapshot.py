@@ -106,7 +106,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     # 参数 → 来源类型 → 透传」排列；`kind` 放在 tool/args 之后是因为绝大多数调用只改
     # target，不动来源类型。
     "mcp_call": ["target", "action", "tool", "args", "kind", "extra"],
-    # #224：`mcp add` 的登记参数按「别名 → 来源类型 → 连接描述 → 说明 → 凭证 → 覆盖」
+    # #224→#273：`mcp add` 的登记参数按「name → 来源类型 → 连接描述 → 说明 → 凭证 → 覆盖」
     # 排列；`name` 必填在前。
     "save_mcp_server": ["name", "kind", "target", "note", "credentials", "overwrite"],
     # 长期记忆工具（#134）。参数顺序统一「先定位（memory_id / query）、后修改字段、

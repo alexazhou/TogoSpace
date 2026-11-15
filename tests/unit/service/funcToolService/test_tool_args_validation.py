@@ -947,7 +947,7 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 129 = 50 + 79（#224：MCP 注册表三工具带来 +8 optional（save.alias/target/credentials、
+    # 129 = 50 + 79（#224→#273：MCP 注册表三工具带来 +8 optional（save.name/target/credentials、
     #   delete.alias、list.name_or_target/tool/args/extra）+ 4 个「有默认值但注解不含
     #   None」（save.kind/note/overwrite、list.kind）+ 1 个裸 object（save.credentials），
     #   故 117→129、46→50、71→79）。**这里必须拆开看两个口径**
