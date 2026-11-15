@@ -133,11 +133,16 @@ mcp ls 列出已配置的 MCP server。看某个 server 的工具清单：mcp ls
 
 ---
 
-### P4【中】`mcp ls` 与 `mcp call` 的默认 `--kind` 不同（`mcp` vs `openapi`）
+### P4【中】`mcp add` 与 `mcp ls` / `mcp call` 的默认 `--kind` 不同（`mcp` vs `openapi`）
 
-**现状**：按**注册表名**调用时 kind 取自注册表（`resolved_from_registry: true`），不会踩；**直接传 URL 时**会踩 —— `mcp ls <url>` 按 mcp 解析成功，`mcp call <url>` 按 openapi 解析失败。
+> **2026-11-16 02:45 订正**：本节原文写的是「`mcp ls` 默认 `mcp`、`mcp call` 默认 `openapi`」，**这是一处事实错误**——我把 `mcp add` 的默认当成了 `mcp ls` 的默认。
+> 代码事实（`0.5_dev` @ `f16f0bf9`）：`save_mcp_server`（`mcp add`）`kind="mcp"`（`tools.py:252`）、`mcp_call` `kind="openapi"`（`tools.py:125`，另有 `_MCP_CALL_DEFAULT_KIND` 常量）、`list_mcp_servers`（`mcp ls`）`kind="openapi"`（`tools.py:346`），且 `mcp ls` 有参分支原样透传给 `mcp_call`，console 层没给 `mcp ls` 另设默认。
+> 实测（二部开发，基线 `f16f0bf9`）：`mcp ls https://mcp.context7.com/mcp` ⇒ `mcp2cli_error`（405 Method Not Allowed），`mcp call https://mcp.context7.com/mcp --tool x` ⇒ 同样 405。**两条都默认 openapi**。
+> 下面保留原始描述仅作留痕；以订正后的事实为准。
 
-**我怎么理解的**：`help` 里有「两者有意不同」的说明，但埋在参数说明深处；报错时不会提示「你可能缺 `--kind mcp`」。
+**现状（订正后）**：按**注册表名**调用时 kind 取自注册表（`resolved_from_registry: true`），不会踩；**直接传 URL 时** `mcp ls <URL>` 与 `mcp call <URL>` **都按 openapi 解析**并失败（405），必须显式 `--kind mcp`。`help` 里「kind 默认 mcp」那句是 `mcp add` 的口径（`consoleTool.py:180`），不是 `mcp ls` 的。
+
+**我怎么理解的**：`help` 里「两者有意不同」的说明埋在参数说明深处，且容易被读成 `mcp ls` 默认 mcp；报错时也不会提示「你可能缺 `--kind mcp`」。
 
 **期望（固定文案，按 §0.1）**：直接传 URL 且解析失败时：
 ```
@@ -145,7 +150,13 @@ mcp ls 列出已配置的 MCP server。看某个 server 的工具清单：mcp ls
   mcp ls <URL> --kind mcp
   mcp call <URL> --kind mcp --tool <工具名> --args '{"键":"值"}'
 ```
-并且 `--help` 的「快速上手」把「`mcp ls` 默认 `mcp`、`mcp call` 默认 `openapi`」提到显眼位置。
+并且 `--help` 的「快速上手」把 kind 默认口径**写成事实句**提到显眼位置：
+
+```
+mcp：kind 默认 openapi（mcp ls / mcp call 相同）；目标是 MCP server 时请加 --kind mcp。
+```
+
+（原期望写的是「`mcp ls` 默认 `mcp`、`mcp call` 默认 `openapi`」，随上文订正一并改；`mcp add` 的 `kind` 默认仍是 `mcp`，属另一条命令。）
 
 **代价**：一句错误提示 + 文档；**状态：待讨论**
 
@@ -238,11 +249,11 @@ mcp ls 列出已配置的 MCP server。看某个 server 的工具清单：mcp ls
 
 ## 3. 待 Operator 决策
 
-- [ ] **D1** P1：`unknown_option` 改固定示例 + 清单剔除位置参数
-- [ ] **D2** P2：`--target` 形态错给专属文案（固定示例）
-- [ ] **D3** P3：`mcp ls` 无参 hint（一段固定文案，覆盖有/无配置）
-- [ ] **D4** P4：`mcp call` 直接传 URL 失败时提示 `--kind mcp`；help 提前
-- [ ] **D5** P5：`mcp ls <名称>` 给一行固定 `mcp call` 模板
+- [x] **D1** P1：`unknown_option` 改固定示例 + 清单剔除位置参数 —— 已批准，进 #281
+- [x] **D2** P2：`--target` 形态错给专属文案（固定示例） —— 已批准，进 #281
+- [x] **D3** P3：`mcp ls` 无参 hint（一段固定文案，覆盖有/无配置） —— 已批准，进 #281
+- [x] **D4** P4：`mcp ls` / `mcp call` 直接传 URL 失败时提示 `--kind mcp`；help 按实测写事实句（两条都默认 openapi） —— 已批准，进 #281
+- [x] **D5** P5：`mcp ls <名称>` 给一行固定 `mcp call` 模板 —— 已批准，进 #281
 - [ ] **D6** P6：错误码维持 `missing_target` 不变
 - [ ] **D7** P7：`target` 双形态选 A（只加说明）/ B（接受别名）/ C（统一改造）
 - [ ] **D8** P8：`--session-*` 控制类子命令改走「raw 文本 + success」，不判 JSON
