@@ -181,7 +181,7 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "spec 文件请显式 --kind openapi）。stdio 启动命令含空格必须加引号，如 "
         "--target \"npx -y @browserbasehq/mcp\"。",
         "默认 insert-only：name 已存在会报 mcp_name_exists，覆盖必须显式 --overwrite true。"
-        "凭证原样存值（#277：明文直接入库，不再要求 env: 引用；如 --credentials "
+        "凭证原样存值（#277：明文直接入库，不再要求 env: 引用；如 --config "
         "'{\"headers\":{\"Authorization\":\"Bearer sk-...\"}}'）；查看面只见掩码。",
     ),
     "mcp rm": (

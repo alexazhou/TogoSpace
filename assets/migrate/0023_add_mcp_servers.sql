@@ -10,13 +10,17 @@
 --   ② alias → name（功能从未发布，不留兼容别名）；
 --   ③ 新增 enable INTEGER NOT NULL DEFAULT 1（禁用 ≠ 删除：工具列表里消失、
 --      mcp call 明确报「已禁用」，mcp ls 仍列出并标注）。
+-- #279（Operator 2026-11-16 00:25 拍板「方案2」）：字段原 `credentials`，本文件直接
+-- 改为 `config`（内容结构不变：{"headers":{...}}/"env" 两层）。前提=0023 在真库
+-- 已执行（账本 id=23），须先 drop mcp_servers 表 + 删账本 id=23 行让本文件重跑
+-- （真库该表 0 行，清理由 PM 执行，顺序=先合并代码再动真库）。
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   name            TEXT    NOT NULL,
   kind            TEXT    NOT NULL DEFAULT 'mcp',
   target          TEXT    NOT NULL,
   note            TEXT    NOT NULL DEFAULT '',
-  credentials     TEXT    NOT NULL DEFAULT '{}',
+  config          TEXT    NOT NULL DEFAULT '{}',
   enable          INTEGER NOT NULL DEFAULT 1,
   created_by      INTEGER NOT NULL DEFAULT 0,
   created_at      DATETIME NOT NULL DEFAULT (datetime('now', 'localtime')),

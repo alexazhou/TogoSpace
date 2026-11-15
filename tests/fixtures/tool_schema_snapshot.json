@@ -1081,7 +1081,7 @@
   "save_mcp_server": {
     "description": "把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp add` 的底层工具）。",
     "parameters": {
-      "credentials": {
+      "config": {
         "description": "凭证值，形如 `{\"headers\": {\"Authorization\": \"Bearer sk-...\"}}` （headers 配 HTTP 类 kind）或 `{\"env\": {\"API_KEY\": \"v123...\"}}` （env 配 `mcp_stdio`，注入子进程环境变量）。**值原样存**（#277）； 查看面只见掩码。",
         "schema": {
           "type": [

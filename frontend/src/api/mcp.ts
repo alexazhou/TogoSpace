@@ -7,7 +7,7 @@ export interface McpServerEntry {
   kind: string;
   target: string;
   note: string;
-  credentials: Record<string, Record<string, string>> | null;
+  config: Record<string, Record<string, string>> | null;
   enable: boolean;
   created_by?: number;
   updated_at?: string | null;
@@ -18,7 +18,7 @@ export interface McpServerSavePayload {
   kind: string;
   target: string;
   note: string;
-  credentials: Record<string, Record<string, string>> | null;
+  config: Record<string, Record<string, string>> | null;
   overwrite: boolean;
 }
 

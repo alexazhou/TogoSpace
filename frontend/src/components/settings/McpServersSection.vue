@@ -40,7 +40,7 @@ type FormDraft = {
   kind: string;
   target: string;
   note: string;
-  credentialsText: string;
+  configText: string;
   overwrite: boolean;
 };
 
@@ -49,15 +49,15 @@ const emptyDraft = (): FormDraft => ({
   kind: 'mcp',
   target: '',
   note: '',
-  credentialsText: '',
+  configText: '',
   overwrite: false,
 });
 
 const formDraft = ref<FormDraft>(emptyDraft());
 const isNameEditable = computed(() => !isEditing.value);
 
-function credentialsToString(entry: McpServerEntry | null): string {
-  const creds = entry?.credentials;
+function configToString(entry: McpServerEntry | null): string {
+  const creds = entry?.config;
   if (!creds || Object.keys(creds).length === 0) {
     return '';
   }
@@ -77,7 +77,7 @@ function openEdit(entry: McpServerEntry): void {
     kind: entry.kind,
     target: entry.target,
     note: entry.note,
-    credentialsText: credentialsToString(entry),
+    configText: configToString(entry),
     overwrite: true,
   };
   showForm.value = true;
@@ -102,13 +102,13 @@ async function load(): Promise<void> {
 }
 
 async function submitForm(): Promise<void> {
-  let credentials: Record<string, Record<string, string>> | null = null;
-  const text = formDraft.value.credentialsText.trim();
+  let config: Record<string, Record<string, string>> | null = null;
+  const text = formDraft.value.configText.trim();
   if (text) {
     try {
-      credentials = JSON.parse(text);
+      config = JSON.parse(text);
     } catch {
-      showGlobalRequestError({ title: t('settings.mcpServers.mcpServersFormTitle'), path: '/mcp/servers/save.json', detail: 'credentials JSON invalid' });
+      showGlobalRequestError({ title: t('settings.mcpServers.mcpServersFormTitle'), path: '/mcp/servers/save.json', detail: 'config JSON invalid' });
       return;
     }
   }
@@ -119,7 +119,7 @@ async function submitForm(): Promise<void> {
       kind: formDraft.value.kind,
       target: formDraft.value.target.trim(),
       note: formDraft.value.note,
-      credentials,
+      config,
       overwrite: isEditing.value || formDraft.value.overwrite,
     });
     showGlobalSuccessToast(t('settings.mcpServers.mcpServersSaved'));
@@ -157,7 +157,7 @@ async function toggleEnabled(entry: McpServerEntry, next: boolean): Promise<void
   }
 }
 
-/** 与后端 `mask_credential_value` 同口径：首个空格/冒号前 token（≤8 字符）+ `***`。 */
+/** 与后端 `mask_config_value` 同口径：首个空格/冒号前 token（≤8 字符）+ `***`。 */
 function maskValue(value: string): string {
   if (!value) {
     return '***';
@@ -171,7 +171,7 @@ function maskValue(value: string): string {
 }
 
 function maskedCredentials(entry: McpServerEntry): string {
-  const creds = entry.credentials;
+  const creds = entry.config;
   if (!creds || Object.keys(creds).length === 0) {
     return '—';
   }
@@ -185,7 +185,7 @@ function maskedCredentials(entry: McpServerEntry): string {
 }
 
 function fullCredentials(entry: McpServerEntry): string {
-  const creds = entry.credentials;
+  const creds = entry.config;
   if (!creds || Object.keys(creds).length === 0) {
     return '—';
   }
@@ -239,7 +239,7 @@ onMounted(() => {
               <td>{{ entry.kind }}</td>
               <td class="mono">{{ entry.target }}</td>
               <td class="mono">
-                <pre class="mcp-credentials">{{ showFullCredentials ? fullCredentials(entry) : maskedCredentials(entry) }}</pre>
+                <pre class="mcp-config">{{ showFullCredentials ? fullCredentials(entry) : maskedCredentials(entry) }}</pre>
               </td>
               <td>
                 <ToggleSwitch
@@ -300,7 +300,7 @@ onMounted(() => {
           wide
           :hint="t('settings.mcpServers.mcpServersCredentialsHint')"
         >
-          <textarea v-model="formDraft.credentialsText" class="text-input mono" rows="4" spellcheck="false" />
+          <textarea v-model="formDraft.configText" class="text-input mono" rows="4" spellcheck="false" />
         </FormField>
         <label v-if="!isEditing" class="mcp-show-full">
           <input v-model="formDraft.overwrite" type="checkbox" />
@@ -332,7 +332,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.mcp-credentials {
+.mcp-config {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;

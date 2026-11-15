@@ -47,7 +47,7 @@ def test_0023_schema_columns_and_unique_index(tmp_path: Path) -> None:
 
     columns = _columns(db_path)
     assert set(columns) == {
-        "id", "name", "kind", "target", "note", "credentials",
+        "id", "name", "kind", "target", "note", "config",
         "enable", "created_by", "created_at", "updated_at",
     }
     assert "team_id" not in columns, "#273：注册表不分 team，不得再建 team_id 列"

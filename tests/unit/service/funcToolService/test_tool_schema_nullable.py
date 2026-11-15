@@ -215,7 +215,7 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     # #224→#273：MCP 注册表四工具的 Optional + None 默认参数（kind/note/overwrite 等
     # 「有默认值但注解不含 None」的进 NON_OPTIONAL_BUT_DEFAULTED 另一张表）。
     ("save_mcp_server", "name"),
-    ("save_mcp_server", "credentials"),
+    ("save_mcp_server", "config"),
     ("save_mcp_server", "target"),
     ("delete_mcp_server", "name"),
     ("list_mcp_servers", "name_or_target"),
@@ -764,10 +764,14 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: `mcp_server_disabled`」。工具数 44、参数数 139 不变。
 #:
 #: #277 重算（`adbf048a…` → 见下）：凭证改**原样存值**（Operator 20:21 需求）——
-#: `save_mcp_server` 的 `credentials` 说明改写（不再要求 env: 引用、明文直接入库、
+#: `save_mcp_server` 的 `config` 说明改写（不再要求 env: 引用、明文直接入库、
 #: 查看面只见掩码）；`mcp_call` 注册表解析段说明同步（凭证值明文注入、出口打码）。
 #: 工具数 44、参数数 139 不变。
-BASELINE_TEXT_DIGEST = "39e8272abef7f5e4a7a292367a71dbc531065a1f91f277e3ed593819dba705e1"
+#:
+#: #279 重算（`39e8272a…` → 见下）：`credentials` → `config` 字段改名（Operator
+#: 2026-11-16 00:04 需求，内容结构不变）——`save_mcp_server.config` 与 `mcp_call`
+#: 相关参数名/说明同步改名；**工具数 44、参数数 139 不变**（纯改名，零增删参数）。
+BASELINE_TEXT_DIGEST = "15d263fc7623a443ebd256ebcb4014fc22f8556e7364b1d3e68397220fa5bb5a"
 
 
 def _text_digest() -> tuple[str, int, int]:

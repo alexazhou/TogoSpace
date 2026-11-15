@@ -1,7 +1,7 @@
 """MCP 服务后台 controller：只做参数校验 + 调 mcpRegistryService，不复制业务规则。
 
-关键判据（#277）：Web 响应给**完整值**（target/credentials 原样，配置页要能回显
-编辑）；脱敏由展示面（mask_credentials_for_display / mcpTool._mask_deep）承担，
+关键判据（#277）：Web 响应给**完整值**（target/config 原样，配置页要能回显
+编辑）；脱敏由展示面（mask_config_for_display / mcpTool._mask_deep）承担，
 本层不做打码也不做业务校验。
 """
 
@@ -24,7 +24,7 @@ def _entry(**overrides) -> SimpleNamespace:
         kind="mcp",
         target="https://mcp.example.com/mcp",
         note="文档检索",
-        credentials={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
+        config={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
         enable=1,
         created_by=0,
         updated_at="2026-11-15 20:00:00",
@@ -53,8 +53,8 @@ async def test_list_returns_full_values_not_masked(monkeypatch):
     assert body["count"] == 1
     server = body["servers"][0]
     assert server["target"] == "https://mcp.example.com/mcp"
-    assert server["credentials"] == {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}}
-    assert "target_masked" not in server and "credentials_masked" not in server
+    assert server["config"] == {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}}
+    assert "target_masked" not in server and "config_masked" not in server
 
 
 async def test_save_delegates_to_service_with_created_by_zero(monkeypatch):
@@ -63,7 +63,7 @@ async def test_save_delegates_to_service_with_created_by_zero(monkeypatch):
 
     async def _save(**kwargs):
         received.update(kwargs)
-        return _entry(note=kwargs.get("note", ""), credentials=kwargs.get("credentials") or {})
+        return _entry(note=kwargs.get("note", ""), config=kwargs.get("config") or {})
 
     monkeypatch.setattr(svc, "save_server", _save)
     handler, captured = _post_handler(
@@ -73,7 +73,7 @@ async def test_save_delegates_to_service_with_created_by_zero(monkeypatch):
             "kind": "mcp",
             "target": "https://mcp.example.com/mcp",
             "note": "n",
-            "credentials": {"headers": {"Authorization": "Bearer v"}},
+            "config": {"headers": {"Authorization": "Bearer v"}},
             "overwrite": True,
         },
     )
@@ -84,11 +84,11 @@ async def test_save_delegates_to_service_with_created_by_zero(monkeypatch):
         "kind": "mcp",
         "target": "https://mcp.example.com/mcp",
         "note": "n",
-        "credentials": {"headers": {"Authorization": "Bearer v"}},
+        "config": {"headers": {"Authorization": "Bearer v"}},
         "overwrite": True,
         "created_by": 0,
     }
-    assert captured[0]["credentials"] == {"headers": {"Authorization": "Bearer v"}}
+    assert captured[0]["config"] == {"headers": {"Authorization": "Bearer v"}}
 
 
 async def test_delete_and_enable_delegate_by_name(monkeypatch):
