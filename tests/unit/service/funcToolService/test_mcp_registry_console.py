@@ -580,6 +580,9 @@ async def test_plain_value_reaches_dispatch_and_never_logs(
 
     returned_argv = body["argv"]
     assert _SECRET not in json.dumps(returned_argv), "返回体 argv 不得含明文值"
+    # 整返回体（不止 argv 子键）0 命中：堵「先打码、再在出口补一段未打码文本」的
+    # 绕开型漏洞（MUT-8 靶子——只查 argv 子键时该变异不红）。
+    assert _SECRET not in json.dumps(body), "返回体整体不得含明文值（含新增字段）"
     masked_value = returned_argv[returned_argv.index("--auth-header") + 1]
     assert masked_value == "Authorization:***", masked_value
 
