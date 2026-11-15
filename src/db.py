@@ -33,8 +33,13 @@ class DatabaseAheadOfCodeError(RuntimeError):
     把「数据不存在」掩盖成「看起来有」。所以「库比代码新」时宁可拒绝启动，
     也不能让旧代码继续往一个新结构的库里写数据。
 
+    **迁移纪律（#274 N-2）**：判据按**文件名**比对，所以已执行过的迁移文件名不可变更。
+    迁移只许新增（`0023_…`），不许改名、不许改内容——改名会让账本里那个旧名字永久
+    被判成「代码缺失」，本错误里 ② 分支就是提示这件事。
+
     属性：`missing` 列出「库中已执行、当前代码缺失」的迁移名（已排序），
-    `code_latest` / `db_latest` 分别给出代码侧与库侧的最新迁移，便于一眼定位差距。
+    `code_latest` / `db_latest` 分别给出代码侧与库侧的最新迁移，便于一眼定位差距，
+    `code_names` 是代码侧迁移名清单（用于区分「真·库超前」与「迁移被改名」）。
     """
 
     def __init__(
@@ -44,30 +49,74 @@ class DatabaseAheadOfCodeError(RuntimeError):
         code_latest: str | None,
         db_latest: str | None,
         db_path: str | Path = "",
+        code_names: list[str] | None = None,
+        unparsed_names: list[str] | None = None,
     ) -> None:
         self.missing = sorted(missing)
         self.code_latest = code_latest
         self.db_latest = db_latest
         self.db_path = str(db_path)
+        self.code_names = list(code_names or [])
+        # 目录里存在、但不符合迁移命名规则的文件（如改名成 .txt / .bak / README.md）
+        self.unparsed_names = list(unparsed_names or [])
         super().__init__(self._build_message())
+
+    def _suspect_renames(self) -> list[str]:
+        """同版本号前缀的代码侧文件名：最能区分「真·库超前」与「迁移被改名」。
+
+        同时看两类：**被解析成迁移的**（改名成 `0022_…_v2.sql` 这种仍合规的名字）
+        与**未被解析的**（改名成 `0022_….txt`/`.bak`/`.sql.bak` 后不再算迁移）。
+        只看前者会漏掉更常见的后者。
+        """
+        prefixes = {name[:4] for name in self.missing}
+        candidates = list(self.code_names) + list(self.unparsed_names)
+        return [name for name in candidates if name[:4] in prefixes]
 
     def _build_message(self) -> str:
         missing = "、".join(self.missing)
         code_latest = self.code_latest or "无"
         db_latest = self.db_latest or "无"
-        return (
+        lines = [
             f"数据库比当前代码新，拒绝启动：库中已执行但当前代码缺失的迁移 = [{missing}]；"
             f"当前代码最新迁移 = {code_latest}，数据库最新迁移 = {db_latest}"
-            f"{f'（{self.db_path}）' if self.db_path else ''}。\n"
-            "这说明该库曾被**更新的代码**迁移过，用当前（较旧）的代码连它会写出不完整的数据。\n"
-            "请任选一种方式自救：\n"
-            "  1) 升级到包含这些迁移的代码后再启动（git pull / 切到最新主干）；\n"
+            f"{f'（{self.db_path}）' if self.db_path else ''}。",
+            "两种原因，请先分清再动手：",
+            "  ① 这个库确实被**更新的代码**迁移过：用当前（较旧）的代码连它会写出不完整的数据"
+            " ⇒ 请升级到包含这些迁移的代码后再启动。",
+            "  ② 迁移文件被**改名/删除**：判据按文件名比对，已执行过的迁移文件名不可变更"
+            "（迁移只许新增、不许改名，内容也不要改）⇒ 请把文件名改回账本里记录的那个名字。",
+            "排查线索：",
+        ]
+        if self.code_names:
+            lines.append(
+                f"  - 代码侧迁移共 {len(self.code_names)} 条（供比对）：{'、'.join(self.code_names)}"
+            )
+        else:
+            lines.append("  - 代码侧迁移目录里一条迁移都没有（检查 --migrations-dir / assets/migrate 是否缺失）")
+        suspects = self._suspect_renames()
+        if suspects:
+            lines.append(
+                f"  - ⚠️ 与缺失项同版本号前缀的代码侧文件：{'、'.join(suspects)}"
+                " ⇒ 高度疑似「迁移被改名」，请改回账本里的原名"
+            )
+        elif self.unparsed_names:
+            lines.append(
+                f"  - 目录里有 {len(self.unparsed_names)} 个不符合迁移命名规则的文件："
+                f"{'、'.join(self.unparsed_names)}（不是迁移，不参与判据）"
+            )
+            lines.append("  - 代码侧没有与缺失项同版本号的迁移 ⇒ 更像 ①（库被更新代码迁移过）")
+        else:
+            lines.append("  - 代码侧没有与缺失项同版本号的迁移 ⇒ 更像 ①（库被更新代码迁移过）")
+        lines.extend([
+            "请任选一种方式自救：",
+            "  1) 升级到包含这些迁移的代码后再启动（git pull / 切到最新主干）；",
             "  2) 若你在较旧的 worktree 上开发，改用独立数据目录（设置 STORAGE_ROOT 指向自己的目录），"
-            "不要与共享库共用；\n"
-            "  3) 确认这些迁移确实该丢弃时，走人工评审后重建数据库。\n"
+            "不要与共享库共用；",
+            "  3) 确认这些迁移确实该丢弃时，走人工评审后重建数据库。",
             "禁止：删除 `_migrations` 账本记录、手工回退表结构、或用旧版本直接读写该库——"
-            "那会让数据结构与代码再次不一致。"
-        )
+            "那会让数据结构与代码再次不一致。",
+        ])
+        return "\n".join(lines)
 
 
 def resolve_db_path(db_path: str) -> Path:
@@ -123,6 +172,20 @@ def list_migration_files(migrations_dir: Path) -> list[Path]:
     )
 
 
+def list_unparsed_files(migrations_dir: Path, migration_files: list[Path]) -> list[str]:
+    """目录里存在、但**不符合迁移命名规则**的文件名（#274 N-2）。
+
+    为什么需要：迁移被改名成 `.txt`/`.bak` 之后就不算迁移了，单看「已解析的迁移名」
+    会以为代码里根本不存在这个版本号的文件，排查时白白去找「哪段代码新增了这条迁移」。
+    """
+    if not migrations_dir.is_dir():
+        return []
+    parsed = {p.name for p in migration_files}
+    return sorted(
+        p.name for p in migrations_dir.iterdir() if p.is_file() and p.name not in parsed
+    )
+
+
 def fetch_applied_migrations(conn: sqlite3.Connection) -> list[Migration]:
     rows = conn.execute(
         f"SELECT name, applied_at FROM {MIGRATIONS_TABLE} ORDER BY name"
@@ -152,6 +215,7 @@ def _ensure_db_not_ahead_of_code(
     applied_names: set[str],
     code_names: list[str],
     db_path: Path,
+    unparsed_names: list[str] | None = None,
 ) -> None:
     """库比代码新 ⇒ 直接拒绝，不写库、不跳过（#270）。
 
@@ -171,6 +235,8 @@ def _ensure_db_not_ahead_of_code(
         code_latest=code_names[-1] if code_names else None,
         db_latest=max(applied_names) if applied_names else None,
         db_path=db_path,
+        code_names=code_names,
+        unparsed_names=unparsed_names,
     )
 
 
@@ -283,6 +349,7 @@ def migrate_database(
             applied_names,
             [p.name for p in migration_files],
             resolved_db_path,
+            list_unparsed_files(resolved_migrations_dir, migration_files),
         )
 
         pending = [p for p in migration_files if p.name not in applied_names]
@@ -439,13 +506,20 @@ def main(argv: list[str] | None = None) -> int:
     db_path = _resolve_cli_db_path(args)
 
     if args.command == "migrate":
-        applied_now = migrate_database(
-            db_path,
-            migrations_dir=args.migrations_dir,
-            up_to=args.up_to,
-            verbose=True,
-            workspace_root=_resolve_cli_workspace_root(args),
-        )
+        try:
+            applied_now = migrate_database(
+                db_path,
+                migrations_dir=args.migrations_dir,
+                up_to=args.up_to,
+                verbose=True,
+                workspace_root=_resolve_cli_workspace_root(args),
+            )
+        except DatabaseAheadOfCodeError as exc:
+            # 与后端启动路径统一（#274 N-4）：exit=2 + 可读错误，不打裸 traceback。
+            # 两条路径同一个语义（库比代码新 ⇒ 拒绝），退出码也统一为 2；
+            # `check` 的 1 表示「库未初始化」，是不同的语义，保持不变。
+            print(f"[TOGO] ERROR {exc}", file=sys.stderr)
+            return 2
         if applied_now:
             print(f"Applied {len(applied_now)} migration(s).")
         else:
@@ -510,6 +584,7 @@ __all__ = [
     "check_database_initialized",
     "clear_database",
     "has_pending_migrations",
+    "list_unparsed_files",
     "main",
     "migrate_database",
     "migration_status",

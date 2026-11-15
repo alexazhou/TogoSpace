@@ -171,7 +171,6 @@ async def main(
     # 端口优先使用命令行参数，其次使用配置文件
     bind_host = app_config.setting.bind_host
     bind_port = port if port is not None else app_config.setting.bind_port
-    logger.info("[启动] 监听地址：%s:%d", bind_host, bind_port)
 
     # ── 数据库迁移：先于所有 service 执行 ────────────────────────────────────
     _run_database_migrations(
@@ -225,6 +224,9 @@ async def main(
     web_server = tornado.httpserver.HTTPServer(route.application)
     try:
         web_server.listen(bind_port, bind_host)
+        # 只在**真正 bind 成功之后**打这行（#274 N-3）：迁移守卫拒绝启动时不该出现任何
+        # 「监听/已就绪」字样，否则 `grep 监听地址` 会把它误读成「已经起来了」。
+        logger.info("[启动] 已监听：%s:%d（HTTP 服务已就绪）", bind_host, bind_port)
         if callbacks is not None and callbacks.on_ready is not None:
             callbacks.on_ready(bind_host, bind_port)
         await _shutdown_event.wait()
