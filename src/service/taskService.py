@@ -567,9 +567,38 @@ async def _update_reviewer_with_event(
     - 任一写入失败即整体回滚：不允许出现「验收人改了但时间线没记录」；
     - 推送放在事务块外（回滚时不会出现「推了但没落库」）。
     """
+    stages = await _load_stages(task)
+    cursor = _effective_cursor(task, stages)
+    review_indexes = [
+        index for index, stage in enumerate(stages)
+        if _stage_field(stage, "node_type") == StageNodeType.REVIEW
+    ]
+    save_fields: list = [GtAgentTask.reviewer_id]
+
     async with atomic():
         task.reviewer_id = new_reviewer_id  # 同步内存态，保证返回体与落库一致
-        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+        if new_reviewer_id is None:
+            # 撤销（#253 S-1）：节点表里的 REVIEW 节点必须一起移除，否则残留节点会让
+            # 执行人后续置 DONE 时被 `non_final_stage_cannot_done` 拦住。
+            # 多级任务已在 `_handle_reviewer_change` 入口拒绝，这里只会是单审核节点。
+            for index in review_indexes:
+                await gtAgentTaskStageManager.delete_stage_and_reindex(task.id, index)
+        elif review_indexes:
+            # 换人：节点 1 的负责人跟着换；若当前正停在审核节点上，持棒人也一起换
+            # （否则新验收人调 DONE/advance/reject 全被拒，待办还挂在旧人名下）。
+            target_index = review_indexes[0]
+            await gtAgentTaskStageManager.update_stage_owner(task.id, target_index, new_reviewer_id)
+            if task.status == TaskStatus.REVIEWING and cursor == target_index:
+                task.current_owner_id = new_reviewer_id
+                save_fields.append(GtAgentTask.current_owner_id)
+        else:
+            # 补设：本来没有审核节点 ⇒ 末尾追加一个 REVIEW 节点（否则提交验收过不去）
+            await gtAgentTaskStageManager.insert_stages_after(
+                task.id,
+                len(stages) - 1,
+                [{"owner_id": new_reviewer_id, "node_type": StageNodeType.REVIEW, "name": ""}],
+            )
+        await gtAgentTaskManager.save_task(task, only=save_fields)
         event = await gtAgentTaskEventManager.append_event(
             task.id,
             actor_id,
@@ -684,6 +713,21 @@ async def _handle_reviewer_change(
                 "message": f"验收人必须是在职成员：agent_id={new_reviewer_id} 已离职",
                 "error_code": "invalid_reviewer",
             }
+
+    # S-1（#253，文档确认口径 ②）：多级任务不走 v2 的 reviewer_id 简写。
+    # 节点数 > 2 或 REVIEW 节点 > 1 时，「唯一审核节点」这个前提不成立：改哪个节点
+    # 无法从 v2 入参推断，硬猜等于替用户改判 ⇒ 拒绝并引导到 reassign_stage。
+    change_stages = await _load_stages(task)
+    if len(change_stages) > 2 or len(_review_nodes(change_stages)) > 1:
+        return {
+            "success": False,
+            "message": (
+                f"该任务是 {len(change_stages)} 节点、{len(_review_nodes(change_stages))} 个审核节点的"
+                "多级链路，不能用 reviewer_id / clear_fields=[\"reviewer_id\"] 改验收人；"
+                "请用 reassign_stage={\"stage_index\": <节点序号>, \"owner_id\": <成员>} 指定具体审核节点"
+            ),
+            "error_code": "reviewer_change_requires_reassign_stage",
+        }
 
     # D4：与当前验收人相同 ⇒ 无变化，不写无意义事件
     if new_reviewer_id == task.reviewer_id:
@@ -1213,6 +1257,10 @@ async def _apply_stage_update(
         if owner_error is not None:
             return owner_error
         new_stages = await gtAgentTaskStageManager.insert_stages_after(task.id, last_index, specs)
+        # S-4（#253，确认口径 ①）：后置加签可能新增 REVIEW 节点，v2 兼容列必须同步，
+        # 否则执行人按 v2 习惯提交 REVIEWING 会被 `no_reviewer` 误拒。
+        task.reviewer_id = _compat_reviewer_for(new_stages, cursor)
+        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
         action_type = TaskEventAction.STAGE_ADD
         event = await gtAgentTaskEventManager.append_event(
             task.id, caller_id,
@@ -1321,7 +1369,15 @@ async def _apply_stage_update(
         await gtAgentTaskManager.save_task(task, only=[GtAgentTask.current_owner_id])
     reviewer_id = _compat_reviewer_for(stages_after, cursor)
     task.reviewer_id = reviewer_id
-    await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+    # S-4（#253，确认口径 ②）：节点 0 是任务主执行人，换人必须同步 v2 兼容列
+    # `assignee_id`，否则新负责人 claim_task 被拒、按 assignee 的查询仍归属旧人。
+    if raw_index == 0:
+        task.assignee_id = raw_owner
+        await gtAgentTaskManager.save_task(
+            task, only=[GtAgentTask.reviewer_id, GtAgentTask.assignee_id]
+        )
+    else:
+        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
     event = await gtAgentTaskEventManager.append_event(
         task.id, caller_id,
         from_status=task.status, to_status=task.status,

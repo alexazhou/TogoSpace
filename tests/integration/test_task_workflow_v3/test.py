@@ -855,3 +855,198 @@ class TestJudgeDebt(_WorkflowCase):
                 if e["action_type"] == TaskEventAction.ADVANCE.value
             )
             assert cursor_seq == [(0, 1)], f"任务 {tid} 的 ADVANCE 事件异常：{cursor_seq}"
+
+
+class TestReviewFix253(_WorkflowCase):
+    """#253 review_notes 落地判据：S-1（reviewer 变更同步）/ S-2（PENDING·ON_HOLD 闸门）
+    / S-4（append_stages·reassign_stage 兼容列同步）/ S-6（末节点 EXECUTION 的 v2 DONE 写法）。
+
+    每条都先在 `2e155037`（未改代码）上跑过并红（证据见 `shared/task-v3-review-fix.md`）。
+    """
+
+    async def _third_agent(self, team_id: int) -> int:
+        """取或建团队里的第三个成员 `carol`。
+
+        S-1 的「换验收人」必须有第三人：验收人不能等于执行人，二人团队里换人无处可换。
+        """
+        from dal.db import gtAgentManager
+        from model.dbModel.gtAgent import GtAgent
+
+        existing = await gtAgentManager.get_agent(team_id, "carol")
+        if existing is not None:
+            return existing.id
+        alice = await gtAgentManager.get_agent(team_id, "alice")
+        assert alice is not None
+        await gtAgentManager.batch_save_agents(
+            team_id,
+            [GtAgent(
+                team_id=team_id,
+                name="carol",
+                role_template_id=alice.role_template_id,
+                i18n={"display_name": {"zh-CN": "carol"}},
+            )],
+        )
+        created = await gtAgentManager.get_agent(team_id, "carol")
+        assert created is not None, "第三个成员创建失败"
+        return created.id
+
+    # ---------------- S-1：reviewer_id 变更必须同步节点链与持棒人 ----------------
+
+    async def test_s1_change_reviewer_while_reviewing_moves_holder(self):
+        """REVIEWING 换验收人：节点 1 负责人与 `current_owner_id` 必须一起换，新验收人可收尾。
+
+        原缺陷：`_update_reviewer_with_event` 只改 `agent_tasks.reviewer_id`，节点链与
+        持棒人不动 ⇒ 新验收人调 DONE/advance/reject 全被拒，待办仍挂在旧人名下。
+        """
+        team_id, alice, bob = await self._agents()
+        carol = await self._third_agent(team_id)
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S1-REVIEWING换验收人",
+            assignee_id=bob, reviewer_id=alice,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        await taskService.update_task(team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS")
+        submitted = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, new_status="REVIEWING", note="提交验收",
+        )
+        assert submitted["success"] is True, submitted
+        assert (await self._stages(task_id))[1][2] == alice, "前置：节点 1 应是旧验收人"
+
+        changed = await taskService.update_task(
+            team_id=team_id, caller_id=alice, task_id=task_id, reviewer_id=carol,
+        )
+        assert changed["success"] is True, changed
+
+        task = await self._task(team_id, task_id)
+        assert (await self._stages(task_id))[1][2] == carol, "节点 1 负责人没跟着换 ⇒ v3 侧持棒人仍是旧人"
+        assert task["current_owner_id"] == carol, "主表持棒人没跟着换"
+        assert task["reviewer_id"] == carol
+
+        done = await taskService.update_task(
+            team_id=team_id, caller_id=carol, task_id=task_id, new_status="DONE", note="新验收人通过",
+        )
+        assert done["success"] is True, f"换人后的新验收人被拒：{done}"
+        assert _status_of(await self._task(team_id, task_id)) == "DONE"
+
+    async def test_s1_clear_reviewer_removes_review_stage(self):
+        """撤销验收人：必须同时移除 REVIEW 节点，之后执行人可直接 DONE。
+
+        原缺陷：节点链残留 REVIEW 节点 ⇒ 执行人置 DONE 时被 `non_final_stage_cannot_done` 拦住。
+        """
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S1-撤销验收人",
+            assignee_id=bob, reviewer_id=alice,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        await taskService.update_task(team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS")
+
+        cleared = await taskService.update_task(
+            team_id=team_id, caller_id=alice, task_id=task_id, clear_fields=["reviewer_id"],
+        )
+        assert cleared["success"] is True, cleared
+
+        stages = await self._stages(task_id)
+        assert [s[1] for s in stages] == ["EXECUTION"], f"撤销验收人后仍残留审核节点：{stages}"
+        assert (await self._task(team_id, task_id))["reviewer_id"] is None
+
+        done = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, new_status="DONE", note="无需验收，直接完成",
+        )
+        assert done["success"] is True, f"撤销验收人后执行人仍不能直接完成：{done}"
+        assert _status_of(await self._task(team_id, task_id)) == "DONE"
+
+    async def test_s1_set_reviewer_appends_review_stage(self):
+        """给无验收人的任务补设 `reviewer_id`：必须追加 REVIEW 节点，之后能提交验收。
+
+        原缺陷：节点链只有 1 个 EXECUTION 节点 ⇒ 提交 REVIEWING 被 `non_final_stage_cannot_done` 拒。
+        """
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S1-补设验收人", assignee_id=bob,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        assert [s[1] for s in await self._stages(task_id)] == ["EXECUTION"], "前置：单执行节点"
+        await taskService.update_task(team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS")
+
+        set_reviewer = await taskService.update_task(
+            team_id=team_id, caller_id=alice, task_id=task_id, reviewer_id=alice,
+        )
+        assert set_reviewer["success"] is True, set_reviewer
+        assert [s[1] for s in await self._stages(task_id)] == ["EXECUTION", "REVIEW"], (
+            f"补设验收人后没有追加审核节点：{await self._stages(task_id)}"
+        )
+
+        submitted = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, new_status="REVIEWING", note="提交验收",
+        )
+        assert submitted["success"] is True, f"补设验收人后仍不能提交验收：{submitted}"
+
+    async def test_s1_multi_level_task_rejects_reviewer_id_shorthand(self):
+        """多级任务（节点数 > 2 或 REVIEW 节点 > 1）拒绝 `reviewer_id=` 写法，引导用 `reassign_stage`。"""
+        task_id, team_id, alice, bob = await self._create_chain(title="S1-多级拒绝v2写法")
+        carol = await self._third_agent(team_id)
+        reviewer_before = (await self._task(team_id, task_id))["reviewer_id"]
+
+        result = await taskService.update_task(
+            team_id=team_id, caller_id=alice, task_id=task_id, reviewer_id=carol,
+        )
+        assert result["success"] is False, f"多级任务应拒绝 reviewer_id 写法：{result}"
+        assert result["error_code"] == "reviewer_change_requires_reassign_stage", result
+        assert "reassign_stage" in result["message"], result["message"]
+        assert (await self._task(team_id, task_id))["reviewer_id"] == reviewer_before, (
+            "被拒的调用不该改动任何东西"
+        )
+
+    # ---------------- S-4：节点链调整后同步 v2 兼容列 ----------------
+
+    async def test_s4_append_stages_syncs_compat_reviewer_id(self):
+        """`append_stages` 追加 REVIEW 节点后，主表 `reviewer_id` 必须同步，否则 v2 提交验收被 `no_reviewer` 拒。"""
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S4-append同步reviewer", assignee_id=bob,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        await taskService.update_task(team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS")
+
+        appended = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id,
+            append_stages=[{"owner_id": alice, "node_type": "REVIEW", "name": "补审核"}],
+        )
+        assert appended["success"] is True, appended
+        assert (await self._task(team_id, task_id))["reviewer_id"] == alice, (
+            "append_stages 没同步 reviewer_id ⇒ v2 提交验收会被 no_reviewer 拒"
+        )
+
+        submitted = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, new_status="REVIEWING", note="提交验收",
+        )
+        assert submitted["success"] is True, f"加签后 v2 提交验收仍被拒：{submitted}"
+
+    async def test_s4_reassign_stage_zero_syncs_assignee_id(self):
+        """`reassign_stage` 换节点 0 负责人时，主表 `assignee_id` 必须同步，否则新人认领失败。"""
+        team_id, alice, bob = await self._agents()
+        carol = await self._third_agent(team_id)
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S4-换节点0负责人", assignee_id=bob,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+
+        moved = await taskService.update_task(
+            team_id=team_id, caller_id=alice, task_id=task_id,
+            reassign_stage={"stage_index": 0, "owner_id": carol},
+        )
+        assert moved["success"] is True, moved
+        assert (await self._task(team_id, task_id))["assignee_id"] == carol, (
+            "换节点 0 负责人后 assignee_id 没同步 ⇒ claim_task 与按 assignee 过滤仍归属旧人"
+        )
+
+        claimed = await taskService.update_task(
+            team_id=team_id, caller_id=carol, task_id=task_id, new_status="IN_PROGRESS", note="新人认领",
+        )
+        assert claimed["success"] is True, f"新负责人认领被拒：{claimed}"
