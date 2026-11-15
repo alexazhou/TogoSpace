@@ -509,13 +509,17 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
             dispatcher(list(argv))
     except SystemExit as exc:  # mcp2cli 的错误路径：sys.exit(1) 绝不能杀后端进程
         code = exc.code if isinstance(exc.code, int) else 1
-        return {
-            "success": False,
-            "error_code": "mcp2cli_exit",
-            "message": f"mcp2cli 以退出码 {code} 结束（参数或目标有误）。",
-            "exit_code": code,
-            "stderr": _truncate(stderr.getvalue())[0],
-        }
+        # #282：`sys.exit(0)` 与「正常返回」同义（退出码 0 = 成功），不该报失败。
+        # 显式 0 退出继续往下走输出解析（JSON 或纯文本两条路都一样）；
+        # 非 0 才是失败，保持原返回形态。
+        if code != 0:
+            return {
+                "success": False,
+                "error_code": "mcp2cli_exit",
+                "message": f"mcp2cli 以退出码 {code} 结束（参数或目标有误）。",
+                "exit_code": code,
+                "stderr": _truncate(stderr.getvalue())[0],
+            }
     except Exception as exc:  # noqa: BLE001 —— 任何异常都转结构化失败，不往上冒
         # 出口打码（#277 F2/F6）：打码必须作用在**日志最终输出的形态**上。
         # 不用 `%r`+先 repr：repr 先转义（' → \'、\ → \\、换行/制表同理），明文串
@@ -546,27 +550,33 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
         }
     try:
         payload = json.loads(out)
-    except json.JSONDecodeError as exc:
-        # **防御性分支，当前不可达**（#202 复验 B5）：本工具固定带 `--json`，而上游
-        # `output_result` 在 `json_output=True` 时会把任何非 JSON 响应体包成合法 JSON
-        # 字符串再输出（`json.loads` 失败 → `_emit_json` 原样输出）。所以 `out` 走到
-        # 这里只能说明「上游改了这层保证」。保留它是因为届时若没有这个兜底，模型会收到
-        # 一个无法解释的空返回；但**不要当能力宣称**：非 JSON 响应请按返回体的
-        # `result_type == "string"` 判断。
-        body, cut = _truncate(out)
-        return {
-            "success": False,
-            "error_code": "mcp2cli_bad_json",
-            "message": f"输出不是合法 JSON：{exc.msg}（已固定 --json，此分支应为防御性）",
-            "raw_excerpt": body,
-            "truncated": cut,
-            "stderr": _truncate(err)[0],
-        }
+    except json.JSONDecodeError:
+        # #282（方案 A，Operator 2026-11-16 02:19 选型）：**非 JSON 输出不等于失败**，
+        # 改按「进程退出码」判成败 —— 能走到这里就等价于退出码 0：
+        # `_main_impl` 正常返回（未 `sys.exit`），而 mcp2cli 的失败路径是 `sys.exit(1)`
+        # 并被上面的 `except SystemExit` 接走（⇒ `mcp2cli_exit`、success=False）。
+        # 库调用路径**拿不到 returncode**，所以「正常返回」就是 0 的唯一可用证据。
+        #
+        # 旧注释写「防御性分支，当前不可达（#202 复验 B5）」，其假设是「`--json` 会让上游
+        # `output_result` 把任何非 JSON 响应体包成合法 JSON 字符串」。**该假设已被实测推翻**
+        # （#282，Operator 02:19 首先发现）：mcp2cli 的 **CLI 自己 print 的控制台文本**
+        # 不经过 `output_result` 包装 —— `--session-start` / `--session-stop` /
+        # `--session-list` 都是「操作成功 + 输出纯文本」，例如
+        # `Session 'ctx7' started (PID 27570)`、`No active sessions.`。
+        # 旧行为把它们全判成 `mcp2cli_bad_json`（操作成功却报失败），误导使用者重试。
+        #
+        # 这里**不按开关名做白名单**（方案 B 已被否）：任何文本型输出都走这条统一兜底，
+        # 形态与「JSON 成功」完全一致 —— 原文进 `result`、`result_type="string"`，
+        # 超限时按同一条截断规则只下发 `raw_excerpt`（不下发 result）。
+        payload = out
 
     # 真截断：超限时**不下发 result**。只截 `raw_excerpt` 而照样把完整 payload 塞进
     # `result`，等于把「保护上下文」写成了一句注释 —— 实测 60029 字符的 `result` 就是
     # 这样整份进了模型上下文，`truncated=True` 反而误导成「已经安全」。
-    full = json.dumps(payload, ensure_ascii=False)
+    # #282：纯文本 payload 直接量原文（不 `json.dumps`）——否则截断后的 `raw_excerpt`
+    # 会带一对引号、换行被转成 `\n`，人看到的就不是 CLI 原本输出的那一行了。
+    # JSON payload 仍走 `json.dumps`（长度口径与既有行为逐字一致）。
+    full = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
     result_type = _result_type(payload)
     if len(full) > MAX_OUTPUT_CHARS:
         body, _ = _truncate(full)
