@@ -34,7 +34,9 @@ gtsp v0.4.19（`assets/execute/gtsp/gtsp-darwin-arm64`，md5 `b32f5cdc…`）`sc
 
 from __future__ import annotations
 
+import datetime
 import gc
+import hashlib
 import json
 
 import subprocess
@@ -439,3 +441,119 @@ def test_gtsp_live_schema_matches_fixture(gtsp_tools) -> None:
     # 本用例要起真实子进程；显式回收，避免把 GC 时点推到后续用例上
     # （未回收的 transport 在别人用例里触发 PytestUnraisableExceptionWarning）。
     gc.collect()
+
+
+# --------------------------------------------------------------------------- #
+# ⑦ provenance 守护：`__provenance__` 三字段此前**无任何判据**（#239 验收 D1）
+#
+# 背景：`__provenance__` 记的是「这份快照从哪个二进制的哪次 dump 来」。它此前全仓
+# 无读者 —— 实测把三个字段全改成假值（`deadbeef…` / `2020-01-01` / `v0.4.19`），
+# 本文件照样 10 passed。后果：升 gtsp 时**只刷了 schema、忘了改 provenance**，
+# 文件里记的信息是错的，却永远绿。
+#
+# 三条判据各自锚到一个**外部来源物**，而不是互相自证：
+#   md5        ← 二进制真实字节
+#   version    ← 二进制 `--version` 实收
+#   dumped_at  ← fixture 引入仓库的日期（外部常量，不随文件内容漂移）
+# --------------------------------------------------------------------------- #
+
+#: 快照取自哪个二进制 —— 与 `__provenance__.source` 的第一段一致
+#: （`assets/execute/gtsp/gtsp-darwin-arm64`）。
+#:
+#: 这里**刻意写死 darwin-arm64**、不用 `appPaths.get_gtsp_binary_path()`：后者按
+#: **当前主机平台**解析（linux CI 上拿到 `gtsp-linux-amd64`），它的 md5 与 darwin
+#: 快照记录的值必然不同 ⇒ 会造出一条与代码无关的假红。而 md5 只看字节、不需要执行
+#: 权限 ⇒ 这条判据**在 ubuntu CI 上也是真跑的**（`test.yml` 的 checkout 带 `lfs: true`）。
+_GTSPS_SNAPSHOT_BINARY = _REPO_ROOT / "assets" / "execute" / "gtsp" / "gtsp-darwin-arm64"
+
+#: Git LFS 指针文件的首行。CI/本地若没拉 LFS，工作区里的「二进制」就是这个一百多字节
+#: 的文本，md5 必然与 provenance 不符 —— 那是**环境问题**，不是快照腐化，必须 skip。
+_LFS_POINTER_MAGIC = b"version https://git-lfs.github.com/spec/v1"
+
+#: fixture 首次进入仓库的日期（`b6e1a5ca`，2026-11-12）。`dumped_at` 不可能早于它。
+#: 写死作外部锚点：若改成「读 fixture 自己」就退化成自证。
+_GTSPS_FIXTURE_INTRODUCED_ON = datetime.date(2026, 11, 12)
+
+
+def _provenance() -> dict[str, Any]:
+    payload = json.loads(_GTSPS_SCHEMA_FIXTURE.read_text(encoding="utf-8"))
+    prov = payload.get("__provenance__")
+    assert isinstance(prov, dict), "fixture 缺 __provenance__"
+    return prov
+
+
+def _snapshot_binary_bytes(path: Path) -> bytes:
+    """读快照二进制的真实字节；拿到 LFS 指针时 **skip**（既不是 pass 也不是 fail）。"""
+    assert path.exists(), f"快照二进制不存在: {path}"
+    data = path.read_bytes()
+    if data.startswith(_LFS_POINTER_MAGIC):
+        pytest.skip(
+            f"{path.name} 是 Git LFS 指针（{len(data)} B），实体未拉取；"
+            "本判据要校验真实字节，请先 `git lfs pull`（不是快照腐化，故 skip 而非 fail）"
+        )
+    return data
+
+
+def test_gtsp_schema_provenance_binary_md5() -> None:
+    """`provenance.binary_md5` 必须等于快照所取二进制的真实字节 md5。
+
+    这条能咬住的典型事故：升 gtsp 换了二进制、只刷了 schema 的 `tools`，忘了改
+    `binary_md5` —— 文件里记的「从哪个二进制 dump 来」是错的，但此前永远绿。
+    """
+
+    prov = _provenance()
+    # 一致性前提：provenance 的 `source` 与本文写死的快照文件名必须是同一个，
+    # 否则「md5 锚到哪个文件」就变成无约束的猜测。
+    assert _GTSPS_SNAPSHOT_BINARY.name in prov["source"], (
+        f"provenance.source 未指向本文校验的二进制 {_GTSPS_SNAPSHOT_BINARY.name}: {prov['source']!r}"
+    )
+
+    actual = hashlib.md5(_snapshot_binary_bytes(_GTSPS_SNAPSHOT_BINARY)).hexdigest()
+    assert prov["binary_md5"] == actual, (
+        f"provenance.binary_md5={prov['binary_md5']!r} 与 {_GTSPS_SNAPSHOT_BINARY.name} "
+        f"实际 md5={actual!r} 不符 —— 升 gtsp 后请同步刷新 __provenance__"
+    )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="--version 需要执行 darwin 二进制；ubuntu CI 上本判据不覆盖")
+def test_gtsp_schema_provenance_gtsp_version() -> None:
+    """`provenance.gtsp_version` 必须等于二进制 `--version` 的实收输出。
+
+    可执行文件用 `appPaths.get_gtsp_binary_path()`（按平台解析，Intel mac 上是
+    darwin-amd64 —— 版本常量各平台一致，比 `gtsp_version` 无碍）；md5 那条才必须
+    钉死 darwin-arm64 快照文件本身。
+    """
+
+    import appPaths
+
+    binary = appPaths.get_gtsp_binary_path()
+    _snapshot_binary_bytes(Path(binary))  # LFS 指针 ⇒ skip
+
+    proc = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 0, proc.stderr
+    actual = proc.stdout.strip()
+
+    prov = _provenance()
+    assert prov["gtsp_version"] == actual, (
+        f"provenance.gtsp_version={prov['gtsp_version']!r} 与 {binary} --version 实收 {actual!r} 不符"
+    )
+
+
+def test_gtsp_schema_provenance_dumped_at() -> None:
+    """`provenance.dumped_at` 必须是合法 `YYYY-MM-DD`，且不早于 fixture 引入仓库的日期。
+
+    上限（今天 +1 天）只防粗大笔误（如写成 `2126-11-15`），留一天余量吸收时区/时钟差。
+    """
+
+    raw = _provenance()["dumped_at"]
+    try:
+        dumped = datetime.date.fromisoformat(raw)
+    except (TypeError, ValueError) as exc:
+        pytest.fail(f"provenance.dumped_at 不是合法的 YYYY-MM-DD: {raw!r}（{exc}）")
+
+    assert dumped >= _GTSPS_FIXTURE_INTRODUCED_ON, (
+        f"provenance.dumped_at={raw} 早于 fixture 引入仓库的日期 {_GTSPS_FIXTURE_INTRODUCED_ON}"
+    )
+    assert dumped <= datetime.date.today() + datetime.timedelta(days=1), (
+        f"provenance.dumped_at={raw} 在未来（今天 {datetime.date.today()}），疑似笔误"
+    )
