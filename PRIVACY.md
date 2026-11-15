@@ -35,7 +35,7 @@ This document is intentionally bilingual so that both users and code-signing rev
 | # | 触发方式 | 目标 | 发送内容 | 代码位置 |
 |---|---|---|---|---|
 | 1 | 启动时自动检查更新（**可在设置里关闭**，配置项 `auto_check_update`，默认开启） | `https://api.github.com/repos/alexazhou/TogoSpace/releases/latest`（GitHub Releases API） | 仅一个固定 `User-Agent: Togobot-UpdateChecker`；不带任何用户数据、标识或统计 | `src/service/updateService.py:15`、`:89-98`；默认值 `src/util/configUtil/configTypes.py:266`；开关接口 `src/controller/systemController.py:92-96` |
-| 2 | 你**配置了**某个 LLM 服务商并使用对话/任务功能 | 你填的 `base_url`（`llm_providers` 默认为**空列表**，未配置就不发任何请求） | 你发给该服务商的对话内容、上下文与你的 API Key | `src/util/configUtil/configTypes.py:259`（`llm_providers` 默认空）、`src/service/llmService/core.py:195` |
+| 2 | 你**配置了**某个 LLM 服务商并使用对话/任务功能 | 你填的 `base_url`（`llm_providers` 默认为**空列表**，未配置就不发任何请求） | 你发给该服务商的对话内容、上下文与你的 API Key | `src/util/configUtil/configTypes.py:258`（`llm_providers` 默认空）、`src/util/llmApiUtil/client.py:269`（流式）、`:340`（非流式） |
 | 3 | Agent 使用「网页抓取」工具时 | 它要抓取的那个网址 | 你/Agent 指定的 URL 与常规 HTTP 头 | `src/service/funcToolService/webFetchTool.py:464` |
 | 4 | 你在设置里填入**自己的**第三方搜索 API Key 并主动测试/使用 | `https://api.deepseek.com/...` 或 `https://api.xiaomimimo.com/...` | 你的搜索 query 与你的 API Key | `src/service/thirdPartyService/deepseekService.py:18`、`xiaomiMimoService.py:18`，调用方 `src/controller/thirdPartyController.py:82`、`:100` |
 
