@@ -1075,6 +1075,40 @@ class TestReviewFix253(_WorkflowCase):
         assert result["error_code"] == "dependency_not_met", result
         assert _status_of(await self._task(team_id, task_id)) == "PENDING", "被拒后状态不该变"
 
+    async def test_s2_advance_rejected_when_pending_without_dependency(self):
+        """`PENDING` 且 `depends_on` 为空时 `advance` 必须报 `task_not_started`。
+
+        这条咬的是 `task_not_started` 分支的**可达性**：`TODO → PENDING` 在
+        `_ALLOWED_TRANSITIONS` 里是合法转换（见 `taskService` 顶部的转换表），所以
+        「`depends_on` 为空 + `status=PENDING`」不用脏数据、走公开 API 就能造出来
+        （排期搁置、外部系统回写等场景）。此时既没有未完成依赖可报
+        `dependency_not_met`，任务又确实还没被认领 ⇒ 只能走保守支：要求先流转。
+        若该分支被删，`advance` 会直接 fall through 到持棒人校验（assignee 就是持棒人）
+        并成功推进，判据即红。
+        """
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S2-无依赖却PENDING", assignee_id=bob,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        parked = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id,
+            new_status="PENDING", note="先挂着等排期",
+        )
+        assert parked["success"] is True, f"前置：TODO → PENDING 是合法转换，却被拒：{parked}"
+        task = await self._task(team_id, task_id)
+        assert (_status_of(task), list(task.get("depends_on") or [])) == ("PENDING", []), (
+            f"前置：应为「PENDING 且无依赖」，实际 {_status_of(task)} / depends_on={task.get('depends_on')}"
+        )
+
+        result = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="硬推",
+        )
+        assert result["success"] is False, f"PENDING（无依赖）任务被 advance 绕过：{result}"
+        assert result["error_code"] == "task_not_started", result
+        assert _status_of(await self._task(team_id, task_id)) == "PENDING", "被拒后状态不该变"
+
     async def test_s2_advance_and_reject_rejected_when_on_hold(self):
         """`ON_HOLD` 时 `advance` 与 `reject` 都必须被拒（先恢复在途状态）。"""
         team_id, alice, bob = await self._agents()
