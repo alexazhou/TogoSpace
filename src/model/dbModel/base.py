@@ -36,6 +36,16 @@ def unbind_database() -> None:
     _database_proxy.initialize(None)
 
 
+def database_bound() -> bool:
+    """代理是否已绑库（未绑时任何查询都会抛「Cannot use uninitialized Proxy.」）。
+
+    #224 引入：注册表查询走这条代理，而「别名解析」是 `mcp_call` 的**增量能力**——
+    注册表不可用（未绑库）时解析必须跳过、按未命中透传，让既有调用行为回到 #224
+    之前（调用方在无库环境直调第 2 跳不应被新增能力打死）。
+    """
+    return _database_proxy.obj is not None
+
+
 @asynccontextmanager
 async def atomic() -> AsyncIterator[None]:
     """跨表写操作的公共事务边界（所有模型共用同一个 `_database_proxy`）。

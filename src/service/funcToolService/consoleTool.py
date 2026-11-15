@@ -170,6 +170,35 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     ),
     "role create": ("只能创建 USER 类型；SYSTEM 内置模板只读。",),
     "role rm": ("只能删除 USER 类型且当前未被任何成员使用的模板。",),
+    # MCP 注册表（#224→#273 全局版）。`add` 的动作词偏离（不叫 create）是有意裁定
+    # （沿 #223 §3.2.1 T5）：登记的是指向外部服务的指针、不是 team 内实体——这句差异
+    # 必须钉在人也能看到的 help 里；kind 默认 mcp 与 `mcp call` 的默认 openapi 不同，
+    # 必须明写。#273：注册表改全局（不分 team）、alias 改 name、新增 enable。
+    "mcp add": (
+        "登记到全局注册表（不分 team），非创建业务实体（动作词 add 而非 create 是有意的）。"
+        "登记后所有团队都可用 `mcp call <name>` 复用；写入需 leader/根主管权限（普通成员会收到 admin_denied）。",
+        "kind 默认 mcp（注意：`mcp call` 直接调用的默认是 openapi，两者有意不同；"
+        "spec 文件请显式 --kind openapi）。stdio 启动命令含空格必须加引号，如 "
+        "--target \"npx -y @browserbasehq/mcp\"。",
+        "默认 insert-only：name 已存在会报 mcp_name_exists，覆盖必须显式 --overwrite true。"
+        "凭证只收引用（如 --credentials '{\"headers\":{\"Authorization\":\"env:GITHUB_TOKEN\"}}'），不接受明文。",
+    ),
+    "mcp rm": (
+        "只按 name 精确删（不支持按 target 或前缀匹配）；name 不存在报 mcp_name_not_found，不静默成功。"
+        "返回体带被删条目的脱敏摘要（target 已打码）。",
+    ),
+    "mcp enable / mcp disable": (
+        "启用/禁用一个登记项（禁用≠删除：`mcp ls` 仍列出并标注 enable=false；"
+        "禁用后该 server 的工具不出现在可用列表，`mcp call` 报 mcp_server_disabled）。"
+        "用法：mcp enable ctx7 / mcp disable ctx7；写入需 leader/根主管权限。",
+    ),
+    "mcp ls": (
+        "无参 = 列全局注册表（忽略一切选项，返回 servers/count；禁用条目仍列出并标注 enable=false）；"
+        "有参 = 对 name 或完整 target 列工具清单（name 命中用注册项的 target/kind，未命中原样透传）。",
+        "有参列的是 openapi spec 时：⚠️ 若 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发）；"
+        "此时请改用完整 URL 的 target，或在该 spec 里补 servers。",
+        "count 超过 20 时返回体会建议收窄；写入需 leader/根主管权限。",
+    ),
     "task ls": (
         "只列未完结任务（要含已完结请用 --status 显式列出，如 --status DONE,CANCELLED）。",
         "状态：TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED",
@@ -180,11 +209,6 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "建单不会自动唤醒执行人：建完请另发 send_chat_msg 通知对方（返回体 hint 字段会再提醒一次）。",
         "必填 --title / --assignee-id；其余可选。数组/对象型参数（--depends-on）"
         "建议用 --from payload 传，避免引号被 shell 拆坏。",
-    ),
-    "mcp ls": (
-        "target 形态由 --kind 决定（openapi / mcp / mcp_stdio / graphql），详见 help mcp call。",
-        "⚠️ 若目标 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发）；"
-        "此时请改用完整 URL 的 target，或在该 spec 里补 servers。",
     ),
     "mcp call": (
         "先 `mcp ls <target>` 拿工具清单，再 `mcp call <target> --tool 名 --args '{...}'`。",

@@ -456,14 +456,23 @@ async def test_call_after_timeout_still_succeeds(tmp_path: Path, dynamic_server)
 
 @pytest.mark.asyncio
 async def test_console_mcp_ls_forwards_to_mcp_call(tmp_path: Path):
+    """`mcp ls <target>` 的转发目标（#224 改写登记）。
+
+    #224 前本用例断言 `mcp ls` 直接转发 `mcp_call`（`{"target": …}`）。#224 按设计稿
+    §3.3 把 `mcp ls` 换成 `list_mcp_servers`（DIRECT，宽签名：0~1 段位置参数都要到达
+    工具），有参分支由该工具**委托** `mcp_call(action="list")`——旧用法一字不改，只是
+    多了一跳纯转发。改写后本用例钉新契约；委托关系由
+    `test_console_mcp_ls_with_target_delegates_to_mcp_call`（test_mcp_registry_console）
+    钉住。
+    """
     spec_path = _write_spec(tmp_path, "http://127.0.0.1:9")
 
     with pytest.raises(ForwardToolCall) as excinfo:
         await console(f"mcp ls {spec_path}")
 
     forward = excinfo.value
-    assert forward.tool_name == "mcp_call"
-    assert forward.tool_args == {"target": spec_path}
+    assert forward.tool_name == "list_mcp_servers"
+    assert forward.tool_args == {"name_or_target": spec_path}
 
 
 @pytest.mark.asyncio

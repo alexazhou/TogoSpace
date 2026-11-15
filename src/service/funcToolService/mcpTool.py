@@ -89,6 +89,7 @@ import contextlib
 import io
 import json
 import logging
+import os
 import sys
 import threading
 from typing import TYPE_CHECKING, Any, cast
@@ -191,6 +192,7 @@ def build_argv(
     tool: str | None,
     args: dict[str, Any] | None,
     extra: dict[str, Any] | None,
+    credential_refs: dict[str, Any] | None = None,
 ) -> list[str]:
     """按 mcp2cli 的 CLI 语法拼出 argv（纯函数，便于单测直接断言）。
 
@@ -198,6 +200,13 @@ def build_argv(
     处把 argv 切成「全局段 / 工具段」，工具段里的选项只认该工具自己的参数。所以
     `extra` 里的全局开关必须排在工具名**之前** —— 排在后面不会报「未知开关」，而是让
     工具子 parser `exit(2)` 并喷一整页 usage（实测：`get-a --head 1` → 退出码 2）。
+
+    `credential_refs`（#224，1331 硬条件 ⅰ）：注册表条目的凭证**引用**（只允许
+    `env:VAR` 引用原文，由 `tools.mcp_call` 从注册表组装，不占模型可见 schema）。
+    headers 层 → `--auth-header "名:env:VAR"`、env 层（stdio 子进程环境）→
+    `--env "VAR=env:SRC"`，同样必须落在工具名之前。**这里只放引用原文，永不解析**：
+    解析替换发生在 `call_mcp` 的 argv 日志**之后**、真正分派之前（硬条件 ⅱ），
+    由 `_with_resolved_credentials` 做——日志与返回体里 grep 不到任何解析后的值。
     """
     flag = _SOURCE_FLAGS.get(kind)
     if flag is None:
@@ -234,6 +243,10 @@ def build_argv(
         else:
             argv.extend([name, json.dumps(value, ensure_ascii=False)])
 
+    # 凭证引用段：同为全局开关，排在工具名之前、extra 之后（顺序语义见 docstring）。
+    # 值是引用原文（env:VAR），解析在日志之后由 _with_resolved_credentials 做。
+    argv.extend(_credential_segments(credential_refs))
+
     if normalized == "list":
         argv.append("--list")
     elif normalized == "call":
@@ -244,6 +257,84 @@ def build_argv(
     else:
         raise McpCallError("mcp_invalid_action", f"action 只支持 list / call，收到 {action!r}。")
     return argv
+
+
+# ---------------------------------------------------------------------------
+# 凭证引用 → 值的解析（#224，1331 硬条件 ⅱ）
+#
+# 时序写死：build_argv 只放引用原文 → call_mcp 打 argv 日志 → **这里解析替换** →
+# 真正分派。日志与返回体里的 argv 永远是引用形态；解析后的值只出现在交给
+# `_main_impl` 的那份运行时 argv 里（openapi/mcp/graphql 三态是进程内库调用，
+# 不产生命令行进程列表）。解析失败报 `credential_unresolved`，**不传空值**——
+# 空值会让上游回 401，排查方向直接跑偏（设计稿 §4.3 B3/B4）。
+# ---------------------------------------------------------------------------
+
+
+def _credential_segments(credential_refs: dict[str, Any] | None) -> list[str]:
+    """凭证引用 → argv 段（引用原文形态；`build_argv` 与解析定位共用同一份生成逻辑）。
+
+    返回 [flag, value, flag, value, ...] 平铺段。
+    """
+    refs = credential_refs or {}
+    segments: list[str] = []
+    for name, ref in (refs.get("headers") or {}).items():
+        segments.extend(["--auth-header", f"{name}:{ref}"])
+    for var, ref in (refs.get("env") or {}).items():
+        segments.extend(["--env", f"{var}={ref}"])
+    return segments
+
+
+def _resolve_credential_ref(ref: str) -> str:
+    """`env:VAR` → 环境变量值。首版只支持 env:（其余在登记时已被拒，这里是防御）。"""
+    scheme, _, var = str(ref).partition(":")
+    var = var.strip()
+    if scheme != "env" or not var:
+        raise McpCallError(
+            "credential_unresolved",
+            f"凭证引用 {ref!r} 当前不可解析（首版只支持 env: 引用）。",
+        )
+    value = os.environ.get(var)
+    if not value:
+        raise McpCallError(
+            "credential_unresolved",
+            f"凭证引用 {ref!r} 在当前机器上不可解析：环境变量 {var} 未设置（或不为空值）。"
+            "跨机迁移后出现此错误属预期行为——请在目标机器配置该环境变量后重试"
+            "（设计稿 §4.3 B4），不要改登记项去绕过。",
+        )
+    return value
+
+
+def _with_resolved_credentials(
+    argv: list[str], credential_refs: dict[str, Any] | None
+) -> list[str]:
+    """把 argv 里**由本模块写入的凭证引用段**替换成解析后的值（整串精确匹配定位）。
+
+    为什么用「期望段整串相等」而不是正则扫描：target / 用户 extra 里完全可能出现
+    含 `env:` 字样的合法数据（如 URL query），按模式扫会误伤；期望段由
+    `_credential_segments` 从同一份 refs 生成，与 `build_argv` 写入的段逐字节相同，
+    只有我们自己写入的那几段能精确命中。
+    """
+    refs = credential_refs or {}
+    if not refs:
+        return argv
+    expected = _credential_segments(refs)
+    if not expected:
+        return argv
+    resolved = list(argv)
+    for index in range(len(resolved) - 1):
+        for slot in range(0, len(expected) - 1, 2):
+            if resolved[index] != expected[slot] or resolved[index + 1] != expected[slot + 1]:
+                continue
+            placeholder = expected[slot + 1]
+            if expected[slot] == "--env":
+                # --env 段："VAR=env:SRC" → "VAR=<值>"
+                var, _, ref = placeholder.partition("=")
+                resolved[index + 1] = f"{var}={_resolve_credential_ref(ref)}"
+            else:
+                # --auth-header 段："Name:env:VAR" → "Name:<值>"
+                name, _, ref = placeholder.partition(":env:")
+                resolved[index + 1] = f"{name}:{_resolve_credential_ref('env:' + ref)}"
+    return resolved
 
 
 #: 与固定 `--json` 冲突、传了也不生效的全局开关（上游 `output_result` 里
@@ -473,17 +564,33 @@ async def call_mcp(
     args: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    credential_refs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """跑一次 mcp2cli 调用并把结果收成工具返回体（不抛异常）。"""
+    """跑一次 mcp2cli 调用并把结果收成工具返回体（不抛异常）。
+
+    `credential_refs`（#224）只收**引用原文**（`env:VAR` 形态，由 `tools.mcp_call`
+    从注册表条目组装）。时序（1331 硬条件 ⅱ）：argv 日志打的是解析**前**的
+    （引用原样）；解析替换在日志之后、真正分派之前；返回体回填的 argv 也是引用
+    形态 —— 日志与返回体里 grep 不到任何解析后的值。
+    """
     try:
-        argv = build_argv(kind=kind, target=target, action=action, tool=tool, args=args, extra=extra)
+        argv = build_argv(
+            kind=kind, target=target, action=action, tool=tool, args=args, extra=extra,
+            credential_refs=credential_refs,
+        )
     except McpCallError as exc:
         return {"success": False, "error_code": exc.error_code, "message": exc.message}
 
     logger.info("mcp_call: argv=%r", argv)
     try:
+        # 解析替换发生在打日志之后、真正发起调用之前（硬条件 ⅱ）。
+        runtime_argv = _with_resolved_credentials(argv, credential_refs)
+    except McpCallError as exc:
+        return {"success": False, "error_code": exc.error_code, "message": exc.message}
+
+    try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(_run_argv_sync, argv), timeout=timeout
+            asyncio.to_thread(_run_argv_sync, runtime_argv), timeout=timeout
         )
     except asyncio.TimeoutError:
         # 注意：这里**只是不再等**，worker 线程仍在跑、仍持着 `_STDOUT_LOCK`

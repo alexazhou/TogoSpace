@@ -81,6 +81,12 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("memory_list", "include_archived"),
     ("memory_search", "limit"),
     ("memory_create", "star_level"),
+    # #224→#273：MCP 注册表四工具里「有默认值、注解不含 None」的参数（+5 ⇒ 26）。
+    ("save_mcp_server", "kind"),
+    ("save_mcp_server", "note"),
+    ("save_mcp_server", "overwrite"),
+    ("list_mcp_servers", "kind"),
+    ("set_mcp_server_enabled", "enable"),
 ]
 
 #: 任务单 §4.2 的 41 个 `Optional` 字段 + #196 新增的 21 个 = 62 个，#198 再 +1
@@ -206,6 +212,17 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("update_task", "reviewer_id"),
     ("update_task", "target_stage"),
     ("update_task", "workflow_action"),
+    # #224→#273：MCP 注册表四工具的 Optional + None 默认参数（kind/note/overwrite 等
+    # 「有默认值但注解不含 None」的进 NON_OPTIONAL_BUT_DEFAULTED 另一张表）。
+    ("save_mcp_server", "name"),
+    ("save_mcp_server", "credentials"),
+    ("save_mcp_server", "target"),
+    ("delete_mcp_server", "name"),
+    ("list_mcp_servers", "name_or_target"),
+    ("list_mcp_servers", "args"),
+    ("list_mcp_servers", "extra"),
+    ("list_mcp_servers", "tool"),
+    ("set_mcp_server_enabled", "name"),
 ]
 
 
@@ -517,8 +534,8 @@ def test_field_lists_match_signatures() -> None:
         expected = (tool_name, param_name) in OPTIONAL_WITH_DEFAULT
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
-    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 21
-    assert len(OPTIONAL_WITH_DEFAULT) == 77
+    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 26
+    assert len(OPTIONAL_WITH_DEFAULT) == 86
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -731,13 +748,14 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 在教模型用。改后说明写清 `head` 的适用范围与 `raw` / `toon` 的失效，并新增
 #: `mcp_unsupported_extra` / `mcp_invalid_extra` 两个错误码。快照同步用
 #: `python scripts/tool_schema_snapshot.py --update` 更新，diff 应只有 `[mcp_call.extra]` 一项。
-#: #227（task system v3）重算：`50c763ad…` → `24bedf14…`。**唯一原因**是新增参数
-#: 的说明文字（`create_task.stages`、`update_task.workflow_action` / `target_stage` /
-#: `append_stages` / `remove_stage_index` / `reassign_stage`、`list_tasks.mine` /
-#: `include_upcoming`），参数数 117 → 125、工具级 required **一字未变**（40 个工具
-#: 的 required 列表与旧基线逐字相同，可用 `git diff` 该文件确认只动了这一个常量与
-#: 两处计数）。既有 40 个工具的 description 也未改。
-BASELINE_TEXT_DIGEST = "24bedf14cfc9a7e59a391571858ebdda809b85c29a60492eaa99fb94db025217"
+#:
+#: #273 重算（`24bedf14…` → 见下）：新增 4 个 MCP 注册表工具（save 6 参 / delete 1 参 /
+#: list 5 参 / set 2 参，共 14 参）+ 改写 `mcp_call` 工具说明（注册表解析段：命中替换
+#: target/kind + 注入凭证引用、`resolved_from_registry`/`name` 恒出现、
+#: `mcp_name_kind_conflict` / `mcp_server_disabled`）。既有 40 个工具的
+#: description / required 一字未动（快照结构化 diff 应只含 4 个新工具 + `mcp_call`）。
+#: 工具数 40 → 44、参数数 125 → 139。快照同步 `python scripts/tool_schema_snapshot.py --update`。
+BASELINE_TEXT_DIGEST = "1bb20f8b6a83b29aca1d02373538efbceb471e90419c979f70250eaaef079379"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -778,9 +796,10 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
     digest, tools, params = _text_digest()
 
-    # 38 → 39 / 108 → 114：`mcp_call`（#202）。
-    assert tools == 40, tools
-    assert params == 125, params  # v3：+6 个可选参数（stages / workflow_action / target_stage / append_stages / remove_stage_index / reassign_stage）+ 2 个 bool（mine / include_upcoming）
+    # 38 → 39 / 108 → 114：`mcp_call`（#202）。40 → 44 / 125 → 139：MCP 注册表四工具
+    # （#224 三工具 + #273 set_mcp_server_enabled，+`mcp_call` 说明改写）。
+    assert tools == 44, tools
+    assert params == 139, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

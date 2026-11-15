@@ -75,10 +75,14 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     # 管理控制台（#154）：`command` 必填在前，`payload` 可选在后。
     # 顺序有意固定——把 `payload` 放前面会让模型先想配置再想命令，实测更易生成错命令。
     "console": ["command", "payload"],
-    # #227（v3）：`stages` 紧跟 `reviewer_id`（两者互斥，放在一起便于模型二选一）。
     "create_task": ["title", "assignee_id", "description", "reviewer_id", "stages", "priority", "parent_id", "depends_on", "room_id", "status", "note"],
     # #196：`dry_run` 追加在末尾（只预演不落库），老参数位置不动。
     "delete_dept": ["name", "dept_id", "recursive", "dry_run"],
+    # #224：MCP 注册表。`delete_mcp_server` 只有定位参数；`list_mcp_servers` 首参
+    # `name_or_target` 必须排第一 —— console 的 `mcp ls` 走 DIRECT，位置参数按
+    # schema 声明顺序映射，第 0 位就是它（设计稿 §3.3 的宽签名约束）。
+    "delete_mcp_server": ["name"],
+    "set_mcp_server_enabled": ["name", "enable"],
     "delete_role_template": ["role_name"],
     "delete_room": ["name", "room_id", "dry_run"],
     "finish_action": ["confirm_no_need_talk"],
@@ -90,15 +94,21 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "get_task_detail": ["task_id", "event_limit"],
     "get_task_event": ["event_id"],
     "get_time": ["timezone"],
+    # #224→#273：`name_or_target` 必填排第一（console `mcp ls` 的 DIRECT 位置参数映射落点）；
+    # 其余四个（tool/args/kind/extra）与 `mcp_call` 的有参 list 分支一一对应，保证
+    # `mcp ls <url> --tool x` 这类既有用法委托 `mcp_call` 时选项面不收窄。
+    "list_mcp_servers": ["name_or_target", "tool", "args", "kind", "extra"],
     "list_role_templates": ["keywords"],
     "list_task_events": ["task_id", "limit", "before_id"],
-    # #227（v3）：`mine` / `include_upcoming` 追加在末尾（老参数位置不动）。
     "list_tasks": ["assignee", "reviewer", "scope", "status", "title_keyword", "open_only", "limit", "mine", "include_upcoming"],
     "load_skill": ["skill_name"],
     # #202 mcp2cli 接入：`target` 必填在前（spec 路径 / MCP URL），其余按「动作 → 工具 →
     # 参数 → 来源类型 → 透传」排列；`kind` 放在 tool/args 之后是因为绝大多数调用只改
     # target，不动来源类型。
     "mcp_call": ["target", "action", "tool", "args", "kind", "extra"],
+    # #224：`mcp add` 的登记参数按「别名 → 来源类型 → 连接描述 → 说明 → 凭证 → 覆盖」
+    # 排列；`name` 必填在前。
+    "save_mcp_server": ["name", "kind", "target", "note", "credentials", "overwrite"],
     # 长期记忆工具（#134）。参数顺序统一「先定位（memory_id / query）、后修改字段、
     # 最后是可选开关」：memory_list 只有开关；memory_update 的 memory_id 必填在最前。
     "memory_create": ["title", "summary", "content", "star_level", "tags"],
@@ -116,6 +126,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     # #158：`update_task` 增加验收人变更能力。顺序「先定位、后流转/评论、最后改验收人」：
     # `task_id` 必填在前；`reviewer_id`（改人）与 `clear_fields`（撤销）在末尾
     # （老参数的位置与顺序一律不动，避免影响既有调用方的填充习惯）。
+    # #227（task v3）：追加 5 个工作流参数（老参数位置与顺序不动）。
     "update_task": [
         "task_id", "new_status", "note", "reviewer_id", "clear_fields",
         "workflow_action", "target_stage", "append_stages", "remove_stage_index", "reassign_stage",
