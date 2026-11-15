@@ -190,12 +190,15 @@ flowchart LR
 | **动态调整后续节点** | `append_stages=[...]` / `remove_stage_index=i` / `reassign_stage={stage_index, owner_id}` | `remove_stage_index` 仅允许删除未开始的 `EXECUTION` 节点（认领后禁止删除 `REVIEW` 节点） |
 | **追加评论** | 仅传 `note="..."` | 全员随时可用（含终态），不改变状态与游标 |
 
+> 现状（2026-11-16）：本节漏了**第五类用法** —— **验收人变更/撤销**（v2 参数 `reviewer_id=` / `clear_fields=["reviewer_id"]`，实现 `taskService._handle_reviewer_change`）。当前实现把 `update_task` 的意图分为**四类互斥**：状态流转 / `workflow_action` / 节点调整 / 验收人变更，同时给多类直接报 `ambiguous_task_update`（`src/service/funcToolService/tools.py:2122-2132`、`taskService.py:1455`）。单审核/无审核任务走 `reviewer_id` 会同步节点链；多级任务会被拒绝并引导用 `reassign_stage`（review_notes S-1 的口径，已落地）。
+
 ### 5.3 `get_task_detail` & `list_tasks`
 
 - **`get_task_detail(task_id)`**：除基础字段与最近事件外，返回 `current_stage`、`current_owner_id` 及完整 `stages` 列表（含 `stage_index`、`node_type`、`name`、`owner_id`、`owner_name`、`stage_status`）。
 - **`list_tasks`**：
   - 保留 `assignee` / `reviewer` 参数（语义上分别对应“我作为 `EXECUTION` 节点负责人的任务”与“我作为 `REVIEW` 节点负责人的任务”，或直接按当前持棒人过滤）。
   - 默认仅返回**当前正轮到自己处理**（`current_owner_id == 我`）的未完结任务；传 `include_upcoming=True` 可查看后续节点包含自己的在途任务。
+  - 现状（2026-11-16）：`include_upcoming=True` **必须配合 `mine=True`**，单独使用报 `invalid_filter_combo`（`tools.py:2246,2261,2292`）。
 
 ---
 
@@ -288,6 +291,8 @@ flowchart LR
 - **强通知/自动唤醒机制**：仍沿用现有调度与轮询机制发现任务。
 
 ### 7.3 验收标准清单
+
+> 现状（2026-11-16）：下列 5 条**均已落地**（清单保持原样未勾选，它是当时的验收约定）—— ①状态映射：`constants.py:304-319` + `taskService._resolve_status_for_stage`；②打回/防跳过：`invalid_reject_target`(`taskService.py:412`)、`reject_note_required`(`:1176`)；③`REVIEW` 不可删：`cannot_remove_review_stage`(`:1343`)；④权限：`not_current_stage_owner`(`:1143`)、`creator_cannot_cancel_after_claim`(`:1730`)；⑤待办无噪音：`gtAgentTaskManager.get_first_active_task` 已按 `current_owner_id` 收紧（review_notes S-5）。逐条依据见 `shared/docs-align/report.md` §3（V1-V6）。
 
 - [ ] **单棒推进与状态映射**：处于 `EXECUTION` 节点时状态为 `IN_PROGRESS`（未认领为 `TODO`/`PENDING`），处于 `REVIEW` 节点时为 `REVIEWING`；末节点 `advance` 进入 `DONE`。
 - [ ] **任意节点打回与防跳过**：节点 $k$ 可成功打回至 $0 \dots k-1$ 任意节点，打回至 $\ge k$ 或在节点 `0` 打回必须被拒绝；返工后必须逐级 `advance`，不可跳过中间节点。
