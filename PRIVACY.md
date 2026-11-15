@@ -7,13 +7,21 @@ This document is intentionally bilingual so that both users and code-signing rev
 - 适用范围 / Scope: the Togobot desktop application (Tauri shell + bundled Python backend), the web console it serves, and the Docker/self-hosted deployment of the same code in this repository.
 - 最后更新 / Last updated: 2026-11-15
 
+## 0. 摘要 / Summary
+
+**不收集、不上报用户数据；启动时会向 GitHub 查询版本更新（不携带用户身份信息），可在设置中关闭。**
+
+**We do not collect or upload user data. At startup the app asks GitHub for the latest release version — no identity information is sent — and this can be disabled in Settings.**
+
+下面是这句话的代码依据与边界，逐条可核。
+
 ---
 
 ## 1. 我们不做什么 / What we do NOT do
 
 代码事实（可自行 grep 核对）：
 
-- **没有遥测、没有统计、没有崩溃上报**。仓库里不存在任何 analytics / telemetry 依赖或上报代码：
+- **没有遥测、没有统计、没有崩溃上报，也不收集、不上报用户数据**。仓库里不存在任何 analytics / telemetry 依赖或上报代码：
   `grep -rn "telemetry\|analytics\|sentry\|bugsnag\|mixpanel\|amplitude\|posthog" src/ api/ frontend/src/` 返回空。
 - **没有账号体系**，不收集邮箱、手机号、设备指纹、安装 ID。
 - **不上传你的对话、文件、任务、Agent 配置**。它们存在本机
@@ -35,7 +43,6 @@ This document is intentionally bilingual so that both users and code-signing rev
 
 - 第 2–4 类都是**你主动配置或主动触发**的，请求直达你选的服务商；我们不经过任何中转服务器，也没有我们的服务器可中转。
 - 第 1 类若你不需要，可在应用「设置 → 检查更新」关闭，或在 `setting.json` 里把 `auto_check_update` 设为 `false`。
-- 在线体验站 `demo.togoagent.org` 是独立部署的演示实例，不属本应用本体；你在那里的数据由该实例的部署者管理。
 
 ## 3. 你的数据存在哪 / Where your data lives
 

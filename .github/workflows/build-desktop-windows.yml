@@ -259,8 +259,8 @@ jobs:
           Write-Host "本次是发布 tag 构建（$ref）：签名由后面的 sign-win job 执行（需要 SignPath 凭据）。"
           "## ✍️ 签名状态：tag 构建，交由 sign-win job 处理（``$ref``）" >> $env:GITHUB_STEP_SUMMARY
         } else {
-          Write-Host "::warning::本次产物**未签名**（UNSIGNED）：当前触发 ref = $ref 不是发布 tag；签名只对 refs/tags/v* 提交（SignPath 策略）。"
-          "## ⏭️ 签名状态：SKIPPED —— 本次产物未签名`n`n原因：当前 ref = ``$ref``，不是发布 tag；签名只对 ``refs/tags/v*`` 提交（SignPath 策略）。`n`nartifact 名：``windows-nsis-installer``（未签名，不要当发布物）。" >> $env:GITHUB_STEP_SUMMARY
+          Write-Host "::warning::本 run 产物未签名，签名只发生在 tag：当前触发 ref = $ref 不是发布 tag；签名只对 refs/tags/v* 提交（SignPath 策略）。"
+          "## ⏭️ 本 run 产物未签名，签名只发生在 tag`n`n原因：当前 ref = ``$ref``，不是发布 tag；签名只对 ``refs/tags/v*`` 提交（SignPath 策略）。`n`nartifact 名：``windows-nsis-installer``（UNSIGNED —— **不要当已签名的发布物使用**）。" >> $env:GITHUB_STEP_SUMMARY
         }
 
     # ── 供签名的产物（#250）────────────────────────────────────────────────────

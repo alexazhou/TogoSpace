@@ -193,30 +193,16 @@ Don't want to install anything? Try the [demo site](https://demo.togoagent.org) 
 
 ## 🔐 Code signing policy
 
-Windows releases (`Togobot_<version>_x64-setup.exe`, NSIS installer) are code-signed for free by the **SignPath Foundation**:
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
 
-> **Free code signing provided by SignPath.io, certificate by SignPath Foundation.**
-
-Scope and process:
-
-- **Only release tags** (`refs/tags/v*`) produce a signing request. Branch pushes and pull-request builds never submit one.
-- Signing runs on a **GitHub-hosted runner** (`windows-2022`) — never on a self-hosted runner.
-- Every signing request is **manually approved by an Approver** on the SignPath side. After signing, CI verifies the
-  result with `Get-AuthenticodeSignature` (`Status = Valid` and the expected signer subject); if that check fails the
-  build fails and no release artifact is produced.
+- **Roles**
+  - **Authors** (commit access): [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1)
+  - **Reviewers**: [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1)
+  - **Approvers** (approve each signing request): [@alexazhou](https://github.com/alexazhou)
+- **Privacy policy**: see [PRIVACY.md](PRIVACY.md). Summary: **we do not collect or upload user data; at startup the app asks GitHub for the latest release version (no identity information is sent) and this can be disabled in Settings.**
+- Windows installers (`Togobot_<version>_x64-setup.exe`, NSIS) are built by GitHub Actions on a **GitHub-hosted runner** (`windows-2022`) and submitted to SignPath for signing; the signature only identifies the publisher and does not change program behavior.
+- **Signing happens on release tags only** (`refs/tags/v*`): branch pushes and pull-request builds never submit a signing request, and their artifacts are **unsigned** — do not use them as releases. Each signing request must be manually approved by an Approver; after signing, CI verifies `Status = Valid` with `Get-AuthenticodeSignature` (and the expected signer subject), failing the build otherwise.
 - macOS builds are signed/notarized with an Apple Developer ID and are outside the scope of this policy.
-
-Roles and members (GitHub accounts):
-
-| Role | Responsibility | Members |
-|---|---|---|
-| **Authors** (submit code / initiate signing requests) | Push code, trigger tag builds | [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1) |
-| **Reviewers** (review changes) | Review code changes before merge | [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1) |
-| **Approvers** (approve every signing request) | Approve/reject signing requests in SignPath | [@alexazhou](https://github.com/alexazhou) |
-
-Privacy: this application does **not** collect or upload user data (no telemetry, analytics, or crash reporting).
-The only automatic outbound request is the update check (GET GitHub Releases API, which can be disabled in Settings).
-Full details, with file:line references for every outbound request, are in [PRIVACY.md](PRIVACY.md).
 
 ## 💬 Community
 
