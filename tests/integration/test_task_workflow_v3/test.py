@@ -1140,3 +1140,72 @@ class TestReviewFix253(_WorkflowCase):
         )
         assert done["success"] is True, f"末节点 EXECUTION 的 v2 DONE 写法被误拒：{done}"
         assert _status_of(await self._task(team_id, task_id)) == "DONE"
+
+    # ---------------- S-3：节点链调整的多步写必须原子 ----------------
+
+    async def test_s3_append_stages_rolls_back_on_event_failure(self):
+        """`append_stages` 写事件失败时，节点表与主表都不能留下部分写入。
+
+        原缺陷：`_apply_stage_update` 三个分支都没包 `atomic()`（违反
+        `gtAgentTaskStageManager` 的「调用方已在事务内」约定）⇒ 事件写入抛错时，
+        节点已被插入、`reviewer_id` 已被改，库里出现「节点多了、事件没记」的半状态。
+        """
+        from unittest import mock
+
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S3-append原子性", assignee_id=bob,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        await taskService.update_task(team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS")
+        stages_before = await self._stages(task_id)
+        reviewer_before = (await self._task(team_id, task_id))["reviewer_id"]
+
+        with mock.patch.object(
+            taskService.gtAgentTaskEventManager, "append_event",
+            side_effect=RuntimeError("injected-append-event-failure"),
+        ):
+            with pytest.raises(RuntimeError):
+                await taskService.update_task(
+                    team_id=team_id, caller_id=bob, task_id=task_id,
+                    append_stages=[{"owner_id": alice, "node_type": "REVIEW", "name": "补审核"}],
+                )
+
+        assert await self._stages(task_id) == stages_before, (
+            f"事件写入失败后节点表仍有部分写入：{await self._stages(task_id)}"
+        )
+        assert (await self._task(team_id, task_id))["reviewer_id"] == reviewer_before, (
+            "事件写入失败后主表 reviewer_id 已被改（半状态）"
+        )
+
+    async def test_s3_reassign_stage_rolls_back_on_event_failure(self):
+        """`reassign_stage` 写事件失败时，节点负责人与主表快照都要回滚。"""
+        from unittest import mock
+
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S3-reassign原子性", assignee_id=bob,
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        stages_before = await self._stages(task_id)
+        task_before = await self._task(team_id, task_id)
+
+        with mock.patch.object(
+            taskService.gtAgentTaskEventManager, "append_event",
+            side_effect=RuntimeError("injected-reassign-event-failure"),
+        ):
+            with pytest.raises(RuntimeError):
+                await taskService.update_task(
+                    team_id=team_id, caller_id=alice, task_id=task_id,
+                    reassign_stage={"stage_index": 0, "owner_id": alice},
+                )
+
+        assert await self._stages(task_id) == stages_before, (
+            f"事件写入失败后节点负责人已被改：{await self._stages(task_id)}"
+        )
+        task_after = await self._task(team_id, task_id)
+        assert (task_after["assignee_id"], task_after["current_owner_id"]) == (
+            task_before["assignee_id"], task_before["current_owner_id"],
+        ), "事件写入失败后主表 assignee_id / current_owner_id 已被改（半状态）"

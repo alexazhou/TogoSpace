@@ -1284,18 +1284,23 @@ async def _apply_stage_update(
         owner_error = await _validate_stage_owners(team_id, task.creator_id, [s["owner_id"] for s in specs])
         if owner_error is not None:
             return owner_error
-        new_stages = await gtAgentTaskStageManager.insert_stages_after(task.id, last_index, specs)
-        # S-4（#253，确认口径 ①）：后置加签可能新增 REVIEW 节点，v2 兼容列必须同步，
-        # 否则执行人按 v2 习惯提交 REVIEWING 会被 `no_reviewer` 误拒。
-        task.reviewer_id = _compat_reviewer_for(new_stages, cursor)
-        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
-        action_type = TaskEventAction.STAGE_ADD
-        event = await gtAgentTaskEventManager.append_event(
-            task.id, caller_id,
-            from_status=task.status, to_status=task.status,
-            content=note or f"追加 {len(specs)} 个节点",
-            action_type=action_type, from_stage=cursor, to_stage=last_index + 1,
-        )
+        # S-3（#253，原为待讨论、按建议方案实现）：多步写库必须在**同一事务**内。
+        # gtAgentTaskStageManager 的既有约定是「本模块不开事务，假定调用方已在事务内」，
+        # 这三条分支此前都没包 atomic ⇒ 某步失败会留下「节点表已改、主表快照没改、
+        # 事件没记」的部分写入。推送仍放在事务块外（回滚时不该有推送）。
+        async with atomic():
+            new_stages = await gtAgentTaskStageManager.insert_stages_after(task.id, last_index, specs)
+            # S-4（#253，确认口径 ①）：后置加签可能新增 REVIEW 节点，v2 兼容列必须同步，
+            # 否则执行人按 v2 习惯提交 REVIEWING 会被 `no_reviewer` 误拒。
+            task.reviewer_id = _compat_reviewer_for(new_stages, cursor)
+            await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+            action_type = TaskEventAction.STAGE_ADD
+            event = await gtAgentTaskEventManager.append_event(
+                task.id, caller_id,
+                from_status=task.status, to_status=task.status,
+                content=note or f"追加 {len(specs)} 个节点",
+                action_type=action_type, from_stage=cursor, to_stage=last_index + 1,
+            )
         _publish_event_appended(team_id, task, event)
         names = await _resolve_display_names([_stage_field(s, "owner_id") for s in new_stages])
         return {
@@ -1343,18 +1348,19 @@ async def _apply_stage_update(
                 "message": "节点 0 是任务主执行人，不能整节点删除；要换人请用 reassign_stage",
                 "error_code": "cannot_remove_active_or_past_stage",
             }
-        await gtAgentTaskStageManager.delete_stage_and_reindex(task.id, remove_stage_index)
-        remaining = await gtAgentTaskStageManager.get_stages_by_task(task.id)
-        reviewer_id = _compat_reviewer_for(remaining, cursor)
-        task.reviewer_id = reviewer_id
-        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
-        event = await gtAgentTaskEventManager.append_event(
-            task.id, caller_id,
-            from_status=task.status, to_status=task.status,
-            content=note or f"删除节点 {remove_stage_index}",
-            action_type=TaskEventAction.STAGE_REMOVE,
-            from_stage=remove_stage_index, to_stage=remove_stage_index,
-        )
+        async with atomic():
+            await gtAgentTaskStageManager.delete_stage_and_reindex(task.id, remove_stage_index)
+            remaining = await gtAgentTaskStageManager.get_stages_by_task(task.id)
+            reviewer_id = _compat_reviewer_for(remaining, cursor)
+            task.reviewer_id = reviewer_id
+            await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+            event = await gtAgentTaskEventManager.append_event(
+                task.id, caller_id,
+                from_status=task.status, to_status=task.status,
+                content=note or f"删除节点 {remove_stage_index}",
+                action_type=TaskEventAction.STAGE_REMOVE,
+                from_stage=remove_stage_index, to_stage=remove_stage_index,
+            )
         _publish_event_appended(team_id, task, event)
         names = await _resolve_display_names([_stage_field(s, "owner_id") for s in remaining])
         return {
@@ -1390,29 +1396,30 @@ async def _apply_stage_update(
     if owner_error is not None:
         return owner_error
     old_owner = _stage_field(stages[raw_index], "owner_id")
-    await gtAgentTaskStageManager.update_stage_owner(task.id, raw_index, raw_owner)
-    stages_after = await gtAgentTaskStageManager.get_stages_by_task(task.id)
-    if raw_index == cursor:
-        task.current_owner_id = raw_owner
-        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.current_owner_id])
-    reviewer_id = _compat_reviewer_for(stages_after, cursor)
-    task.reviewer_id = reviewer_id
-    # S-4（#253，确认口径 ②）：节点 0 是任务主执行人，换人必须同步 v2 兼容列
-    # `assignee_id`，否则新负责人 claim_task 被拒、按 assignee 的查询仍归属旧人。
-    if raw_index == 0:
-        task.assignee_id = raw_owner
-        await gtAgentTaskManager.save_task(
-            task, only=[GtAgentTask.reviewer_id, GtAgentTask.assignee_id]
+    async with atomic():
+        await gtAgentTaskStageManager.update_stage_owner(task.id, raw_index, raw_owner)
+        stages_after = await gtAgentTaskStageManager.get_stages_by_task(task.id)
+        if raw_index == cursor:
+            task.current_owner_id = raw_owner
+            await gtAgentTaskManager.save_task(task, only=[GtAgentTask.current_owner_id])
+        reviewer_id = _compat_reviewer_for(stages_after, cursor)
+        task.reviewer_id = reviewer_id
+        # S-4（#253，确认口径 ②）：节点 0 是任务主执行人，换人必须同步 v2 兼容列
+        # `assignee_id`，否则新负责人 claim_task 被拒、按 assignee 的查询仍归属旧人。
+        if raw_index == 0:
+            task.assignee_id = raw_owner
+            await gtAgentTaskManager.save_task(
+                task, only=[GtAgentTask.reviewer_id, GtAgentTask.assignee_id]
+            )
+        else:
+            await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+        event = await gtAgentTaskEventManager.append_event(
+            task.id, caller_id,
+            from_status=task.status, to_status=task.status,
+            content=note or f"节点 {raw_index} 换人：{old_owner} → {raw_owner}",
+            action_type=TaskEventAction.STAGE_REASSIGN,
+            from_stage=raw_index, to_stage=raw_index,
         )
-    else:
-        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
-    event = await gtAgentTaskEventManager.append_event(
-        task.id, caller_id,
-        from_status=task.status, to_status=task.status,
-        content=note or f"节点 {raw_index} 换人：{old_owner} → {raw_owner}",
-        action_type=TaskEventAction.STAGE_REASSIGN,
-        from_stage=raw_index, to_stage=raw_index,
-    )
     _publish_event_appended(team_id, task, event)
     names = await _resolve_display_names([_stage_field(s, "owner_id") for s in stages_after] + [old_owner])
     message = f"节点 {raw_index} 负责人已更换：{old_owner} → {raw_owner}"
