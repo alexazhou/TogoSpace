@@ -1079,7 +1079,7 @@ class TestReviewFix253(_WorkflowCase):
         """`PENDING` 且 `depends_on` 为空时 `advance` 必须报 `task_not_started`。
 
         这条咬的是 `task_not_started` 分支的**可达性**：`TODO → PENDING` 在
-        `_ALLOWED_TRANSITIONS` 里是合法转换（见 `taskService` 顶部的转换表），所以
+        `_VALID_TRANSITIONS` 里是合法转换（见 `taskService` 顶部的转换表），所以
         「`depends_on` 为空 + `status=PENDING`」不用脏数据、走公开 API 就能造出来
         （排期搁置、外部系统回写等场景）。此时既没有未完成依赖可报
         `dependency_not_met`，任务又确实还没被认领 ⇒ 只能走保守支：要求先流转。
