@@ -538,6 +538,10 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
             dispatcher(list(argv))
     except SystemExit as exc:  # mcp2cli 的错误路径：sys.exit(1) 绝不能杀后端进程
         code = exc.code if isinstance(exc.code, int) else 1
+        # 已知边界（#284 / B52-N3）：**无参 `sys.exit()` 仍判失败** —— 此时 `exc.code`
+        # 为 `None`，`isinstance(None, int)` 为 False ⇒ 落到 `code = 1`。当前**不可达**：
+        # 38 核过 mcp2cli 30 处 `exit` / `sys.exit` **全部带参**（0 或 1）。若上游将来
+        # 改成无参退出（语义上 = 0），这里会把成功误报为失败，届时才需要 `code is None` 分支。
         # #282：`sys.exit(0)` 与「正常返回」同义（退出码 0 = 成功），不该报失败。
         # 显式 0 退出继续往下走输出解析（JSON 或纯文本两条路都一样）；
         # 非 0 才是失败，保持原返回形态。
@@ -597,6 +601,12 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
         # 这里**不按开关名做白名单**（方案 B 已被否）：任何文本型输出都走这条统一兜底，
         # 形态与「JSON 成功」完全一致 —— 原文进 `result`、`result_type="string"`，
         # 超限时按同一条截断规则只下发 `raw_excerpt`（不下发 result）。
+        #
+        # 已知边界（#284 / B52-N1）：**stdout 里混入非 JSON 文本不再可区分**。改前这种
+        # 「噪音 + payload」会被判 `mcp2cli_bad_json`（失败）；方案 A 之后只要 mcp2cli
+        # 正常返回就按成功，原文进 `result`、`result_type="string"`，于是「混入的噪音」
+        # 与「上游确实返回纯文本」在返回体上完全同形。这是「以退出码为准」的必然代价：
+        # 要判失败，必须让 mcp2cli 真的非 0 退出（拿不到 returncode 的库调用路径判不了）。
         payload = out
 
     # 真截断：超限时**不下发 result**。只截 `raw_excerpt` 而照样把完整 payload 塞进
@@ -604,7 +614,11 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
     # 这样整份进了模型上下文，`truncated=True` 反而误导成「已经安全」。
     # #282：纯文本 payload 直接量原文（不 `json.dumps`）——否则截断后的 `raw_excerpt`
     # 会带一对引号、换行被转成 `\n`，人看到的就不是 CLI 原本输出的那一行了。
-    # JSON payload 仍走 `json.dumps`（长度口径与既有行为逐字一致）。
+    # 例外（#284 订正：原注释写「JSON payload 仍走 `json.dumps`」不够准确）：**当整个输出
+    # 是一个裸 JSON 字符串**（CLI 打印 `"hello"` 这种）时，`json.loads` 得到的是 `str`
+    # ⇒ `payload` 也是 `str` ⇒ 与纯文本走同一条原文路径，量的是**原文长度**（不含
+    # `json.dumps` 会补的那对引号、也不做转义）。即「文本 vs JSON」在这里由
+    # `isinstance(payload, str)` 决定，**不由「原始输出是否合法 JSON」决定**。
     full = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
     result_type = _result_type(payload)
     if len(full) > MAX_OUTPUT_CHARS:

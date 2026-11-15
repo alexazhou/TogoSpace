@@ -354,6 +354,8 @@ async def test_oversized_result_is_really_truncated(tmp_path: Path, dynamic_serv
     assert result["original_chars"] > mcpTool.MAX_OUTPUT_CHARS, result
     assert result["raw_excerpt"] is not None
     assert len(result["raw_excerpt"]) <= mcpTool.MAX_OUTPUT_CHARS + 100, len(result["raw_excerpt"])
+    # N4（#284）：截断路径也要标出 result_type —— 否则调用方无法判断被截的是对象还是文本。
+    assert result["result_type"] == "object", result
 
 
 @pytest.mark.asyncio
@@ -373,6 +375,10 @@ async def test_non_json_response_is_distinguishable(tmp_path: Path, dynamic_serv
     assert result["success"] is True, result
     assert result["result"] == "this is NOT json <<<"
     assert result["result_type"] == "string", result
+    # N4（#284）：未截断路径的 `raw_excerpt` 必须是 `None`（而不是空串/残留值）——
+    # 它是「这条结果没被截断」的唯一结构化信号，和 `truncated is False` 互为佐证。
+    assert result["raw_excerpt"] is None, result
+    assert result["truncated"] is False, result
 
     # 对照：同一套判据下 JSON 对象必须是 "object"（防止把 result_type 写成常量）。
     routes["obj"] = (json.dumps({"marker": "OBJ"}).encode(), "application/json")
