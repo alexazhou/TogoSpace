@@ -189,6 +189,19 @@ cd frontend && npm install && npm run dev
 
 ---
 
+## 🔐 Code signing policy / 代码签名策略
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+- **Roles / 角色**
+  - **Authors** (commit access): [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1)
+  - **Reviewers**: [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1)
+  - **Approvers** (approve each signing request): [@alexazhou](https://github.com/alexazhou)
+- **Privacy policy / 隐私政策**：见 [PRIVACY.md](PRIVACY.md)。摘要：**不收集、不上报用户数据；启动时会向 GitHub 查询版本更新（不携带用户身份信息），可在设置中关闭。**
+- Windows 安装包（`Togobot_<version>_x64-setup.exe`，NSIS）由 GitHub Actions 在 **GitHub 托管 runner**（`windows-2022`）上构建并提交 SignPath 签名；签名仅用于标识发布者，不改变程序行为。
+- **签名只发生在发布 tag**（`refs/tags/v*`）：普通分支 push / PR 构建不提交签名请求，其产物**未签名**，不得作为发布物。签名请求需 Approver 人工批准；签名后 CI 会用 `Get-AuthenticodeSignature` 校验 `Status = Valid` 且签名主体符合预期，校验不过则该次构建失败。
+- macOS 产物走 Apple Developer ID 签名与公证，不属本策略范围。
+
 ## 💬 交流群
 
 欢迎加入微信交流群，反馈问题、分享你的 AI 团队玩法：

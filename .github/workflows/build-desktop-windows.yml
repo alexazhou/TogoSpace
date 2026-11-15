@@ -17,6 +17,9 @@ on:
   push:
     branches:
       - feat/win-build
+    # 发布 tag 也要跑：Windows 安装包在这里构建，签名只对 refs/tags/v* 生效（#250）。
+    tags:
+      - "v*"
 
 concurrency:
   group: win-desktop-${{ github.ref }}
@@ -25,6 +28,9 @@ concurrency:
 jobs:
   build-win:
     name: Build Windows NSIS installer
+    # 供 sign-win 用的产物 id（SignPath 的 github-artifact-id 参数，见 #250）
+    outputs:
+      signing-artifact-id: ${{ steps.upload-for-signing.outputs.artifact-id }}
     # 钉 windows-2022，不用 windows-latest：浮动标签会随镜像更新漂移
     #（macos-14 被退役导致 job 1 秒 cancelled 就是前车之鉴）。
     runs-on: windows-2022
@@ -202,6 +208,7 @@ jobs:
         Get-Content artifact-digest.txt
 
     - name: Upload installer artifact
+      id: upload-installer
       # 两个条件都要：①always() —— 构建成功但验证红时也要能取到产物人工分析；
       # ②locate 真的有产物 —— 否则空 path 会让本步骤红，把真正的失败原因（前面的构建/验证步骤）
       #   埋进「No files were found with the provided path」里（run 43617333776 就是这么被埋的）。
@@ -215,3 +222,190 @@ jobs:
         # digest 文件是后面一步才写的：构建早就红了的时候它不存在，不该因此再红一次
         if-no-files-found: warn
         retention-days: 30
+
+    # ── 产物元数据（#250，SignPath Artifact Configuration 要求）─────────────────
+    # SignPath 侧要求：product name = 项目名、product version 每次一致（用于版本一致性校验）。
+    # 这里直接读安装包 NSIS 里的 VERSIONINFO，而不是「我读 config 觉得它是稳定的」。
+    - name: "Verify installer metadata (ProductName / ProductVersion)"
+      shell: pwsh
+      run: |
+        $p = "${{ steps.locate.outputs.path }}"
+        $v = (Get-Item -LiteralPath $p).VersionInfo
+        Write-Host "FileDescription = $($v.FileDescription)"
+        Write-Host "ProductName     = $($v.ProductName)"
+        Write-Host "ProductVersion  = $($v.ProductVersion)"
+        Write-Host "FileVersion     = $($v.FileVersion)"
+        Write-Host "CompanyName     = $($v.CompanyName)"
+        $failures = @()
+        if ($v.ProductName -ne 'Togobot') {
+          $failures += "ProductName='$($v.ProductName)'，期望 'Togobot'（SignPath Artifact Configuration 要求 product name = 项目名）"
+        }
+        if (-not $v.ProductVersion) {
+          $failures += "ProductVersion 为空 ⇒ SignPath 无法做「每次版本号一致」的校验"
+        }
+        if ($failures.Count -gt 0) {
+          foreach ($f in $failures) { Write-Host "::error::$f" }
+          exit 1
+        }
+        Write-Host "=== 产物元数据符合 SignPath 要求（ProductName=Togobot / ProductVersion 非空）==="
+        "## 产物元数据`n`nProductName=``$($v.ProductName)`` ProductVersion=``$($v.ProductVersion)``" >> $env:GITHUB_STEP_SUMMARY
+
+    # ── 本次是否签名：把「未签名」这件事显式写在日志与 job summary 里（#250 红线）──
+    - name: "Signing status（本次产物是否签名）"
+      shell: pwsh
+      run: |
+        $ref = "${{ github.ref }}"
+        if ($ref.StartsWith('refs/tags/v')) {
+          Write-Host "本次是发布 tag 构建（$ref）：签名由后面的 sign-win job 执行（需要 SignPath 凭据）。"
+          "## ✍️ 签名状态：tag 构建，交由 sign-win job 处理（``$ref``）" >> $env:GITHUB_STEP_SUMMARY
+        } else {
+          Write-Host "::warning::本 run 产物未签名，签名只发生在 tag：当前触发 ref = $ref 不是发布 tag；签名只对 refs/tags/v* 提交（SignPath 策略）。"
+          "## ⏭️ 本 run 产物未签名，签名只发生在 tag`n`n原因：当前 ref = ``$ref``，不是发布 tag；签名只对 ``refs/tags/v*`` 提交（SignPath 策略）。`n`nartifact 名：``windows-nsis-installer``（UNSIGNED —— **不要当已签名的发布物使用**）。" >> $env:GITHUB_STEP_SUMMARY
+        }
+
+    # ── 供签名的产物（#250）────────────────────────────────────────────────────
+    # 单独上传「只含安装包的 zip」：
+    #   SignPath 的 Artifact Configuration 根元素是 <zip-file>，zip 里元素越少越不容易配错；
+    #   上面那个 artifact 里还混了 artifact-digest.txt，不适合直接当签名输入。
+    # 只在发布 tag 上跑，避免分支 push 每次都多传 60+ MB。
+    - name: Upload installer for signing
+      id: upload-for-signing
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-nsis-installer-for-signing
+        path: ${{ steps.locate.outputs.path }}
+        if-no-files-found: error
+        retention-days: 7
+
+    # ── Authenticode 校验本身的判据自证（#250）────────────────────────────────
+    # 交付标准要求：即使本次拿不到签名产物，也要证明「校验逻辑会判 Valid=False，而不是恒真绿」。
+    # 四个方向一起跑，缺一个都说明判据没牙：
+    #   ① 未签名安装包 + -Expect NotSigned            ⇒ 通过（能读出 NotSigned）
+    #   ② 未签名安装包 + -Expect Valid                ⇒ 必须失败（Valid 判据不是恒真）
+    #   ③ 系统自带已签名程序 + -Expect Valid(Microsoft) ⇒ 通过（Valid 判据与主体断言可用）
+    #   ④ 系统自带已签名程序 + 期望主体 SignPath Foundation ⇒ 必须失败（主体断言有牙）
+    - name: "Authenticode check self-proof (unsigned ⇒ NotSigned / Valid 判据有牙)"
+      shell: pwsh
+      run: |
+        $installer = "${{ steps.locate.outputs.path }}"
+        $signedSystemBinary = "$env:SystemRoot\System32\notepad.exe"
+        $script = "scripts/verify_authenticode.ps1"
+
+        # 注意：GitHub 的 pwsh 包装器在脚本末尾会用 $LASTEXITCODE 当本步骤退出码。
+        # 本步骤里有两次「故意让它失败」的调用（②④），所以每次调用后必须把
+        # $LASTEXITCODE 归零，否则步骤会带着 1 退出 —— run 43663044483 就是这么红的
+        # （4 个方向全对，步骤却红了）。判据结果改用显式变量与 exit 表达。
+        function Invoke-AuthCheck {
+          param([string[]]$CheckArgs)
+          pwsh -NoProfile -File $script @CheckArgs | Out-Host
+          $code = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          return $code
+        }
+        $failures = @()
+
+        Write-Host "=== ① 未签名安装包 + -Expect NotSigned（应通过）==="
+        $c1 = Invoke-AuthCheck @('-Path', $installer, '-Expect', 'NotSigned')
+        if ($c1 -ne 0) { $failures += "①未签名产物未被判为 NotSigned（exit=$c1）" }
+        else { Write-Host "✅ ①通过：读出了 NotSigned" }
+
+        Write-Host "=== ② 未签名安装包 + -Expect Valid（必须失败）==="
+        $c2 = Invoke-AuthCheck @('-Path', $installer, '-Expect', 'Valid')
+        if ($c2 -eq 0) { $failures += "②-Expect Valid 在未签名产物上竟然通过 ⇒ 判据恒真，无牙" }
+        else { Write-Host "✅ ②如预期失败（exit=$c2）⇒ Valid 判据不是恒真" }
+
+        Write-Host "=== ③ 系统已签名程序 + -Expect Valid -ExpectedSubject Microsoft（应通过）==="
+        $c3 = Invoke-AuthCheck @('-Path', $signedSystemBinary, '-Expect', 'Valid', '-ExpectedSubject', 'Microsoft')
+        if ($c3 -ne 0) { $failures += "③已签名程序未被判为 Valid ⇒ Valid 判据在真签名上不成立（exit=$c3）" }
+        else { Write-Host "✅ ③通过：真签名被判 Valid 且主体匹配 Microsoft" }
+
+        Write-Host "=== ④ 系统已签名程序 + 期望主体 SignPath Foundation（必须失败）==="
+        $c4 = Invoke-AuthCheck @('-Path', $signedSystemBinary, '-Expect', 'Valid', '-ExpectedSubject', 'SignPath Foundation')
+        if ($c4 -eq 0) { $failures += "④主体断言在错误主体上竟然通过 ⇒ 主体判据恒真" }
+        else { Write-Host "✅ ④如预期失败（exit=$c4）⇒ 主体断言有牙" }
+
+        if ($failures.Count -gt 0) {
+          foreach ($f in $failures) { Write-Host "::error::$f" }
+          "## ❌ Authenticode 判据自证失败`n`n" + ($failures -join "`n") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          exit 1
+        }
+        Write-Host "=== Authenticode 判据自证全部通过（4/4）==="
+        "## ✅ Authenticode 判据自证 4/4：未签名⇒NotSigned / 同一文件 -Expect Valid 失败 / 真签名⇒Valid / 错主体⇒失败" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+        exit 0
+
+  # ── 签名阶段（#250）──────────────────────────────────────────────────────────
+  # 只在发布 tag 上跑：分支 push 不提交签名请求（SignPath 策略要求）。
+  # 全部跑在 GitHub 托管 runner 上（SignPath OSS 硬要求，禁止 self-hosted）。
+  sign-win:
+    name: Sign Windows installer (SignPath)
+    needs: build-win
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+      SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+      SIGNPATH_EXPECTED_SUBJECT: ${{ vars.SIGNPATH_EXPECTED_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # 红线（#250）：缺凭据时绝不允许「没签也报绿」。
+      # 这里选择「红」而不是「绿着跳过」：本 job 的 if 已经把非 tag 挡掉了，
+      # 能走到这里就说明「这是一次发布构建，本该签名」——此时缺凭据是配置事故，必须炸出来。
+      - name: "Preflight: signing credentials"
+        shell: pwsh
+        run: |
+          $missing = @()
+          if (-not $env:SIGNPATH_API_TOKEN)         { $missing += 'secrets.SIGNPATH_API_TOKEN' }
+          if (-not $env:SIGNPATH_ORGANIZATION_ID)   { $missing += 'vars.SIGNPATH_ORGANIZATION_ID' }
+          if (-not $env:SIGNPATH_PROJECT_SLUG)      { $missing += 'vars.SIGNPATH_PROJECT_SLUG' }
+          if (-not $env:SIGNPATH_SIGNING_POLICY_SLUG) { $missing += 'vars.SIGNPATH_SIGNING_POLICY_SLUG' }
+          if ($missing.Count -gt 0) {
+            $reason = "缺签名凭据：" + ($missing -join ', ')
+            Write-Host "::error::$reason"
+            "## ❌ 签名未执行`n`n$reason`n`n本次为 tag 构建，产物**未签名**，不得作为发布物。" >> $env:GITHUB_STEP_SUMMARY
+            exit 1
+          }
+          Write-Host "签名凭据齐备：org=$($env:SIGNPATH_ORGANIZATION_ID) project=$($env:SIGNPATH_PROJECT_SLUG) policy=$($env:SIGNPATH_SIGNING_POLICY_SLUG)"
+          "## ✍️ 签名请求将提交`n`nproject=$($env:SIGNPATH_PROJECT_SLUG) policy=$($env:SIGNPATH_SIGNING_POLICY_SLUG)" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Submit signing request to SignPath
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ env.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ needs.build-win.outputs.signing-artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: "Verify Authenticode signature (Status=Valid + 签名主体)"
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path signed -Filter *.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { Write-Host "::error::SignPath 输出目录里没有 .exe"; exit 1 }
+          pwsh -NoProfile -File scripts/verify_authenticode.ps1 `
+            -Path $exe.FullName -Expect Valid -ExpectedSubject "$env:SIGNPATH_EXPECTED_SUBJECT"
+          $code = $LASTEXITCODE
+          $global:LASTEXITCODE = 0   # 同上：别让残留的 LASTEXITCODE 决定本步骤退出码
+          if ($code -ne 0) { Write-Host "::error::签名产物校验失败（Status 非 Valid 或主体不符）"; exit 1 }
+          $sha = (Get-FileHash -Algorithm SHA256 -Path $exe.FullName).Hash.ToLower()
+          "file=$($exe.Name)" | Tee-Object -FilePath signed-digest.txt
+          "sha256=$sha" | Tee-Object -Append -FilePath signed-digest.txt
+          Write-Host "✅ 签名产物校验通过，sha256=$sha"
+          exit 0
+
+      - name: Upload signed installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-nsis-installer-signed
+          path: |
+            signed/
+            signed-digest.txt
+          if-no-files-found: error
+          retention-days: 30

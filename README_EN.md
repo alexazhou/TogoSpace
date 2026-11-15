@@ -191,6 +191,19 @@ Don't want to install anything? Try the [demo site](https://demo.togoagent.org) 
 
 ---
 
+## 🔐 Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+- **Roles**
+  - **Authors** (commit access): [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1)
+  - **Reviewers**: [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1)
+  - **Approvers** (approve each signing request): [@alexazhou](https://github.com/alexazhou)
+- **Privacy policy**: see [PRIVACY.md](PRIVACY.md). Summary: **we do not collect or upload user data; at startup the app asks GitHub for the latest release version (no identity information is sent) and this can be disabled in Settings.**
+- Windows installers (`Togobot_<version>_x64-setup.exe`, NSIS) are built by GitHub Actions on a **GitHub-hosted runner** (`windows-2022`) and submitted to SignPath for signing; the signature only identifies the publisher and does not change program behavior.
+- **Signing happens on release tags only** (`refs/tags/v*`): branch pushes and pull-request builds never submit a signing request, and their artifacts are **unsigned** — do not use them as releases. Each signing request must be manually approved by an Approver; after signing, CI verifies `Status = Valid` with `Get-AuthenticodeSignature` (and the expected signer subject), failing the build otherwise.
+- macOS builds are signed/notarized with an Apple Developer ID and are outside the scope of this policy.
+
 ## 💬 Community
 
 Join our WeChat group to report issues and share how you use your AI team:
