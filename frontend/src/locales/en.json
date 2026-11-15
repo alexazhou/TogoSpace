@@ -271,6 +271,7 @@
     "taskStageStatusWaiting": "Waiting",
     "taskStageStatusCompleted": "Done",
     "taskStageStatusApproved": "Approved",
+    "taskStageStatusRejected": "Rejected",
     "taskEventsLabel": "Timeline",
     "taskEventsTotal": "{count} total",
     "taskEventsEmpty": "No events yet.",

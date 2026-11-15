@@ -275,6 +275,7 @@ function requestClose(): void {
           <p class="task-detail-modal__section-title">{{ t('agent.taskWorkflowLabel') }}</p>
           <AgentTaskWorkflowGraph
             :task="view"
+            :events="events"
             :creator-label="creatorLabel"
             :assignee-label="assigneeLabel"
             :reviewer-label="reviewerLabel"

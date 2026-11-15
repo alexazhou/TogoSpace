@@ -95,6 +95,9 @@ export type RawAgentTaskEvent = {
   from_status?: unknown;
   to_status?: unknown;
   content?: unknown;
+  action_type?: unknown;
+  from_stage?: unknown;
+  to_stage?: unknown;
   created_at?: unknown;
   updated_at?: unknown;
 };

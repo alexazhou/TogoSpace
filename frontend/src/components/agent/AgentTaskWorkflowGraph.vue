@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { AgentTask, AgentTaskStage, AgentTaskStageStatus } from '../../types';
+import type { AgentTask, AgentTaskEvent, AgentTaskStage, AgentTaskStageStatus } from '../../types';
 
-type WorkflowVisualState = 'approved' | 'active' | 'todo' | 'hold' | 'waiting' | 'cancelled';
+type WorkflowVisualState = 'approved' | 'active' | 'todo' | 'hold' | 'rejected' | 'waiting' | 'cancelled';
 
 interface WorkflowNode {
   key: string;
@@ -15,13 +15,16 @@ interface WorkflowNode {
   isCurrentHolder: boolean;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   task: AgentTask;
+  events?: AgentTaskEvent[];
   creatorLabel: string;
   assigneeLabel: string;
   reviewerLabel: string;
   actorLabel: (id: number) => string;
-}>();
+}>(), {
+  events: () => [],
+});
 
 const { t } = useI18n();
 
@@ -61,9 +64,23 @@ function fallbackStages(task: AgentTask): AgentTaskStage[] {
   return stages;
 }
 
+const rejectedStages = computed<Set<number>>(() => {
+  const rejected = new Set<number>();
+  const sorted = [...props.events].sort((a, b) => a.id - b.id);
+  for (const event of sorted) {
+    if (event.action_type === 'REJECT' && typeof event.from_stage === 'number') {
+      rejected.add(event.from_stage);
+    } else if (event.action_type === 'ADVANCE' && typeof event.from_stage === 'number') {
+      rejected.delete(event.from_stage);
+    }
+  }
+  return rejected;
+});
+
 function resolveStagePresentation(
   stage: AgentTaskStage,
   taskStatus: AgentTask['status'],
+  rejectedSet: Set<number>,
 ): { visualState: WorkflowVisualState; statusText: string; isCurrentHolder: boolean } {
   if (stage.stage_status === 'APPROVED' || taskStatus === 'DONE') {
     return {
@@ -123,6 +140,14 @@ function resolveStagePresentation(
     };
   }
 
+  if (rejectedSet.has(stage.stage_index)) {
+    return {
+      visualState: 'rejected',
+      statusText: t('agent.taskStageStatusRejected'),
+      isCurrentHolder: false,
+    };
+  }
+
   return {
     visualState: 'waiting',
     statusText: t('agent.taskStageStatusWaiting'),
@@ -147,8 +172,9 @@ const nodes = computed<WorkflowNode[]>(() => {
     ? task.stages
     : fallbackStages(task);
 
+  const rejectedSet = rejectedStages.value;
   const stageNodes: WorkflowNode[] = stages.map((stage) => {
-    const presentation = resolveStagePresentation(stage, task.status);
+    const presentation = resolveStagePresentation(stage, task.status, rejectedSet);
     const defaultRoleLabel =
       stage.node_type === 'REVIEW'
         ? t('agent.taskStageTypeReview')
@@ -301,6 +327,19 @@ function isConnectorCompleted(node: WorkflowNode): boolean {
 .task-workflow-graph__node[data-state='hold'] .task-workflow-graph__owner {
   color: var(--state-info);
   font-weight: 700;
+}
+
+/* 被打回后等待重审的节点：红色实线边框 */
+.task-workflow-graph__node[data-state='rejected'] .task-workflow-graph__vertex {
+  border-style: solid;
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel-bg) 88%);
+  color: var(--danger);
+}
+
+.task-workflow-graph__node[data-state='rejected'] .task-workflow-graph__owner {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* 未执行：灰色虚线边框 */

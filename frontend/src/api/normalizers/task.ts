@@ -63,6 +63,15 @@ export function normalizeAgentTaskEvent(raw: RawAgentTaskEvent): AgentTaskEvent 
     from_status: normalizeEventStatus(raw.from_status),
     to_status: normalizeEventStatus(raw.to_status),
     content: typeof raw.content === 'string' ? raw.content : '',
+    action_type: typeof raw.action_type === 'string' && raw.action_type.trim()
+      ? raw.action_type.trim().toUpperCase()
+      : null,
+    from_stage: typeof raw.from_stage === 'number' && Number.isFinite(raw.from_stage)
+      ? raw.from_stage
+      : null,
+    to_stage: typeof raw.to_stage === 'number' && Number.isFinite(raw.to_stage)
+      ? raw.to_stage
+      : null,
     created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : null,
   };

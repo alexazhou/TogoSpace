@@ -187,6 +187,9 @@ export interface AgentTaskEvent {
   from_status: AgentTaskStatus | null;
   to_status: AgentTaskStatus | null;
   content: string;
+  action_type?: string | null;
+  from_stage?: number | null;
+  to_stage?: number | null;
   created_at: string | null;
   updated_at: string | null;
 }

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import AgentTaskDetailModal from '../AgentTaskDetailModal.vue';
 import i18n from '../../../i18n';
-import type { AgentTask, AgentTaskDependencySummary } from '../../../types';
+import type { AgentTask, AgentTaskDependencySummary, AgentTaskEvent } from '../../../types';
 
 const { getTaskDetailMock, getTaskEventsPageMock } = vi.hoisted(() => ({
   getTaskDetailMock: vi.fn(),
@@ -48,9 +48,9 @@ function dependency(overrides: Partial<AgentTaskDependencySummary> = {}): AgentT
   };
 }
 
-async function mountModal(task: AgentTask) {
+async function mountModal(task: AgentTask, events: AgentTaskEvent[] = []) {
   getTaskDetailMock.mockResolvedValue(task);
-  getTaskEventsPageMock.mockResolvedValue({ events: [], total: 0 });
+  getTaskEventsPageMock.mockResolvedValue({ events, total: events.length });
 
   const wrapper = mount(AgentTaskDetailModal, {
     props: {
@@ -257,5 +257,131 @@ describe('AgentTaskDetailModal 多节点流转图', () => {
     const doneNodes = doneWrapper.findAll('.task-workflow-graph__node');
     expect(doneNodes[1].attributes('data-state')).toBe('approved');
     expect(doneNodes[2].attributes('data-state')).toBe('approved');
+  });
+
+  it('事件时间线存在 REJECT 时将对应打回节点标红，重新 ADVANCE 后恢复', async () => {
+    const baseEvents: AgentTaskEvent[] = [
+      {
+        id: 1,
+        task_id: 155,
+        actor_id: 2,
+        from_status: 'IN_PROGRESS',
+        to_status: 'REVIEWING',
+        content: '提审',
+        action_type: 'ADVANCE',
+        from_stage: 0,
+        to_stage: 1,
+        created_at: '2026-11-15 20:00:00',
+        updated_at: '2026-11-15 20:00:00',
+      },
+      {
+        id: 2,
+        task_id: 155,
+        actor_id: 3,
+        from_status: 'REVIEWING',
+        to_status: 'IN_PROGRESS',
+        content: '需要补充测试',
+        action_type: 'REJECT',
+        from_stage: 1,
+        to_stage: 0,
+        created_at: '2026-11-15 20:10:00',
+        updated_at: '2026-11-15 20:10:00',
+      },
+    ];
+
+    const rejectedWrapper = await mountModal(baseTask({
+      id: 201,
+      status: 'IN_PROGRESS',
+      current_stage: 0,
+      stages: [
+        {
+          stage_index: 0,
+          node_type: 'EXECUTION',
+          name: '',
+          owner_id: 2,
+          owner_name: '二部开发',
+          stage_status: 'ACTIVE',
+        },
+        {
+          stage_index: 1,
+          node_type: 'REVIEW',
+          name: '',
+          owner_id: 3,
+          owner_name: '二部测试',
+          stage_status: 'WAITING',
+        },
+      ],
+    }), baseEvents);
+
+    const rejectedNodes = rejectedWrapper.findAll('.task-workflow-graph__node');
+    expect(rejectedNodes[0].attributes('data-state')).toBe('approved');
+    expect(rejectedNodes[1].attributes('data-state')).toBe('active');
+    expect(rejectedNodes[2].attributes('data-state')).toBe('rejected');
+
+    // 重新提审并通过阶段 1 进入阶段 2 后，阶段 1 恢复为绿色已通过
+    const passedWrapper = await mountModal(baseTask({
+      id: 202,
+      status: 'REVIEWING',
+      current_stage: 2,
+      stages: [
+        {
+          stage_index: 0,
+          node_type: 'EXECUTION',
+          name: '',
+          owner_id: 2,
+          owner_name: '二部开发',
+          stage_status: 'APPROVED',
+        },
+        {
+          stage_index: 1,
+          node_type: 'REVIEW',
+          name: '初审',
+          owner_id: 3,
+          owner_name: '二部测试',
+          stage_status: 'APPROVED',
+        },
+        {
+          stage_index: 2,
+          node_type: 'REVIEW',
+          name: '终审',
+          owner_id: 4,
+          owner_name: '总监',
+          stage_status: 'ACTIVE',
+        },
+      ],
+    }), [
+      ...baseEvents,
+      {
+        id: 3,
+        task_id: 202,
+        actor_id: 2,
+        from_status: 'IN_PROGRESS',
+        to_status: 'REVIEWING',
+        content: '已修复',
+        action_type: 'ADVANCE',
+        from_stage: 0,
+        to_stage: 1,
+        created_at: '2026-11-15 20:20:00',
+        updated_at: '2026-11-15 20:20:00',
+      },
+      {
+        id: 4,
+        task_id: 202,
+        actor_id: 3,
+        from_status: 'REVIEWING',
+        to_status: 'REVIEWING',
+        content: '初审通过',
+        action_type: 'ADVANCE',
+        from_stage: 1,
+        to_stage: 2,
+        created_at: '2026-11-15 20:30:00',
+        updated_at: '2026-11-15 20:30:00',
+      },
+    ]);
+
+    const passedNodes = passedWrapper.findAll('.task-workflow-graph__node');
+    expect(passedNodes[1].attributes('data-state')).toBe('approved');
+    expect(passedNodes[2].attributes('data-state')).toBe('approved');
+    expect(passedNodes[3].attributes('data-state')).toBe('active');
   });
 });

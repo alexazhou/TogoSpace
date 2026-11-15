@@ -271,6 +271,7 @@
     "taskStageStatusWaiting": "待流转",
     "taskStageStatusCompleted": "已完成",
     "taskStageStatusApproved": "已通过",
+    "taskStageStatusRejected": "已打回",
     "taskEventsLabel": "事件时间线",
     "taskEventsTotal": "共 {count} 条",
     "taskEventsEmpty": "暂无事件记录。",
