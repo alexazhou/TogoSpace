@@ -685,7 +685,7 @@
         }
       },
       "kind": {
-        "description": "来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。 name 命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。",
+        "description": "来源类型：`openapi` / `mcp` / `graphql`，默认 `openapi`。 name 命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。",
         "schema": {
           "type": "string"
         }
@@ -1082,7 +1082,7 @@
     "description": "把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp add` 的底层工具）。",
     "parameters": {
       "config": {
-        "description": "凭证值，形如 `{\"headers\": {\"Authorization\": \"Bearer sk-...\"}}` （headers 配 HTTP 类 kind）或 `{\"env\": {\"API_KEY\": \"v123...\"}}` （env 配 `mcp_stdio`，注入子进程环境变量）。**值原样存**（#277）； 查看面只见掩码。",
+        "description": "凭证值，形如 `{\"headers\": {\"Authorization\": \"Bearer sk-...\"}}` （headers 配 HTTP 传输：mcp+sse / mcp+streamable_http / openapi / graphql） 或 `{\"env\": {\"API_KEY\": \"v123...\"}}`（env 配 mcp+stdio，注入子进程环境变量）。 值原样存**（#277）；查看面只见掩码。",
         "schema": {
           "type": [
             "object",
@@ -1091,7 +1091,7 @@
         }
       },
       "kind": {
-        "description": "来源类型，默认 `mcp`（与 `mcp_call` 的默认 `openapi` **有意不同**：注册表 典型用法是 MCP server）；可选 `openapi` / `mcp` / `mcp_stdio` / `graphql`。",
+        "description": "来源类型，默认 `mcp`（与 `mcp_call` 的默认 `openapi` **有意不同**：注册表 典型用法是 MCP server）；可选 `openapi` / `graphql`。",
         "schema": {
           "type": "string"
         }
@@ -1115,6 +1115,15 @@
         "description": "name 已存在时是否覆盖；默认 false（防误覆盖别人的登记）。",
         "schema": {
           "type": "boolean"
+        }
+      },
+      "protocol": {
+        "description": "仅 kind=mcp 有意义——MCP 传输方式：`stdio`（本地子进程，target 填 启动命令）/ `sse`（服务器发送事件，target 填 URL）/ `streamable_http` （可流式 HTTP，target 填 URL，缺省值）。其余 kind 的 protocol 必须留空。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "target": {

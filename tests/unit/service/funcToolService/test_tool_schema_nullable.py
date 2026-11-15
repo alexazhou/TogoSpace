@@ -215,6 +215,9 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     # #224→#273：MCP 注册表四工具的 Optional + None 默认参数（kind/note/overwrite 等
     # 「有默认值但注解不含 None」的进 NON_OPTIONAL_BUT_DEFAULTED 另一张表）。
     ("save_mcp_server", "name"),
+    # kind（来源类型）与 protocol（MCP 传输方式）拆成两字段：protocol 为
+    # `Optional[str] = None`（非 kind=mcp 时必须留空，null 是合法输入）。
+    ("save_mcp_server", "protocol"),
     ("save_mcp_server", "config"),
     ("save_mcp_server", "target"),
     ("delete_mcp_server", "name"),
@@ -535,7 +538,7 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 26
-    assert len(OPTIONAL_WITH_DEFAULT) == 86
+    assert len(OPTIONAL_WITH_DEFAULT) == 87
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -771,7 +774,12 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: #279 重算（`39e8272a…` → 见下）：`credentials` → `config` 字段改名（Operator
 #: 2026-11-16 00:04 需求，内容结构不变）——`save_mcp_server.config` 与 `mcp_call`
 #: 相关参数名/说明同步改名；**工具数 44、参数数 139 不变**（纯改名，零增删参数）。
-BASELINE_TEXT_DIGEST = "15d263fc7623a443ebd256ebcb4014fc22f8556e7364b1d3e68397220fa5bb5a"
+#:
+#: kind/protocol 拆分重算（`15d263fc…` → 见下）：`save_mcp_server` 新增
+#: `protocol: Optional[str] = None`（MCP 传输方式 stdio/sse/streamable_http，仅
+#: kind=mcp 有意义，其余 kind 必须留空），`kind` / `target` / `config` 说明同步
+#: 重写；**工具数 44、参数数 139 → 140**（+1 可选参数）。
+BASELINE_TEXT_DIGEST = "e9083278039db3f805f02941f623e973193ac4080c8a034fa7b4bd699240ffa8"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -815,7 +823,7 @@ def test_descriptions_and_required_do_not_drift() -> None:
     # 38 → 39 / 108 → 114：`mcp_call`（#202）。40 → 44 / 125 → 139：MCP 注册表四工具
     # （#224 三工具 + #273 set_mcp_server_enabled，+`mcp_call` 说明改写）。
     assert tools == 44, tools
-    assert params == 139, params
+    assert params == 140, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

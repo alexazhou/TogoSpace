@@ -213,8 +213,8 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     ),
     "mcp call": (
         "先 `mcp ls <target>` 拿工具清单，再 `mcp call <target> --tool 名 --args '{...}'`。",
-        "target 形态由 --kind 决定：openapi=spec 文件路径或 URL（默认）/ mcp=HTTP-SSE 地址 / "
-        "mcp_stdio=启动命令（含参数，整体加引号）/ graphql=endpoint。",
+        "target 形态由 --kind 决定：openapi=spec 文件路径或 URL（默认）/ mcp=MCP server（配 --protocol stdio=启动命令（含参数，整体加引号）/ sse=纯 SSE 地址 / streamable_http=URL，缺省）/ "
+        "graphql=endpoint。",
         "⚠️ 若目标 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发，"
         "表现为 404 或打错服务）；请在 spec 里补 servers，或直接用带完整 path 的 URL。"
         "该限制由 mcp2cli 的 spec 解析决定，本工具不改写你的 target。",

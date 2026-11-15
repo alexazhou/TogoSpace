@@ -108,7 +108,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "mcp_call": ["target", "action", "tool", "args", "kind", "extra"],
     # #224→#273：`mcp add` 的登记参数按「name → 来源类型 → 连接描述 → 说明 → 凭证 → 覆盖」
     # 排列；`name` 必填在前。
-    "save_mcp_server": ["name", "kind", "target", "note", "config", "overwrite"],
+    "save_mcp_server": ["name", "kind", "protocol", "target", "note", "config", "overwrite"],
     # 长期记忆工具（#134）。参数顺序统一「先定位（memory_id / query）、后修改字段、
     # 最后是可选开关」：memory_list 只有开关；memory_update 的 memory_id 必填在最前。
     "memory_create": ["title", "summary", "content", "star_level", "tags"],

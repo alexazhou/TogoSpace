@@ -37,16 +37,20 @@ logger = logging.getLogger(__name__)
 #: 依据是解析器边界（shlex / `--` 前缀当选项 / `-h` 全局短路），不是偏好。
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
-#: kind 合法值（`tools.mcp_call` 同一口径，`mcpTool._SOURCE_FLAGS` 的键集）。
-VALID_KINDS = ("openapi", "mcp", "mcp_stdio", "graphql")
+#: kind 合法值（`tools.mcp_call` 同一口径，`mcpTool._SOURCE_FLAGS` 的键集）：
+#: 「来源是什么」。MCP 的传输差异不进 kind，见 VALID_PROTOCOLS。
+VALID_KINDS = ("mcp", "openapi", "graphql")
 
-#: HTTP 类 kind：headers 凭证（`--auth-header`）只对它们有意义。
-_HTTP_KINDS = ("openapi", "mcp", "graphql")
+#: protocol 合法值（仅 kind=mcp 有意义）：MCP 的三种传输，与 mcp2cli 引擎的
+#: `--transport` 同词汇（streamable_http 对应引擎 `streamable`；stdio 走
+#: `--mcp-stdio` 子进程）。其余 kind 的 protocol 一律存 ''。
+VALID_PROTOCOLS = ("stdio", "sse", "streamable_http")
 #: stdio 类 kind：env 凭证（`--env`，注入子进程环境）只对它有意义。
 _STDIO_KIND = "mcp_stdio"
 
 _ERROR_NAME_INVALID = "mcp_invalid_name"
 _ERROR_KIND_INVALID = "mcp_invalid_kind"
+_ERROR_PROTOCOL_INVALID = "mcp_invalid_protocol"
 _ERROR_TARGET_INVALID = "mcp_invalid_target"
 _ERROR_NAME_EXISTS = "mcp_name_exists"
 _ERROR_NAME_NOT_FOUND = "mcp_name_not_found"
@@ -89,14 +93,33 @@ def validate_target(target: str) -> str:
     return text
 
 
-def validate_config(config: dict | None, kind: str) -> dict:
+def validate_protocol(protocol: str | None, kind: str) -> str | None:
+    """protocol 归一：kind=mcp 必为三种传输之一（缺省 streamable_http）；
+    其余 kind 一律 NULL（给了非空值报 `mcp_invalid_protocol`——静默丢弃比报错更坏）。"""
+    text = str(protocol or "").strip()
+    if kind != "mcp":
+        if text:
+            raise _fail(_ERROR_PROTOCOL_INVALID, f"protocol 只对 kind=mcp 有意义，当前 kind={kind}。")
+        return None
+    if not text:
+        return "streamable_http"
+    if text not in VALID_PROTOCOLS:
+        raise _fail(
+            _ERROR_PROTOCOL_INVALID,
+            f"protocol 只支持 {' / '.join(VALID_PROTOCOLS)}，收到 {text!r}。",
+        )
+    return text
+
+
+def validate_config(config: dict | None, kind: str, protocol: str = "") -> dict:
     """凭证**结构**校验（#277：值原样存，不再校验前缀）。返回归一后的存储形态。
 
     - `{}` / `None` ⇒ `{}`（空凭证统一存 `{}`）；
     - 结构只能是 `{"headers": {...}, "env": {...}}` 两层；**值原样存**（明文，
       不做任何前缀/形态校验——Operator 20:21 明确改为直接存值）；
-    - headers 层只配 HTTP 类 kind、env 层只配 `mcp_stdio`（错配 ⇒
-      `mcp_credential_kind_mismatch`）——静默存下调用时永不生效的凭证，比报错更坏。
+    - headers 层只配 kind=mcp 的 HTTP 传输（sse / streamable_http）、env 层只配
+      kind=mcp 的 stdio（错配 ⇒ `mcp_credential_kind_mismatch`）——静默存下调用时
+      永不生效的凭证，比报错更坏。openapi / graphql 是 HTTP 来源，headers 同样合法。
 
     值是明文 ⇒ 脱敏责任在**输出面**（日志/返回体/异常文案打码，见模块 docstring），
     校验层不做打码（存的就是值，展示才打码）。
@@ -127,15 +150,19 @@ def validate_config(config: dict | None, kind: str) -> dict:
             layer_out[str(name)] = value.strip()
         normalized[layer] = layer_out
 
-    if "headers" in normalized and kind not in _HTTP_KINDS:
+    headers_ok = kind != "mcp" or protocol in ("sse", "streamable_http")
+    if "headers" in normalized and not headers_ok:
         raise _fail(
             _ERROR_CREDENTIAL_KIND_MISMATCH,
-            f"headers 凭证只对 HTTP 类 kind（{' / '.join(_HTTP_KINDS)}）有意义，当前 kind={kind}。",
+            f"headers 凭证只对 HTTP 传输有意义（kind=mcp 且 protocol=sse/streamable_http，"
+            f"或 openapi / graphql），当前 kind={kind}、protocol={protocol!r}。",
         )
-    if "env" in normalized and kind != _STDIO_KIND:
+    env_ok = kind == "mcp" and protocol == "stdio"
+    if "env" in normalized and not env_ok:
         raise _fail(
             _ERROR_CREDENTIAL_KIND_MISMATCH,
-            f"env 凭证只对 kind=mcp_stdio 有意义（注入子进程环境变量），当前 kind={kind}。",
+            f"env 凭证只对 kind=mcp + protocol=stdio 有意义（注入子进程环境变量），"
+            f"当前 kind={kind}、protocol={protocol!r}。",
         )
     return normalized
 
@@ -167,6 +194,7 @@ def entry_summary(entry: GtMcpServer) -> dict:
     return {
         "name": entry.name,
         "kind": entry.kind,
+        "protocol": entry.protocol,
         "target_masked": mask_target(entry.target),
         "note": entry.note,
         "enable": bool(entry.enable),
@@ -194,6 +222,7 @@ async def save_server(
     *,
     name: str,
     kind: str = "mcp",
+    protocol: str | None = None,
     target: str,
     note: str = "",
     config: dict | None = None,
@@ -204,12 +233,13 @@ async def save_server(
 
     正确性不依赖「先查后插」：并发第二写由全局唯一索引 `ux_mcp_servers_name` 兜底，
     `IntegrityError` 统一转 `mcp_name_exists`（与预检语义一致）。`overwrite` 只覆盖
-    kind/target/note/config，**不动 enable**（禁用状态属运维态，覆盖登记不改它）。
+    kind/protocol/target/note/config，**不动 enable**（禁用状态属运维态，覆盖登记不改它）。
     """
     name_n = validate_name(name)
     kind_n = validate_kind(kind)
+    protocol_n = validate_protocol(protocol, kind_n)
     target_n = validate_target(target)
-    config_n = validate_config(config, kind_n)
+    config_n = validate_config(config, kind_n, protocol_n or "")
 
     existing = await gtMcpServerManager.get_by_name(name_n)
     if existing is not None and not overwrite:
@@ -221,11 +251,12 @@ async def save_server(
 
     if existing is not None:
         existing.kind = kind_n
+        existing.protocol = protocol_n
         existing.target = target_n
         existing.note = note or ""
         existing.config = config_n
         await gtMcpServerManager.update_entry(
-            existing, ["kind", "target", "note", "config"]
+            existing, ["kind", "protocol", "target", "note", "config"]
         )
         logger.info("mcp registry: name %s 已覆盖", name_n)
         return existing
@@ -233,6 +264,7 @@ async def save_server(
     entry = GtMcpServer(
         name=name_n,
         kind=kind_n,
+        protocol=protocol_n,
         target=target_n,
         note=note or "",
         config=config_n,
@@ -247,7 +279,7 @@ async def save_server(
             _ERROR_NAME_EXISTS,
             f"name {name_n!r} 已登记（并发写入撞全局唯一索引）。覆盖须显式 overwrite=true。",
         ) from exc
-    logger.info("mcp registry: name %s 已登记（kind=%s）", name_n, kind_n)
+    logger.info("mcp registry: name %s 已登记（kind=%s, protocol=%s）", name_n, kind_n, protocol_n)
     return entry
 
 

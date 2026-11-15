@@ -80,9 +80,11 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
   }
 
   try {
+    // headers 必须放在 ...init 之后：调用方传了 init.headers 时，若先放 headers
+    // 会被整个覆盖，导致 Authorization 丢失（POST 携带 Content-Type 即触发 401）。
     const response = await fetch(requestUrl, {
-      headers,
       ...init,
+      headers,
     });
     const responseContentType = response.headers.get('content-type') || '';
 

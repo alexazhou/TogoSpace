@@ -14,10 +14,17 @@
 -- 改为 `config`（内容结构不变：{"headers":{...}}/"env" 两层）。前提=0023 在真库
 -- 已执行（账本 id=23），须先 drop mcp_servers 表 + 删账本 id=23 行让本文件重跑
 -- （真库该表 0 行，清理由 PM 执行，顺序=先合并代码再动真库）。
+--
+-- kind / protocol 两字段拆分（Operator 2026-11-17）：kind 表「来源是什么」
+-- （mcp / openapi / graphql），protocol 表「MCP 用哪种传输」（stdio / sse /
+-- streamable_http，仅 kind=mcp 有意义，其余 kind 存 NULL）。裸 `mcp_stdio` /
+-- `mcp_sse` 拼名 kind 废弃，不留别名（#273 先例），同 #279 前提：
+-- drop 表 + 删账本 id=23 重跑。
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   name            TEXT    NOT NULL,
   kind            TEXT    NOT NULL DEFAULT 'mcp',
+  protocol        TEXT,
   target          TEXT    NOT NULL,
   note            TEXT    NOT NULL DEFAULT '',
   config          TEXT    NOT NULL DEFAULT '{}',

@@ -131,7 +131,7 @@ async def mcp_call(
     先用 `action=list` 拿到该目标的可调用工具清单（含参数说明），再用 `action=call`
     调其中一个。这样外部服务的几十上百个工具只占「一次 list」的 token，不必每个都
     预先塞成独立工具。`kind` 决定 target 怎么解释：`openapi` 填 spec 文件路径或 URL，
-    `mcp` 填 MCP server 的 HTTP/SSE 地址，`mcp_stdio` 填启动该 server 的本地命令，
+    `mcp` 填 MCP server 的地址（引擎 auto：先试 Streamable HTTP、失败回落 SSE），
     `graphql` 填 GraphQL endpoint。返回成功时 `result` 是 mcp2cli 的 JSON 输出
     （list 为命令数组，call 为结果 envelope），`result_type` 标出它是 object / array /
     string 等（远端返回纯文本时 `result_type="string"`，不是调用失败）；`truncated=True`
@@ -156,7 +156,7 @@ async def mcp_call(
         action: `list` 只列工具，`call` 真调一次。
         tool: action=call 时的工具名（从 list 结果里取）。
         args: action=call 时的参数对象，键名与 list 里该工具的参数名一致。
-        kind: 来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。
+        kind: 来源类型：`openapi` / `mcp` / `graphql`，默认 `openapi`。
             name 命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。
         extra: 透传 **mcp2cli 全局开关**，如 `{"transport": "sse", "search": "关键词"}`。
             `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql`
@@ -167,6 +167,7 @@ async def mcp_call(
     registry_name: str | None = None
     resolved_from_registry = False
     config: dict | None = None
+    protocol: str | None = None
     name = str(target or "").strip()
     if name:
         # 注册表是**增量能力**：未绑库（无库环境直调第 2 跳）时按未命中透传，
@@ -211,6 +212,9 @@ async def mcp_call(
                         ),
                     }
                 kind = entry.kind
+                # 两字段拆分：传输方式随注册项注入（stdio/sse/streamable_http；
+                # 非 mcp kind 的 protocol 为 NULL，不影响其它 kind 的来源开关）。
+                protocol = entry.protocol
                 target = entry.target
                 # #277：凭证原样存值，注入直接用字面值（明文）；出口打码在 mcpTool。
                 config = mcpRegistryService.config_of(entry)
@@ -223,6 +227,7 @@ async def mcp_call(
         args=args,
         extra=extra,
         config=config,
+        protocol=protocol,
     )
     # 恒出现（沿 1337 附加判据 3）：命中 true + name 字段，未命中恒 false；不做条件字段。
     result["resolved_from_registry"] = resolved_from_registry
@@ -245,6 +250,7 @@ _MCP_CALL_DEFAULT_KIND = "openapi"
 async def save_mcp_server(
     name: Optional[str] = None,
     kind: str = "mcp",
+    protocol: Optional[str] = None,
     target: Optional[str] = None,
     note: str = "",
     config: Optional[dict] = None,
@@ -262,13 +268,16 @@ async def save_mcp_server(
     Args:
         name: 全局唯一名，小写字母开头、仅含小写字母/数字/下划线/连字符，最长 32 字符（如 `ctx7`）。
         kind: 来源类型，默认 `mcp`（与 `mcp_call` 的默认 `openapi` **有意不同**：注册表
-            典型用法是 MCP server）；可选 `openapi` / `mcp` / `mcp_stdio` / `graphql`。
+            典型用法是 MCP server）；可选 `openapi` / `graphql`。
+        protocol: 仅 kind=mcp 有意义——MCP 传输方式：`stdio`（本地子进程，target 填
+            启动命令）/ `sse`（服务器发送事件，target 填 URL）/ `streamable_http`
+            （可流式 HTTP，target 填 URL，缺省值）。其余 kind 的 protocol 必须留空。
         target: 完整连接描述：MCP server URL / spec 路径或 URL / stdio 启动命令 / GraphQL endpoint。
         note: 备注说明（给人看的用途描述）。
         config: 凭证值，形如 `{"headers": {"Authorization": "Bearer sk-..."}}`
-            （headers 配 HTTP 类 kind）或 `{"env": {"API_KEY": "v123..."}}`
-            （env 配 `mcp_stdio`，注入子进程环境变量）。**值原样存**（#277）；
-            查看面只见掩码。
+            （headers 配 HTTP 传输：mcp+sse / mcp+streamable_http / openapi / graphql）
+            或 `{"env": {"API_KEY": "v123..."}}`（env 配 mcp+stdio，注入子进程环境变量）。
+            **值原样存**（#277）；查看面只见掩码。
         overwrite: name 已存在时是否覆盖；默认 false（防误覆盖别人的登记）。
     """
     # 注册表全局化（#273）后 team 上下文无作用域语义，不再设 _require_team_context 门；
@@ -280,6 +289,7 @@ async def save_mcp_server(
         entry = await mcpRegistryService.save_server(
             name=str(name or ""),
             kind=kind,
+            protocol=protocol,
             target=str(target or ""),
             note=str(note or ""),
             config=config,
@@ -290,7 +300,11 @@ async def save_mcp_server(
         return toolResult.error_result(exc)
     return {
         "success": True,
-        "message": f"name {entry.name!r} 已登记（kind={entry.kind}，全局注册表）。可用 `mcp call {entry.name}` 调用。",
+        "message": (
+            f"name {entry.name!r} 已登记（kind={entry.kind}"
+            + (f", protocol={entry.protocol}" if entry.protocol else "")
+            + "，全局注册表）。可用 `mcp call " + entry.name + "` 调用。"
+        ),
         "server": mcpRegistryService.entry_summary(entry),
         "resolved_from_registry": False,
     }

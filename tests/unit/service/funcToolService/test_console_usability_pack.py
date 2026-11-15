@@ -169,9 +169,11 @@ class TestMcpEmptyTargetHint:
         assert result["success"] is False
         assert result["error_code"] == "missing_target", result
         usage = "\n".join(result["usage"])
-        # 四种 kind 都得点到名，且各带一句 target 形态
-        for kind in ("openapi", "mcp_stdio", "graphql"):
+        # 三种 kind 都得点到名，protocol 三种传输也得点到名（两字段拆分）
+        for kind in ("mcp", "openapi", "graphql"):
             assert f"--kind {kind}" in usage, f"usage 里缺 {kind}：{usage}"
+        for protocol in ("stdio", "sse", "streamable_http"):
+            assert protocol in usage, f"usage 里缺 {protocol}：{usage}"
         # 至少两个可抄的示例（一个是文件、一个是 URL/命令）
         assert "示例" in usage and "mcp ls ./openapi.json" in usage, usage
         assert "http" in usage.lower(), usage

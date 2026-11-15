@@ -963,9 +963,11 @@ async def test_null_injection_exhaustive_table() -> None:
     # （save.name/target/config、delete.name、set.name、list.name_or_target/tool/args/extra）
     # 与 +5 个「有默认值但注解不含 None」（save.kind/note/overwrite、list.kind、set.enable）
     # ⇒ p1_required 48→53、p1_optional 77→86。
-    assert p1_required + p1_optional == 139, (p1_required, p1_optional)
+    # kind/protocol 拆分：`save_mcp_server.protocol` 为新增 Optional + None 默认
+    # ⇒ p1_optional 86→87、总数 139→140。
+    assert p1_required + p1_optional == 140, (p1_required, p1_optional)
     assert p1_required == 53, p1_required
-    assert p1_optional == 86, p1_optional
+    assert p1_optional == 87, p1_optional
     assert p2 == 15, f"P2={p2}"
     # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
     # #224→#273：`save_mcp_server.config`、`list_mcp_servers.args/extra` 亦是裸 object
@@ -975,10 +977,11 @@ async def test_null_injection_exhaustive_table() -> None:
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    # 198 = 44 + 53 + 86 + 15 + 0（#273 实测口径：工具 40→44、P1 125→138、P2 恒 15，
+    # 199 = 44 + 53 + 87 + 15 + 0（#273 实测口径：工具 40→44、P1 125→138、P2 恒 15，
     # P3 内部 key 恒 0；p3_fields（7→10，裸 object 计数）不进 total，同 #202 口径）。
+    # （kind/protocol 拆分：`save_mcp_server.protocol` +1 ⇒ 198→199）
     # （#202 实测：166 = 39 + 46 + 68 + 13 + 0；#196 前 148；#189 时 146）
-    assert total == 198, total
+    assert total == 199, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

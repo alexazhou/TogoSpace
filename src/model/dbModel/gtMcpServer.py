@@ -76,7 +76,8 @@ def mask_config_for_display(config: dict) -> dict:
 
 class GtMcpServer(DbModelBase):
     name:        str   = peewee.CharField()                # 全局唯一（ux_mcp_servers_name）；原 #224 半成品的 alias（#273 改名）
-    kind:        str   = peewee.CharField(default="mcp")   # openapi/mcp/mcp_stdio/graphql
+    kind:        str        = peewee.CharField(default="mcp")   # mcp/openapi/graphql（来源类型）
+    protocol:    str | None = peewee.CharField(null=True)       # stdio/sse/streamable_http（仅 kind=mcp 有意义；其余 NULL）
     target:      str   = peewee.TextField()
     note:        str   = peewee.TextField(default="")
     # #279（Operator 2026-11-16 00:25 拍板「方案2」）：0023 文件直接改为 `config` 列，

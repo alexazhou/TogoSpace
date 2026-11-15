@@ -99,6 +99,7 @@ async def test_save_persists_across_reconnect(mcp_db, reopened_db):
     fresh = await gtMcpServerManager.get_by_name("ctx7")
     assert fresh is not None
     assert fresh.kind == "mcp"
+    assert fresh.protocol == "streamable_http"  # kind=mcp 缺省传输
     assert fresh.config == {}  # E1：空凭证统一存 {}
     assert fresh.enable == 1  # 新登记默认启用
 
@@ -193,11 +194,11 @@ async def test_config_structure_violations(mcp_db):
     assert bad_layer.value.error_code == "mcp_invalid_credentials"
 
 
-async def test_credential_kind_mismatch_refused(mcp_db):
-    """headers 配 stdio / env 配 HTTP 都在登记时拒——静默存下调用时永不生效的凭证更坏。"""
+async def test_credential_protocol_mismatch_refused(mcp_db):
+    """headers 配 stdio / env 配 HTTP 传输都在登记时拒——静默存下调用时永不生效的凭证更坏。"""
     with pytest.raises(TogoException) as header_stdio:
         await _save(
-            name="s3", kind="mcp_stdio", target="npx -y some-server",
+            name="s3", kind="mcp", protocol="stdio", target="npx -y some-server",
             config={"headers": {"Authorization": "env:T"}},
         )
     assert header_stdio.value.error_code == "mcp_credential_kind_mismatch"
@@ -209,12 +210,37 @@ async def test_credential_kind_mismatch_refused(mcp_db):
         )
     assert env_http.value.error_code == "mcp_credential_kind_mismatch"
 
-    # 对称正向：env 层配 mcp_stdio 合法（值原样存）。
+    # 对称正向：env 层配 kind=mcp + protocol=stdio 合法（值原样存）。
     entry = await _save(
-        name="s5", kind="mcp_stdio", target="npx -y some-server",
+        name="s5", kind="mcp", protocol="stdio", target="npx -y some-server",
         config={"env": {"API_KEY": "v-API-KEY-VALUE"}},
     )
     assert entry.config == {"env": {"API_KEY": "v-API-KEY-VALUE"}}
+
+
+async def test_mcp_protocol_field_rules(mcp_db):
+    """protocol 仅 kind=mcp 有意义：三种传输合法、缺省 streamable_http、其余 kind 拒。"""
+    for name, protocol in (("p-sse", "sse"), ("p-http", "streamable_http")):
+        entry = await _save(name=name, kind="mcp", protocol=protocol, target="https://x")
+        assert entry.protocol == protocol
+    # 缺省 ⇒ streamable_http；headers 配 HTTP 传输合法。
+    default_entry = await _save(
+        name="p-default", target="https://x",
+        config={"headers": {"Authorization": "Bearer v-TEST-TOKEN"}},
+    )
+    assert default_entry.protocol == "streamable_http"
+
+    with pytest.raises(TogoException) as bad_value:
+        await _save(name="p-bad", kind="mcp", protocol="websocket", target="https://x")
+    assert bad_value.value.error_code == "mcp_invalid_protocol"
+
+    with pytest.raises(TogoException) as on_non_mcp:
+        await _save(name="p-openapi", kind="openapi", protocol="sse", target="./spec.json")
+    assert on_non_mcp.value.error_code == "mcp_invalid_protocol"
+
+    # 非 mcp kind 的 protocol 归一为 NULL（不留空串）。
+    plain = await _save(name="p-plain", kind="openapi", target="./spec.json")
+    assert plain.protocol is None
 
 
 # ---------------------------------------------------------------------------

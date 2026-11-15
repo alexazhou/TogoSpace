@@ -151,6 +151,7 @@ def secret_env(monkeypatch):
 async def _register_server(
     name: str = "ctx7",
     kind: str = "mcp",
+    protocol: str | None = None,
     target: str = "https://mcp.context7.com/mcp",
     config: dict | None = None,
     team_id: int = 1,
@@ -158,6 +159,7 @@ async def _register_server(
     return await save_mcp_server(
         name=name,
         kind=kind,
+        protocol=protocol,
         target=target,
         config=config,
         _context=toolRegistry.ToolCallContext(agent_id=1, team_id=team_id),
@@ -322,7 +324,8 @@ async def test_closed_loop_add_ls_call_rm(mcp_db, leader_ctx, loaded_tools, stub
     assert body["name"] == "ctx7"
     assert stub_mcp2cli.runtime_argvs, "call 必须真的分派一次"
     argv = stub_mcp2cli.runtime_argvs[-1]
-    assert argv[0:3] == ["--mcp", "https://mcp.context7.com/mcp", "--json"], argv
+    # kind=mcp 缺省 protocol=streamable_http ⇒ 显式 --transport streamable（引擎词汇）
+    assert argv[0:5] == ["--mcp", "https://mcp.context7.com/mcp", "--transport", "streamable", "--json"], argv
     assert "list_issues" in argv
 
     # rm（真删库）
@@ -638,9 +641,10 @@ async def test_plain_value_reaches_dispatch_and_never_logs(
 async def test_stdio_env_value_verbatim_to_dispatch(
     mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
 ):
-    """env 层（mcp_stdio）：#277 起值是明文，直接注入子进程环境变量，无解析链。"""
+    """env 层（mcp + stdio）：#277 起值是明文，直接注入子进程环境变量，无解析链。"""
     await _register_server(
-        kind="mcp_stdio",
+        kind="mcp",
+        protocol="stdio",
         target="npx -y some-server",
         config={"env": {"API_KEY": _SECRET}},
     )

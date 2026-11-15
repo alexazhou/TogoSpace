@@ -47,13 +47,14 @@ def test_0023_schema_columns_and_unique_index(tmp_path: Path) -> None:
 
     columns = _columns(db_path)
     assert set(columns) == {
-        "id", "name", "kind", "target", "note", "config",
+        "id", "name", "kind", "protocol", "target", "note", "config",
         "enable", "created_by", "created_at", "updated_at",
     }
     assert "team_id" not in columns, "#273：注册表不分 team，不得再建 team_id 列"
     assert "alias" not in columns, "#273：alias 已改名 name，不得保留旧列"
     assert columns["name"] is False, "name 必须 NOT NULL"
     assert columns["enable"] is False, "enable 必须 NOT NULL（默认 1）"
+    assert columns["protocol"] is True, "protocol 必须可空（非 mcp kind 存 NULL，不用空串）"
     assert "ux_mcp_servers_name" in _indexes(db_path)
 
 

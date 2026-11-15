@@ -423,12 +423,11 @@ def _spec(
 #: 放在命令表**外面**：元组字面量里不能赋值，而这段文案两条 mcp 命令共用一份，
 #: 各抄一遍就会漂移（`ls` 说 openapi 默认、`call` 说 mcp 默认，模型照谁写都不对）。
 MCP_KIND_HINT: tuple[str, ...] = (
-    "用法：mcp <ls|call> <target> [--kind openapi|mcp|mcp_stdio|graphql]，target 形态取决于 kind：",
-    "  --kind openapi（默认）  spec 文件路径或 URL",
-    "  --kind mcp              MCP server 的 HTTP/SSE 地址",
-    "  --kind mcp_stdio        启动该 server 的本地命令（含参数，整体加引号）",
+    "用法：mcp <ls|call> <target> [--kind mcp|openapi|graphql] [--protocol stdio|sse|streamable_http]，target 形态取决于 kind：",
+    "  --kind mcp（默认）      MCP server；配合 --protocol stdio（启动命令）/ sse / streamable_http（URL，缺省）",
+    "  --kind openapi          spec 文件路径或 URL",
     "  --kind graphql          GraphQL endpoint",
-    "示例：mcp ls ./openapi.json ｜ mcp ls http://127.0.0.1:8000/mcp --kind mcp",
+    "示例：mcp ls ./openapi.json ｜ mcp ls http://127.0.0.1:8000/mcp --kind mcp ｜ mcp ls \"npx -y server\" --kind mcp --protocol stdio",
 )
 
 

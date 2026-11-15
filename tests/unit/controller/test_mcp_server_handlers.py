@@ -22,6 +22,7 @@ def _entry(**overrides) -> SimpleNamespace:
         id=1,
         name="ctx7",
         kind="mcp",
+        protocol="streamable_http",
         target="https://mcp.example.com/mcp",
         note="文档检索",
         config={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
@@ -82,6 +83,7 @@ async def test_save_delegates_to_service_with_created_by_zero(monkeypatch):
     assert received == {
         "name": "ctx7",
         "kind": "mcp",
+        "protocol": None,
         "target": "https://mcp.example.com/mcp",
         "note": "n",
         "config": {"headers": {"Authorization": "Bearer v"}},

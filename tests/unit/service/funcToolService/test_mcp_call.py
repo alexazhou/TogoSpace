@@ -161,6 +161,47 @@ def test_build_argv_list_uses_source_flag_json_and_list():
     assert argv == ["--spec", "./openapi.json", "--json", "--list"]
 
 
+def test_build_argv_mcp_protocol_selects_flag_and_transport():
+    """kind=mcp 时 protocol 决定来源开关与显式传输：stdio ⇒ --mcp-stdio；
+    sse / streamable_http ⇒ --mcp + --transport。显式 transport 是全局选项，
+    必须落在工具名之前。"""
+    sse = mcpTool.build_argv(
+        kind="mcp", protocol="sse", target="http://127.0.0.1:9/sse",
+        action="list", tool=None, args=None, extra=None,
+    )
+    assert sse == ["--mcp", "http://127.0.0.1:9/sse", "--transport", "sse", "--json", "--list"]
+
+    streamable = mcpTool.build_argv(
+        kind="mcp", protocol="streamable_http", target="http://127.0.0.1:9/mcp",
+        action="list", tool=None, args=None, extra=None,
+    )
+    assert streamable == ["--mcp", "http://127.0.0.1:9/mcp", "--transport", "streamable", "--json", "--list"]
+
+    stdio = mcpTool.build_argv(
+        kind="mcp", protocol="stdio", target="npx -y some-server",
+        action="list", tool=None, args=None, extra=None,
+    )
+    assert stdio == ["--mcp-stdio", "npx -y some-server", "--json", "--list"]
+
+
+def test_build_argv_mcp_without_protocol_keeps_engine_auto():
+    """注册表未命中的直连旧用法：protocol 缺省 ⇒ 无 --transport，引擎 auto
+    （先试 streamable、失败回落 SSE）。"""
+    argv = mcpTool.build_argv(
+        kind="mcp", target="http://127.0.0.1:9/mcp", action="list", tool=None, args=None, extra=None
+    )
+    assert argv == ["--mcp", "http://127.0.0.1:9/mcp", "--json", "--list"]
+
+
+def test_build_argv_mcp_rejects_unknown_protocol():
+    with pytest.raises(mcpTool.McpCallError) as excinfo:
+        mcpTool.build_argv(
+            kind="mcp", protocol="websocket", target="https://x",
+            action="list", tool=None, args=None, extra=None,
+        )
+    assert excinfo.value.error_code == "mcp_invalid_protocol"
+
+
 def test_build_argv_call_maps_args_to_kebab_flags_and_booleans():
     """`args` 的键按 mcp2cli 的口径 kebab-case；bool 走 `--flag` / `--no-flag`。
 

@@ -5,6 +5,8 @@ export interface McpServerEntry {
   id?: number;
   name: string;
   kind: string;
+  /** 仅 kind=mcp 有意义：stdio / sse / streamable_http；其余 kind 为 null。 */
+  protocol: string | null;
   target: string;
   note: string;
   config: Record<string, Record<string, string>> | null;
@@ -16,6 +18,7 @@ export interface McpServerEntry {
 export interface McpServerSavePayload {
   name: string;
   kind: string;
+  protocol?: string | null;
   target: string;
   note: string;
   config: Record<string, Record<string, string>> | null;

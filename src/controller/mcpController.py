@@ -21,10 +21,11 @@ from service import mcpRegistryService
 
 
 class McpServerSaveRequest(BaseModel):
-    """POST /mcp/servers.json 请求体（name/kind/target 必填，凭证可选）。"""
+    """POST /mcp/servers.json 请求体（name/kind/target 必填，protocol/凭证可选）。"""
 
     name: str
     kind: str = "mcp"
+    protocol: str | None = None
     target: str
     note: str = ""
     config: dict | None = None
@@ -47,6 +48,7 @@ def _entry_full(entry) -> dict:
         "id": entry.id,
         "name": entry.name,
         "kind": entry.kind,
+        "protocol": entry.protocol,
         "target": entry.target,
         "note": entry.note,
         "config": entry.config or {},
@@ -76,6 +78,7 @@ class McpServerSaveHandler(BaseHandler):
         entry = await mcpRegistryService.save_server(
             name=request.name,
             kind=request.kind,
+            protocol=request.protocol,
             target=request.target,
             note=request.note,
             config=request.config,
