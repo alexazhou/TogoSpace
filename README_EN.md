@@ -191,6 +191,33 @@ Don't want to install anything? Try the [demo site](https://demo.togoagent.org) 
 
 ---
 
+## 🔐 Code signing policy
+
+Windows releases (`Togobot_<version>_x64-setup.exe`, NSIS installer) are code-signed for free by the **SignPath Foundation**:
+
+> **Free code signing provided by SignPath.io, certificate by SignPath Foundation.**
+
+Scope and process:
+
+- **Only release tags** (`refs/tags/v*`) produce a signing request. Branch pushes and pull-request builds never submit one.
+- Signing runs on a **GitHub-hosted runner** (`windows-2022`) — never on a self-hosted runner.
+- Every signing request is **manually approved by an Approver** on the SignPath side. After signing, CI verifies the
+  result with `Get-AuthenticodeSignature` (`Status = Valid` and the expected signer subject); if that check fails the
+  build fails and no release artifact is produced.
+- macOS builds are signed/notarized with an Apple Developer ID and are outside the scope of this policy.
+
+Roles and members (GitHub accounts):
+
+| Role | Responsibility | Members |
+|---|---|---|
+| **Authors** (submit code / initiate signing requests) | Push code, trigger tag builds | [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1) |
+| **Reviewers** (review changes) | Review code changes before merge | [@alexazhou](https://github.com/alexazhou), [@yanzihan1](https://github.com/yanzihan1) |
+| **Approvers** (approve every signing request) | Approve/reject signing requests in SignPath | [@alexazhou](https://github.com/alexazhou) |
+
+Privacy: this application does **not** collect or upload user data (no telemetry, analytics, or crash reporting).
+The only automatic outbound request is the update check (GET GitHub Releases API, which can be disabled in Settings).
+Full details, with file:line references for every outbound request, are in [PRIVACY.md](PRIVACY.md).
+
 ## 💬 Community
 
 Join our WeChat group to report issues and share how you use your AI team:

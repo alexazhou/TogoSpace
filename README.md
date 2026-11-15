@@ -189,6 +189,31 @@ cd frontend && npm install && npm run dev
 
 ---
 
+## 🔐 Code signing policy / 代码签名策略
+
+Windows 发行版（`Togobot_<version>_x64-setup.exe`，NSIS 安装包）由 **SignPath Foundation** 免费签名：
+
+> **Free code signing provided by SignPath.io, certificate by SignPath Foundation.**
+
+签名范围与流程：
+
+- **只签发布 tag**（`refs/tags/v*`）产出的 Windows 安装包；普通分支 push、PR 构建不提交签名请求。
+- 签名在 GitHub Actions 的 **GitHub 托管 runner**（`windows-2022`）上完成，不使用 self-hosted runner。
+- 每个签名请求都由 **Approver 人工批准**（SignPath 侧策略），签名后 CI 会用 `Get-AuthenticodeSignature` 校验
+  `Status = Valid` 且签名主体符合预期，校验不通过则该次构建失败、不产出发布物。
+- macOS 产物走 Apple Developer ID 签名与公证，不属本策略范围。
+
+角色与成员（GitHub 账号）：
+
+| 角色 | 职责 | 成员 |
+|---|---|---|
+| **Authors**（提交代码 / 发起签名请求） | 向仓库提交代码、在 tag 上发起构建 | [@alexazhou](https://github.com/alexazhou)、[@yanzihan1](https://github.com/yanzihan1) |
+| **Reviewers**（审查改动） | 审查合并前的代码改动 | [@alexazhou](https://github.com/alexazhou)、[@yanzihan1](https://github.com/yanzihan1) |
+| **Approvers**（批准每一次签名请求） | 在 SignPath 中人工批准/拒绝签名请求 | [@alexazhou](https://github.com/alexazhou) |
+
+隐私：本应用**不收集、不上传**用户数据（无遥测/统计/崩溃上报）。唯一的自动外部请求是「检查更新」
+（GET GitHub Releases API，可在设置中关闭）。完整说明（含逐条代码位置）见 [PRIVACY.md](PRIVACY.md)。
+
 ## 💬 交流群
 
 欢迎加入微信交流群，反馈问题、分享你的 AI 团队玩法：
