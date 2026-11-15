@@ -166,7 +166,7 @@ async def mcp_call(
     # ---- 注册表解析（#273：唯一插入点；`mcp ls <name>` 经 list_mcp_servers 复用本入口）----
     registry_name: str | None = None
     resolved_from_registry = False
-    credentials: dict | None = None
+    config: dict | None = None
     name = str(target or "").strip()
     if name:
         # 注册表是**增量能力**：未绑库（无库环境直调第 2 跳）时按未命中透传，
@@ -213,7 +213,7 @@ async def mcp_call(
                 kind = entry.kind
                 target = entry.target
                 # #277：凭证原样存值，注入直接用字面值（明文）；出口打码在 mcpTool。
-                credentials = mcpRegistryService.credentials_of(entry)
+                config = mcpRegistryService.config_of(entry)
 
     result = await mcpTool.call_mcp(
         kind=kind,
@@ -222,7 +222,7 @@ async def mcp_call(
         tool=tool,
         args=args,
         extra=extra,
-        credentials=credentials,
+        config=config,
     )
     # 恒出现（沿 1337 附加判据 3）：命中 true + name 字段，未命中恒 false；不做条件字段。
     result["resolved_from_registry"] = resolved_from_registry
@@ -247,7 +247,7 @@ async def save_mcp_server(
     kind: str = "mcp",
     target: Optional[str] = None,
     note: str = "",
-    credentials: Optional[dict] = None,
+    config: Optional[dict] = None,
     overwrite: bool = False,
     _context: ToolCallContext = None,
 ) -> dict:
@@ -265,7 +265,7 @@ async def save_mcp_server(
             典型用法是 MCP server）；可选 `openapi` / `mcp` / `mcp_stdio` / `graphql`。
         target: 完整连接描述：MCP server URL / spec 路径或 URL / stdio 启动命令 / GraphQL endpoint。
         note: 备注说明（给人看的用途描述）。
-        credentials: 凭证值，形如 `{"headers": {"Authorization": "Bearer sk-..."}}`
+        config: 凭证值，形如 `{"headers": {"Authorization": "Bearer sk-..."}}`
             （headers 配 HTTP 类 kind）或 `{"env": {"API_KEY": "v123..."}}`
             （env 配 `mcp_stdio`，注入子进程环境变量）。**值原样存**（#277）；
             查看面只见掩码。
@@ -282,7 +282,7 @@ async def save_mcp_server(
             kind=kind,
             target=str(target or ""),
             note=str(note or ""),
-            credentials=credentials,
+            config=config,
             overwrite=bool(overwrite),
             created_by=_context.agent_id if _context is not None else 0,
         )
@@ -336,7 +336,7 @@ async def list_mcp_servers(
     """无参列出**全局** MCP 注册表；有参时对 name/完整 target 列工具清单（`mcp ls` 的底层工具）。
 
     **无参**：返回 `{success, servers: [...], count}`——每条只含脱敏摘要
-    （`target_masked` / `credentials_masked` / `has_credentials` / `enable`；#277 起
+    （`target_masked` / `config_masked` / `has_config` / `enable`；#277 起
     凭证给**掩码**——保留少量前缀便于识别、主体 `***`，启用/禁用两态同一份代码
     路径、打码形态一致），**不含** `result`。禁用条目**仍然列出**并标注 enable=false
     （禁用 ≠ 删除，要看得见才好启用；#273）。

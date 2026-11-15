@@ -947,9 +947,9 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 129 = 50 + 79（#224→#273：MCP 注册表三工具带来 +8 optional（save.name/target/credentials、
+    # 129 = 50 + 79（#224→#273：MCP 注册表三工具带来 +8 optional（save.name/target/config、
     #   delete.alias、list.name_or_target/tool/args/extra）+ 4 个「有默认值但注解不含
-    #   None」（save.kind/note/overwrite、list.kind）+ 1 个裸 object（save.credentials），
+    #   None」（save.kind/note/overwrite、list.kind）+ 1 个裸 object（save.config），
     #   故 117→129、46→50、71→79）。**这里必须拆开看两个口径**
     #   （否则「总数对」会掩盖反向变动）：
     #   · `p1_required` 数的是「P1 注入后**应被拦**的字段」，不是 `required` 列表长度：
@@ -960,7 +960,7 @@ async def test_null_injection_exhaustive_table() -> None:
     #   · `p1_optional` = 138 - 52 = 86（#196 前 100 - 55 = 45）
     # 138 = 全部参数数（44 工具，含容器组）。#196 前为 100、#202 前为 108。
     # v3 新增 6 个可选参数 + 2 个 bool ⇒ 48+77=125；#224→#273 MCP 四工具再 +9 optional
-    # （save.name/target/credentials、delete.name、set.name、list.name_or_target/tool/args/extra）
+    # （save.name/target/config、delete.name、set.name、list.name_or_target/tool/args/extra）
     # 与 +5 个「有默认值但注解不含 None」（save.kind/note/overwrite、list.kind、set.enable）
     # ⇒ p1_required 48→53、p1_optional 77→86。
     assert p1_required + p1_optional == 139, (p1_required, p1_optional)
@@ -968,7 +968,7 @@ async def test_null_injection_exhaustive_table() -> None:
     assert p1_optional == 86, p1_optional
     assert p2 == 15, f"P2={p2}"
     # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
-    # #224→#273：`save_mcp_server.credentials`、`list_mcp_servers.args/extra` 亦是裸 object
+    # #224→#273：`save_mcp_server.config`、`list_mcp_servers.args/extra` 亦是裸 object
     # ⇒ 7 → 10（v3 的 reassign_stage 已把 6→7）。
     assert p3_fields == 10, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点

@@ -12,7 +12,7 @@
 - **值原样存**（明文），不再校验/要求任何前缀（`env:` / `file:` / `keychain:` 三种
   引用语法一并移除，不做兼容）；结构校验保留（headers/env 两层 + kind 匹配）；
 - 明文由此会进 argv ⇒ **脱敏改为「出口打码」**：日志、异常文案、返回体在输出前
-  把凭证值替换为 `***`（`mcpTool._mask_secret_values` / `mask_credentials_for_display`），
+  把凭证值替换为 `***`（`mcpTool._mask_secret_values` / `mask_config_for_display`），
   本层不负责输出面；
 - 解析链（`env:VAR` → 环境变量值）已删除（#277）：注入直接用字面值。
 """
@@ -26,7 +26,7 @@ import peewee
 from exception import TogoException
 from model.dbModel.gtMcpServer import (
     GtMcpServer,
-    mask_credentials_for_display,
+    mask_config_for_display,
     mask_target,
 )
 from dal.db import gtMcpServerManager
@@ -51,7 +51,7 @@ _ERROR_TARGET_INVALID = "mcp_invalid_target"
 _ERROR_NAME_EXISTS = "mcp_name_exists"
 _ERROR_NAME_NOT_FOUND = "mcp_name_not_found"
 _ERROR_SERVER_DISABLED = "mcp_server_disabled"
-_ERROR_CREDENTIALS_INVALID = "mcp_invalid_credentials"
+_ERROR_CONFIG_INVALID = "mcp_invalid_credentials"
 _ERROR_CREDENTIAL_KIND_MISMATCH = "mcp_credential_kind_mismatch"
 
 
@@ -89,7 +89,7 @@ def validate_target(target: str) -> str:
     return text
 
 
-def validate_credentials(credentials: dict | None, kind: str) -> dict:
+def validate_config(config: dict | None, kind: str) -> dict:
     """凭证**结构**校验（#277：值原样存，不再校验前缀）。返回归一后的存储形态。
 
     - `{}` / `None` ⇒ `{}`（空凭证统一存 `{}`）；
@@ -101,29 +101,29 @@ def validate_credentials(credentials: dict | None, kind: str) -> dict:
     值是明文 ⇒ 脱敏责任在**输出面**（日志/返回体/异常文案打码，见模块 docstring），
     校验层不做打码（存的就是值，展示才打码）。
     """
-    if not credentials:
+    if not config:
         return {}
-    if not isinstance(credentials, dict):
-        raise _fail(_ERROR_CREDENTIALS_INVALID, "credentials 必须是对象：{\"headers\":{名:值},\"env\":{变量:值}}。")
+    if not isinstance(config, dict):
+        raise _fail(_ERROR_CONFIG_INVALID, "config 必须是对象：{\"headers\":{名:值},\"env\":{变量:值}}。")
 
-    unknown_layers = sorted(set(credentials) - {"headers", "env"})
+    unknown_layers = sorted(set(config) - {"headers", "env"})
     if unknown_layers:
         raise _fail(
-            _ERROR_CREDENTIALS_INVALID,
-            f"credentials 只支持 headers / env 两层，收到未知层：{unknown_layers}。",
+            _ERROR_CONFIG_INVALID,
+            f"config 只支持 headers / env 两层，收到未知层：{unknown_layers}。",
         )
 
     normalized: dict[str, dict[str, str]] = {}
     for layer in ("headers", "env"):
-        values = credentials.get(layer)
+        values = config.get(layer)
         if values in (None, {}, []):
             continue
         if not isinstance(values, dict):
-            raise _fail(_ERROR_CREDENTIALS_INVALID, f"credentials.{layer} 必须是「名称 → 值」的对象。")
+            raise _fail(_ERROR_CONFIG_INVALID, f"config.{layer} 必须是「名称 → 值」的对象。")
         layer_out: dict[str, str] = {}
         for name, value in values.items():
             if not isinstance(value, str) or not value.strip():
-                raise _fail(_ERROR_CREDENTIALS_INVALID, f"credentials.{layer} 的值必须是非空字符串。")
+                raise _fail(_ERROR_CONFIG_INVALID, f"config.{layer} 的值必须是非空字符串。")
             layer_out[str(name)] = value.strip()
         normalized[layer] = layer_out
 
@@ -161,7 +161,7 @@ async def resolve_name(name: str) -> GtMcpServer | None:
 def entry_summary(entry: GtMcpServer) -> dict:
     """注册项的**脱敏**摘要（ls / rm / name_exists 附带说明共用同一份形态）。
 
-    `credentials_masked`（#277）：值已明文存储，查看面统一给掩码（保留少量前缀
+    `config_masked`（#277）：值已明文存储，查看面统一给掩码（保留少量前缀
     便于识别、主体打码）；启用/禁用条目走同一份代码路径，打码形态天然一致。
     """
     return {
@@ -170,18 +170,18 @@ def entry_summary(entry: GtMcpServer) -> dict:
         "target_masked": mask_target(entry.target),
         "note": entry.note,
         "enable": bool(entry.enable),
-        "credentials_masked": mask_credentials_for_display(entry.credentials or {}),
-        "has_credentials": bool(entry.credentials),
+        "config_masked": mask_config_for_display(entry.config or {}),
+        "has_config": bool(entry.config),
         "updated_at": str(entry.updated_at) if entry.updated_at else None,
     }
 
 
-def credentials_of(entry: GtMcpServer) -> dict:
+def config_of(entry: GtMcpServer) -> dict:
     """从注册项取出凭证（#277：**值原样**，注入时直接用字面值，无解析链）。"""
-    credentials = entry.credentials or {}
+    config = entry.config or {}
     return {
-        "headers": dict(credentials.get("headers") or {}),
-        "env": dict(credentials.get("env") or {}),
+        "headers": dict(config.get("headers") or {}),
+        "env": dict(config.get("env") or {}),
     }
 
 
@@ -196,7 +196,7 @@ async def save_server(
     kind: str = "mcp",
     target: str,
     note: str = "",
-    credentials: dict | None = None,
+    config: dict | None = None,
     overwrite: bool = False,
     created_by: int = 0,
 ) -> GtMcpServer:
@@ -204,12 +204,12 @@ async def save_server(
 
     正确性不依赖「先查后插」：并发第二写由全局唯一索引 `ux_mcp_servers_name` 兜底，
     `IntegrityError` 统一转 `mcp_name_exists`（与预检语义一致）。`overwrite` 只覆盖
-    kind/target/note/credentials，**不动 enable**（禁用状态属运维态，覆盖登记不改它）。
+    kind/target/note/config，**不动 enable**（禁用状态属运维态，覆盖登记不改它）。
     """
     name_n = validate_name(name)
     kind_n = validate_kind(kind)
     target_n = validate_target(target)
-    credentials_n = validate_credentials(credentials, kind_n)
+    config_n = validate_config(config, kind_n)
 
     existing = await gtMcpServerManager.get_by_name(name_n)
     if existing is not None and not overwrite:
@@ -223,9 +223,9 @@ async def save_server(
         existing.kind = kind_n
         existing.target = target_n
         existing.note = note or ""
-        existing.credentials = credentials_n
+        existing.config = config_n
         await gtMcpServerManager.update_entry(
-            existing, ["kind", "target", "note", "credentials"]
+            existing, ["kind", "target", "note", "config"]
         )
         logger.info("mcp registry: name %s 已覆盖", name_n)
         return existing
@@ -235,7 +235,7 @@ async def save_server(
         kind=kind_n,
         target=target_n,
         note=note or "",
-        credentials=credentials_n,
+        config=config_n,
         enable=1,
         created_by=created_by,
     )

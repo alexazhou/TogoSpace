@@ -25,7 +25,7 @@ from exception import TogoException
 from model.dbModel.base import bind_database, unbind_database
 from model.dbModel.gtMcpServer import (
     GtMcpServer,
-    mask_credentials_for_display,
+    mask_config_for_display,
     mask_target,
 )
 from service import mcpRegistryService as svc
@@ -99,7 +99,7 @@ async def test_save_persists_across_reconnect(mcp_db, reopened_db):
     fresh = await gtMcpServerManager.get_by_name("ctx7")
     assert fresh is not None
     assert fresh.kind == "mcp"
-    assert fresh.credentials == {}  # E1：空凭证统一存 {}
+    assert fresh.config == {}  # E1：空凭证统一存 {}
     assert fresh.enable == 1  # 新登记默认启用
 
 
@@ -149,10 +149,10 @@ async def test_target_refused_when_blank(mcp_db, target):
 # ---------------------------------------------------------------------------
 
 
-async def test_empty_credentials_normalized_to_empty_dict(mcp_db):
+async def test_empty_config_normalized_to_empty_dict(mcp_db):
     for index, given in enumerate((None, {}, {"headers": {}}, {"env": {}})):
-        entry = await _save(name=f"zero-cred-{index}", credentials=given)
-        assert entry.credentials == {}, given
+        entry = await _save(name=f"zero-cred-{index}", config=given)
+        assert entry.config == {}, given
 
 
 async def test_values_stored_verbatim_any_string(mcp_db):
@@ -167,29 +167,29 @@ async def test_values_stored_verbatim_any_string(mcp_db):
     for index, value in enumerate(cases):
         entry = await _save(
             name=f"verbatim-{index}",
-            credentials={"headers": {"Authorization": value}},
+            config={"headers": {"Authorization": value}},
         )
-        assert entry.credentials == {"headers": {"Authorization": value}}, value
+        assert entry.config == {"headers": {"Authorization": value}}, value
 
 
 async def test_value_must_be_nonempty_string(mcp_db):
     """结构校验保留：空串 / 非字符串仍拒（mcp_invalid_credentials）。"""
     with pytest.raises(TogoException) as empty:
-        await _save(name="empty-str", credentials={"headers": {"Authorization": "  "}})
+        await _save(name="empty-str", config={"headers": {"Authorization": "  "}})
     assert empty.value.error_code == "mcp_invalid_credentials"
 
     with pytest.raises(TogoException) as non_str:
-        await _save(name="num-str", credentials={"headers": {"Authorization": 123}})
+        await _save(name="num-str", config={"headers": {"Authorization": 123}})
     assert non_str.value.error_code == "mcp_invalid_credentials"
 
 
-async def test_credentials_structure_violations(mcp_db):
+async def test_config_structure_violations(mcp_db):
     with pytest.raises(TogoException) as unknown_layer:
-        await _save(name="s1", credentials={"cookies": {"sid": "env:S"}})
+        await _save(name="s1", config={"cookies": {"sid": "env:S"}})
     assert unknown_layer.value.error_code == "mcp_invalid_credentials"
 
     with pytest.raises(TogoException) as bad_layer:
-        await _save(name="s2", credentials={"headers": ["env:A"]})
+        await _save(name="s2", config={"headers": ["env:A"]})
     assert bad_layer.value.error_code == "mcp_invalid_credentials"
 
 
@@ -198,23 +198,23 @@ async def test_credential_kind_mismatch_refused(mcp_db):
     with pytest.raises(TogoException) as header_stdio:
         await _save(
             name="s3", kind="mcp_stdio", target="npx -y some-server",
-            credentials={"headers": {"Authorization": "env:T"}},
+            config={"headers": {"Authorization": "env:T"}},
         )
     assert header_stdio.value.error_code == "mcp_credential_kind_mismatch"
 
     with pytest.raises(TogoException) as env_http:
         await _save(
             name="s4", kind="mcp", target="https://x",
-            credentials={"env": {"API_KEY": "env:API_KEY"}},
+            config={"env": {"API_KEY": "env:API_KEY"}},
         )
     assert env_http.value.error_code == "mcp_credential_kind_mismatch"
 
     # 对称正向：env 层配 mcp_stdio 合法（值原样存）。
     entry = await _save(
         name="s5", kind="mcp_stdio", target="npx -y some-server",
-        credentials={"env": {"API_KEY": "v-API-KEY-VALUE"}},
+        config={"env": {"API_KEY": "v-API-KEY-VALUE"}},
     )
-    assert entry.credentials == {"env": {"API_KEY": "v-API-KEY-VALUE"}}
+    assert entry.config == {"env": {"API_KEY": "v-API-KEY-VALUE"}}
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ async def test_overwrite_updates_existing_row(mcp_db):
         kind="openapi",
         target="https://spec.example.com/openapi.json",
         note="换目标",
-        credentials={"headers": {"Authorization": "Bearer T-value"}},
+        config={"headers": {"Authorization": "Bearer T-value"}},
         overwrite=True,
     )
     assert updated.id == (await gtMcpServerManager.get_by_name("ctx7")).id
@@ -267,11 +267,11 @@ async def test_overwrite_updates_existing_row(mcp_db):
     fresh = rows[0]
     assert fresh.kind == "openapi"
     assert fresh.target == "https://spec.example.com/openapi.json"
-    assert fresh.credentials == {"headers": {"Authorization": "Bearer T-value"}}
+    assert fresh.config == {"headers": {"Authorization": "Bearer T-value"}}
 
 
 async def test_overwrite_does_not_touch_enable(mcp_db):
-    """覆盖登记只改 kind/target/note/credentials，不动运维态 enable（#273）。"""
+    """覆盖登记只改 kind/target/note/config，不动运维态 enable（#273）。"""
     await _save()
     await svc.set_enabled("ctx7", False)
     await _save(kind="openapi", target="https://spec.example.com/openapi.json", overwrite=True)
@@ -317,17 +317,17 @@ async def test_disabled_entry_still_listed_and_resolvable(mcp_db):
     assert hit is not None and hit.enable == 0
 
 
-async def test_entry_summary_masks_target_and_flags_credentials(mcp_db):
+async def test_entry_summary_masks_target_and_flags_config(mcp_db):
     await _save(
         target="https://api.example.com/v1?api_key=should_never_leak",
-        credentials={"headers": {"Authorization": "env:GITHUB_TOKEN"}},
+        config={"headers": {"Authorization": "env:GITHUB_TOKEN"}},
     )
     entry = await gtMcpServerManager.get_by_name("ctx7")
     summary = svc.entry_summary(entry)
     assert summary["name"] == "ctx7"
     assert summary["enable"] is True
     assert "should_never_leak" not in json_dumps(summary)
-    assert summary["has_credentials"] is True
+    assert summary["has_config"] is True
     assert "target_masked" in summary and "target" not in summary
 
 
@@ -346,9 +346,9 @@ def test_mask_target_masks_query_and_long_tokens():
     assert mask_target("https://x.com/short/path") == "https://x.com/short/path"
 
 
-def test_mask_credentials_keeps_prefix_only():
+def test_mask_config_keeps_prefix_only():
     """#277：值已明文，展示掩码=保留少量前缀 + ***；完整值任何形态都不得出现。"""
-    masked = mask_credentials_for_display(
+    masked = mask_config_for_display(
         {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}, "env": {"API_KEY": "v-SECRET-999"}}
     )
     assert masked == {"headers": {"Authorization": "Bearer***"}, "env": {"API_KEY": "v-SECRET***"}}
@@ -356,30 +356,30 @@ def test_mask_credentials_keeps_prefix_only():
     assert "sk-TESTONLY" not in json_dumps(masked)
     assert "v-SECRET-999" not in json_dumps(masked)
     # 短值整段打码
-    assert mask_credentials_for_display({"headers": {"A": "abc"}}) == {"headers": {"A": "***"}}
-    assert mask_credentials_for_display({}) == {}
+    assert mask_config_for_display({"headers": {"A": "abc"}}) == {"headers": {"A": "***"}}
+    assert mask_config_for_display({}) == {}
 
 
 async def test_model_to_json_masks_values(mcp_db):
     """to_json 展示面：完整明文值不出现在 JSON 里，凭证字段是掩码形态（#277）。"""
     await _save(
         target="https://api.example.com/v1?api_key=should_never_leak",
-        credentials={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
+        config={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
     )
     entry = await gtMcpServerManager.get_by_name("ctx7")
     data = entry.to_json()
     dumped = json_dumps(data, default=str)
     assert "should_never_leak" not in dumped
     assert "sk-TESTONLY-1234567890" not in dumped, "明文凭证值不得出现在 to_json 展示面"
-    assert data["credentials"] == {"headers": {"Authorization": "Bearer***"}}
+    assert data["config"] == {"headers": {"Authorization": "Bearer***"}}
     assert "target" not in data and data["target_masked"].endswith("?***")
 
 
-async def test_credentials_of_returns_verbatim_values(mcp_db):
-    """#277：`credentials_of` 取出的是**原样值**（注入直接用字面值，无解析链）。"""
+async def test_config_of_returns_verbatim_values(mcp_db):
+    """#277：`config_of` 取出的是**原样值**（注入直接用字面值，无解析链）。"""
     await _save(
-        credentials={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
+        config={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
     )
     entry = await gtMcpServerManager.get_by_name("ctx7")
-    creds = svc.credentials_of(entry)
+    creds = svc.config_of(entry)
     assert creds == {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}, "env": {}}

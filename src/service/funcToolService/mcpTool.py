@@ -191,7 +191,7 @@ def build_argv(
     tool: str | None,
     args: dict[str, Any] | None,
     extra: dict[str, Any] | None,
-    credentials: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> list[str]:
     """按 mcp2cli 的 CLI 语法拼出 argv（纯函数，便于单测直接断言）。
 
@@ -200,7 +200,7 @@ def build_argv(
     `extra` 里的全局开关必须排在工具名**之前** —— 排在后面不会报「未知开关」，而是让
     工具子 parser `exit(2)` 并喷一整页 usage（实测：`get-a --head 1` → 退出码 2）。
 
-    `credentials`（#224→#277）：注册表条目的凭证**值**（#277 起原样存值，明文，
+    `config`（#224→#277）：注册表条目的凭证**值**（#277 起原样存值，明文，
     由 `tools.mcp_call` 从注册表组装，不占模型可见 schema）。headers 层 →
     `--auth-header "名:值"`、env 层（stdio 子进程环境）→ `--env "VAR=值"`，
     同样必须落在工具名之前。**明文由此直接进 argv ⇒ 脱敏改为出口打码**：
@@ -244,7 +244,7 @@ def build_argv(
 
     # 凭证段：同为全局开关，排在工具名之前、extra 之后（顺序语义见 docstring）。
     # #277 起值是**明文**（注册表原样存值），注入直接用字面值，无解析链。
-    argv.extend(_credential_segments(credentials))
+    argv.extend(_config_segments(config))
 
     if normalized == "list":
         argv.append("--list")
@@ -268,12 +268,12 @@ def build_argv(
 # ---------------------------------------------------------------------------
 
 
-def _credential_segments(credentials: dict[str, Any] | None) -> list[str]:
+def _config_segments(config: dict[str, Any] | None) -> list[str]:
     """凭证值 → argv 段（明文形态；`build_argv` 与打码定位共用同一份生成逻辑）。
 
     返回 [flag, value, flag, value, ...] 平铺段。
     """
-    creds = credentials or {}
+    creds = config or {}
     segments: list[str] = []
     for name, value in (creds.get("headers") or {}).items():
         segments.extend(["--auth-header", f"{name}:{value}"])
@@ -282,9 +282,9 @@ def _credential_segments(credentials: dict[str, Any] | None) -> list[str]:
     return segments
 
 
-def _secret_values(credentials: dict[str, Any] | None) -> list[str]:
+def _secret_values(config: dict[str, Any] | None) -> list[str]:
     """收集这次调用会用到的**明文凭证值**（打码靶子清单）。"""
-    creds = credentials or {}
+    creds = config or {}
     secrets: list[str] = []
     for layer in ("headers", "env"):
         for _name, value in (creds.get(layer) or {}).items():
@@ -571,22 +571,22 @@ async def call_mcp(
     args: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    credentials: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """跑一次 mcp2cli 调用并把结果收成工具返回体（不抛异常）。
 
-    `credentials`（#224→#277）是注册表条目的凭证**值**（明文，由 `tools.mcp_call`
+    `config`（#224→#277）是注册表条目的凭证**值**（明文，由 `tools.mcp_call`
     从注册表条目组装）。#277 起值直接进 argv，**脱敏改为出口打码**：日志行、
     返回体（含 argv / stderr / raw_excerpt / result 嵌套）里的明文值一律替换为
     `***`（`_mask_deep`）——旧「先放引用、日志之后再解析」的时序保护已删。
     """
     # 出口打码（#277 F2/F6）：靶子=原始值+repr 转义形态（值经 repr 渲染进文本的
     # 出口靠原始值匹配不到，见 _secret_mask_forms）。
-    secrets = _secret_mask_forms(_secret_values(credentials))
+    secrets = _secret_mask_forms(_secret_values(config))
     try:
         argv = build_argv(
             kind=kind, target=target, action=action, tool=tool, args=args, extra=extra,
-            credentials=credentials,
+            config=config,
         )
     except McpCallError as exc:
         return _mask_deep({"success": False, "error_code": exc.error_code, "message": exc.message}, secrets)

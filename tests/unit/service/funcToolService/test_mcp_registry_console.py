@@ -152,14 +152,14 @@ async def _register_server(
     name: str = "ctx7",
     kind: str = "mcp",
     target: str = "https://mcp.context7.com/mcp",
-    credentials: dict | None = None,
+    config: dict | None = None,
     team_id: int = 1,
 ) -> dict:
     return await save_mcp_server(
         name=name,
         kind=kind,
         target=target,
-        credentials=credentials,
+        config=config,
         _context=toolRegistry.ToolCallContext(agent_id=1, team_id=team_id),
     )
 
@@ -573,7 +573,7 @@ async def test_exception_log_exit_masks_secret(
     """
     await _register_server(
         target="https://mcp.example.com/mcp",
-        credentials={"headers": {"Authorization": _SECRET, "X-Api-Key": _TRICKY}},
+        config={"headers": {"Authorization": _SECRET, "X-Api-Key": _TRICKY}},
     )
 
     def _explode(argv: list[str]) -> None:
@@ -609,7 +609,7 @@ async def test_plain_value_reaches_dispatch_and_never_logs(
     """#277 日志判据：明文值送达分派 argv；日志与返回体里 0 命中（出口打码）。"""
     await _register_server(
         target="https://mcp.example.com/mcp",
-        credentials={"headers": {"Authorization": _SECRET}},
+        config={"headers": {"Authorization": _SECRET}},
     )
     with caplog.at_level(logging.INFO, logger="service.funcToolService.mcpTool"):
         from service.funcToolService.tools import mcp_call
@@ -642,7 +642,7 @@ async def test_stdio_env_value_verbatim_to_dispatch(
     await _register_server(
         kind="mcp_stdio",
         target="npx -y some-server",
-        credentials={"env": {"API_KEY": _SECRET}},
+        config={"env": {"API_KEY": _SECRET}},
     )
     from service.funcToolService.tools import mcp_call
 
@@ -658,7 +658,7 @@ async def test_stdio_env_value_verbatim_to_dispatch(
 
 
 @pytest.mark.asyncio
-async def test_registry_without_credentials_changes_nothing(
+async def test_registry_without_config_changes_nothing(
     mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
 ):
     """硬条件 ③ 旁证：零凭证条目不带任何凭证段，extra 通道照旧。"""
@@ -680,7 +680,7 @@ async def test_registry_without_credentials_changes_nothing(
 # ---------------------------------------------------------------------------
 
 
-def test_build_argv_credential_segments_before_tool_name():
+def test_build_argv_config_segments_before_tool_name():
     argv = mcpTool.build_argv(
         kind="mcp",
         target="https://x",
@@ -688,7 +688,7 @@ def test_build_argv_credential_segments_before_tool_name():
         tool="my-tool",
         args={"a": "1"},
         extra=None,
-        credentials={"headers": {"Authorization": _SECRET}},
+        config={"headers": {"Authorization": _SECRET}},
     )
     # 全局段（含凭证）必须排在工具名之前（上游 _split_at_subcommand 语义）。
     assert argv.index("--auth-header") < argv.index("my-tool")
@@ -794,15 +794,15 @@ async def test_disabled_entry_ls_body_says_enable_false(
 
 
 @pytest.mark.asyncio
-async def test_ls_credentials_masked_two_states_identical(mcp_db, leader_ctx, loaded_tools):
+async def test_ls_config_masked_two_states_identical(mcp_db, leader_ctx, loaded_tools):
     """打码判据（#277 交付标准 3）：启/禁两态的凭证掩码形态一致，且不含完整值。
 
-    M 变异：`entry_summary` 删掉 `credentials_masked` 字段 ⇒ 本用例红。
+    M 变异：`entry_summary` 删掉 `config_masked` 字段 ⇒ 本用例红。
     """
     from service.funcToolService.tools import set_mcp_server_enabled
 
     creds = {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}}
-    await _register_server(kind="mcp", credentials=creds)
+    await _register_server(kind="mcp", config=creds)
 
     enabled_body = await list_mcp_servers(name_or_target=None, _context=leader_ctx)
     await set_mcp_server_enabled(name="ctx7", enable=False, _context=leader_ctx)
@@ -811,6 +811,6 @@ async def test_ls_credentials_masked_two_states_identical(mcp_db, leader_ctx, lo
     enabled = [s for s in enabled_body["servers"] if s["name"] == "ctx7"][0]
     disabled = [s for s in disabled_body["servers"] if s["name"] == "ctx7"][0]
     expected = {"headers": {"Authorization": "Bearer***"}}
-    assert enabled["credentials_masked"] == expected
-    assert disabled["credentials_masked"] == expected, "启/禁两态打码形态必须一致"
+    assert enabled["config_masked"] == expected
+    assert disabled["config_masked"] == expected, "启/禁两态打码形态必须一致"
     assert "sk-TESTONLY-1234567890" not in json.dumps(disabled_body)

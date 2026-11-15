@@ -10,7 +10,7 @@
 
 脱敏口径（#277）：**REST 响应给完整值**（Web 配置页要能回显、可编辑）；
 明文不进日志的判据由 `mcpTool._mask_deep`（调用出口）与
-`mask_credentials_for_display`（模型/ls 展示面）分别承担，本层不重复实现。
+`mask_config_for_display`（模型/ls 展示面）分别承担，本层不重复实现。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class McpServerSaveRequest(BaseModel):
     kind: str = "mcp"
     target: str
     note: str = ""
-    credentials: dict | None = None
+    config: dict | None = None
     overwrite: bool = False
 
 
@@ -49,7 +49,7 @@ def _entry_full(entry) -> dict:
         "kind": entry.kind,
         "target": entry.target,
         "note": entry.note,
-        "credentials": entry.credentials or {},
+        "config": entry.config or {},
         "enable": bool(entry.enable),
         "created_by": entry.created_by,
         "updated_at": str(entry.updated_at) if entry.updated_at else None,
@@ -78,7 +78,7 @@ class McpServerSaveHandler(BaseHandler):
             kind=request.kind,
             target=request.target,
             note=request.note,
-            credentials=request.credentials,
+            config=request.config,
             overwrite=request.overwrite,
             created_by=0,  # Web 后台无 agent 上下文，审计字段记 0
         )
