@@ -109,6 +109,32 @@ class _WorkflowCase(ServiceTestCase):
         assert result["success"] is True, result
         return result["task_id"], team_id, alice, bob
 
+    async def _third_agent(self, team_id: int) -> int:
+        """取或建团队里的第三个成员 `carol`。
+
+        S-1 的「换验收人」必须有第三人：验收人不能等于执行人，二人团队里换人无处可换。
+        """
+        from dal.db import gtAgentManager
+        from model.dbModel.gtAgent import GtAgent
+
+        existing = await gtAgentManager.get_agent(team_id, "carol")
+        if existing is not None:
+            return existing.id
+        alice = await gtAgentManager.get_agent(team_id, "alice")
+        assert alice is not None
+        await gtAgentManager.batch_save_agents(
+            team_id,
+            [GtAgent(
+                team_id=team_id,
+                name="carol",
+                role_template_id=alice.role_template_id,
+                i18n={"display_name": {"zh-CN": "carol"}},
+            )],
+        )
+        created = await gtAgentManager.get_agent(team_id, "carol")
+        assert created is not None, "第三个成员创建失败"
+        return created.id
+
     async def _stages(self, task_id: int) -> list[tuple[int, str, int, str]]:
         """(stage_index, node_type.value, owner_id, stage_status.value) 列表。"""
         rows = await gtAgentTaskStageManager.get_stages_by_task(task_id)
@@ -864,32 +890,6 @@ class TestReviewFix253(_WorkflowCase):
     每条都先在 `2e155037`（未改代码）上跑过并红（证据见 `shared/task-v3-review-fix.md`）。
     """
 
-    async def _third_agent(self, team_id: int) -> int:
-        """取或建团队里的第三个成员 `carol`。
-
-        S-1 的「换验收人」必须有第三人：验收人不能等于执行人，二人团队里换人无处可换。
-        """
-        from dal.db import gtAgentManager
-        from model.dbModel.gtAgent import GtAgent
-
-        existing = await gtAgentManager.get_agent(team_id, "carol")
-        if existing is not None:
-            return existing.id
-        alice = await gtAgentManager.get_agent(team_id, "alice")
-        assert alice is not None
-        await gtAgentManager.batch_save_agents(
-            team_id,
-            [GtAgent(
-                team_id=team_id,
-                name="carol",
-                role_template_id=alice.role_template_id,
-                i18n={"display_name": {"zh-CN": "carol"}},
-            )],
-        )
-        created = await gtAgentManager.get_agent(team_id, "carol")
-        assert created is not None, "第三个成员创建失败"
-        return created.id
-
     # ---------------- S-1：reviewer_id 变更必须同步节点链与持棒人 ----------------
 
     async def test_s1_change_reviewer_while_reviewing_moves_holder(self):
@@ -1209,3 +1209,55 @@ class TestReviewFix253(_WorkflowCase):
         assert (task_after["assignee_id"], task_after["current_owner_id"]) == (
             task_before["assignee_id"], task_before["current_owner_id"],
         ), "事件写入失败后主表 assignee_id / current_owner_id 已被改（半状态）"
+
+
+class TestFirstActiveTask253(_WorkflowCase):
+    """#253 S-5：多级 EXECUTION 链下，旧持棒人不该被 `get_first_active_task` 命中。
+
+    单独一个类是为了拿到**干净的库**：`get_first_active_task` 返回「最早的一条」，
+    若与前面的用例共库，任何更早的在途任务都会干扰判定。
+    """
+
+    async def test_s5_former_holder_is_not_woken_on_multi_exec_chain(self):
+        """`[EXEC(bob), EXEC(carol), REVIEW(alice)]` 棒已交到 carol ⇒ bob 不该再被唤醒。
+
+        原缺陷：查询把 v2 的 `(assignee_id=我 & status IN [TODO, IN_PROGRESS])` 与
+        `current_owner_id=我` 直接 `OR` —— bob 仍是 assignee_id 且任务 IN_PROGRESS，
+        于是拿到一个「幽灵待办」触发调度；而真正持棒的 carol 也可能因为 ID 顺序被挡住。
+        """
+        from dal.db import gtAgentTaskManager
+
+        team_id, alice, bob = await self._agents()
+        carol = await self._third_agent(team_id)
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S5-多级执行链",
+            assignee_id=bob,
+            stages=[
+                {"owner_id": carol, "node_type": "EXECUTION", "name": "第二步执行"},
+                {"owner_id": alice, "node_type": "REVIEW", "name": "终审"},
+            ],
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        assert [s[1] for s in await self._stages(task_id)] == ["EXECUTION", "EXECUTION", "REVIEW"], (
+            f"前置：应为两段执行 + 一段审核，实际 {await self._stages(task_id)}"
+        )
+
+        await taskService.update_task(team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS")
+        moved = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="交给第二步",
+        )
+        assert moved["success"] is True, moved
+        task = await self._task(team_id, task_id)
+        assert (task["current_stage"], task["current_owner_id"], task["assignee_id"]) == (1, carol, bob), (
+            f"前置：棒应在 carol 手上而 assignee 仍是 bob，实际 {task['current_stage']}/{task['current_owner_id']}/{task['assignee_id']}"
+        )
+
+        woken = await gtAgentTaskManager.get_first_active_task(bob)
+        assert woken is None or woken.id != task_id, (
+            f"旧持棒人 bob 仍被 get_first_active_task 命中（task_id={getattr(woken, 'id', None)}）⇒ 幽灵待办"
+        )
+        holder_task = await gtAgentTaskManager.get_first_active_task(carol)
+        assert holder_task is not None and holder_task.id == task_id, (
+            "真正持棒的 carol 反而查不到该任务（判据不能靠「谁都不返回」过关）"
+        )
