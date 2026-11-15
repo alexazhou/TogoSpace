@@ -26,7 +26,7 @@ from service import (
 import service.skillService as skillService
 import appPaths
 import route
-from db import has_pending_migrations, migrate_database
+from db import DatabaseAheadOfCodeError, has_pending_migrations, migrate_database
 from version import __version__
 from dal.db import gtTeamManager
 
@@ -171,7 +171,6 @@ async def main(
     # 端口优先使用命令行参数，其次使用配置文件
     bind_host = app_config.setting.bind_host
     bind_port = port if port is not None else app_config.setting.bind_port
-    logger.info("[启动] 监听地址：%s:%d", bind_host, bind_port)
 
     # ── 数据库迁移：先于所有 service 执行 ────────────────────────────────────
     _run_database_migrations(
@@ -225,6 +224,9 @@ async def main(
     web_server = tornado.httpserver.HTTPServer(route.application)
     try:
         web_server.listen(bind_port, bind_host)
+        # 只在**真正 bind 成功之后**打这行（#274 N-3）：迁移守卫拒绝启动时不该出现任何
+        # 「监听/已就绪」字样，否则 `grep 监听地址` 会把它误读成「已经起来了」。
+        logger.info("[启动] 已监听：%s:%d（HTTP 服务已就绪）", bind_host, bind_port)
         if callbacks is not None and callbacks.on_ready is not None:
             callbacks.on_ready(bind_host, bind_port)
         await _shutdown_event.wait()
@@ -261,5 +263,11 @@ if __name__ == "__main__":
     
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
     signal.signal(signal.SIGINT, _handle_shutdown_signal)
-    
-    asyncio.run(main(config_dir=args.config_dir, port=args.port))
+
+    try:
+        asyncio.run(main(config_dir=args.config_dir, port=args.port))
+    except DatabaseAheadOfCodeError as exc:
+        # 库比代码新（#270）：拒绝启动，不进入服务状态。用非 0 退出码 + 可读信息，
+        # 而不是让它掉进通用异常里变成一段 traceback（信息在、但不便于人看）。
+        print(f"[TOGO] ERROR {exc}", file=sys.stderr)
+        sys.exit(2)
