@@ -6,6 +6,25 @@
 
 ---
 
+> #### 落地状态（2026-11-16 核对）：**七项全部已落地**
+>
+> 事实基线 `0.5_dev` @ `158c02f2`。逐条依据见 `shared/docs-align/report.md` §5。
+>
+> | 编号 | 原状态 | 现状 | 依据（时点 `158c02f2`） |
+> |---|---|---|---|
+> | M-1 | 已确认方案（待修改） | **已落地** | `assets/migrate/0022_add_agent_task_stages.sql:14` 起 `BEGIN;`…`COMMIT;`；`src/db.py:243-252` `_rollback_if_in_transaction` 兜底 |
+> | M-2 | 待讨论 | **已落地** | `0022:27-28,53-62` 统一 `datetime('now','localtime')` |
+> | S-1 | 已确认方案（待修改） | **已落地** | `taskService._handle_reviewer_change`：单审核/无审核同步节点链，多级拒绝并引导 `reassign_stage` |
+> | S-2 | 待讨论 | **已落地** | `taskService.py:1115-1129`：`ON_HOLD`→`task_on_hold`；依赖未完成→`dependency_not_met` |
+> | S-3 | 待讨论 | **已落地** | `_apply_stage_update` 三分支各自 `async with atomic()`，事件在事务外 |
+> | S-4 | 已确认方案（待修改） | **已落地** | `taskService.py:1295`（`append_stages` 同步 `reviewer_id`）、`:1410`（`reassign_stage(0)` 同步 `assignee_id`） |
+> | S-5 | 待讨论 | **已落地** | `gtAgentTaskManager.get_first_active_task`：在途以 `current_owner_id` 为唯一真值，仅历史空游标行退化 |
+> | S-6 | 待讨论 | **已落地** | `taskService.py:1770-1785`：`review_required` 闸门仅当 `done_cursor < done_last_index` 生效 |
+>
+> 因此本文件各条目的「状态」行已过期，**保留原文作历史记录**，以本表为准。
+
+---
+
 ## 一、Migrate 部分
 
 ### [M-1] P0：`0022` 迁移脚本未显式开启事务，中途失败会导致「半迁移 + 后续静默跳过回填」

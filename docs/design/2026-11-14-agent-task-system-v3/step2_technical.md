@@ -4,6 +4,8 @@
 > **关联文档**：[产品文档 (step1_product.md)](./step1_product.md)  
 > **实施范围约束**：当前阶段为纯技术设计阶段；在评审确认前，`src/` 与 `assets/migrate/` 保持零变更。
 
+> **现状（2026-11-16 核对）**：v3 **已实现并合入主干**，本文 §1–§6 与实现逐条一致（枚举 `constants.py:304-340`、模型与索引 `gtAgentTask.py:33-38`/`gtAgentTaskStage.py:26-30`、九条错误码、DAL 方法、按任务锁、`MAX_TASK_STAGES=20`、WS 事件），逐条依据见 `shared/docs-align/report.md` §4（T1-T10）。两处补正：①§2.4「配套 Python 回填迁移」不存在（回填写在 `0022` 的 SQL 内）；②`list_tasks.include_upcoming` 需与 `mine=True` 搭配。上文「`src/` 保持零变更」是**当时的阶段约束**，现已过期。
+
 ---
 
 ## 1. 架构目标与设计原则
@@ -136,6 +138,8 @@ class TaskEventAction(EnhanceEnum):
 
 新增迁移脚本 `0022_add_agent_task_stages.sql`（及配套 Python 回填迁移，参考 `0015`/`0016` 模式）：
 
+> 现状（2026-11-16）：实际只有 `assets/migrate/0022_add_agent_task_stages.sql` **一个文件**，存量回填写在该 SQL 内（`0022:50-116`），**没有配套 Python 回填脚本**；整份脚本已用 `BEGIN;`…`COMMIT;` 包裹（review_notes M-1 已落地，见 `src/db.py:243-252` 兜底）。
+
 1. **DDL 变更**：
    - 创建 `agent_task_stages` 表及索引；
    - `agent_tasks` 添加 `current_stage`（`DEFAULT 0`）与 `current_owner_id`；
@@ -262,6 +266,7 @@ flowchart TD
    - `list_tasks` 新增 `include_upcoming: bool = False`：
      - `False`（默认）：过滤 `current_owner_id == target_agent_id`；
      - `True`：过滤 `current_owner_id == target_agent_id OR id IN upcoming_task_ids`。
+     - 现状（2026-11-16）：`include_upcoming=True` **必须配合 `mine=True`**，单独使用报 `invalid_filter_combo`（`src/service/funcToolService/tools.py:2246,2261,2292`）。
 
 ### 5.2 HTTP / WebSocket 接口（`controller/`）
 

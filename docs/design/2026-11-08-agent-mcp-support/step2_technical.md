@@ -6,6 +6,28 @@
 
 ---
 
+> #### 现状（2026-11-16 核对）：本文是**技术设计意图**，实现阶段已整条改向，**不要照本文做实现**
+>
+> 事实基线 `0.5_dev` @ `158c02f2`。逐条依据见 `shared/docs-align/report.md`「MCP」§2（#283）。**与本文的核心差别一句话**：今天没有「按 Team 托管的 MCP 进程池」，而是**全局注册表 + 单工具入口 `mcp_call` + mcp2cli 进程内执行**。
+>
+> | 本文设计 | 今天的实现（依据） |
+> |---|---|
+> | `mcpService` / `TeamMcpManager` 进程池，按 Team 起停 | **不存在**（`grep -rln "TeamMcpManager" --include=*.py src/` 空）。业务全在 `src/service/mcpRegistryService.py`（纯 CRUD + name 解析，不管进程） |
+> | 表 `gt_mcp_server`，迁移 `0021_add_gt_mcp_servers.sql`，17 列（含 `team_id`/`scope`/`transport`/`command`/`args`/`env`/`url`/`headers`/`tool_allowlist`/超时两列） | 表 **`mcp_servers`**，迁移 **`0023_add_mcp_servers.sql`**，11 列：`id,name,kind,protocol,target,note,config,enable,created_by,created_at,updated_at`（`0023_add_mcp_servers.sql:23-35`）；`tool_allowlist`/超时列在 `src/` 全无） |
+> | `UNIQUE(team_id, name)` + `(team_id, enabled)` 查询索引 | `ux_mcp_servers_name(name)` **全局唯一**；无查询索引（`mcpRegistryService.py:321` 全表读） |
+> | `restore_team` 先起 MCP、并发降级、SIGTERM→SIGKILL 孤儿治理（§4 全节） | **无对应实现**：`grep -n "mcp" src/service/teamService.py` 空；`mcp_stdio` 的子进程只在单次调用内由 mcp2cli 起落（`mcpTool.py:17-18`），无常驻进程即无孤儿问题 |
+> | `mcp__{server}__{tool}` 命名 + 动态注册进 `tool_registry`（§5.1/5.2） | Agent 侧**只有一个**工具 `mcp_call`；注册项在它内部解析（`tools.py:166-179`），无命名空间前缀 |
+> | `ToolCategory.MCP` 与 `__*` 前缀授权（§5.3） | 无该类别（`grep -n "MCP" src/constants.py` 空） |
+> | 截断 16384 + `MCP_TOOL_EXECUTION_TIMEOUT` 式错误码 | 截断 **20000 字符**（`mcpTool.py:130`）；错误码为小写族 `mcp_call_timeout` / `mcp_name_not_found` / `mcp_name_kind_conflict` / `mcp_server_disabled` / `mcp2cli_*`（`tools.py:139-151`） |
+> | HTTP `/teams/{team_id}/mcp_servers…` 6 条（含 test / reload） | 4 条：`/mcp/servers.json` `/save.json` `/delete.json` `/enable.json`（`src/route.py:70-73`），**无 team 段、无 test、无 reload** |
+>
+> **本文仍然成立、可直接引用的部分**：§1.2-①「MCP 与 gtsp 无关，调用不经 gtsp」；§5.1「MCP 工具本身已带标准 JSON Schema，不必包装成 `FuncTool`」；§6.1「大输出必须截断」的问题判断（阈值另定）；§8「新增独立表、不动既有链路即零回归」的结论。
+
+> **console 文案（#281）与 `mcpTool` 判成败（#282）改造中**：两者均**未合主干**（`4defafce` 未入 `0.5_dev`），故本文涉及的 `mcp add/rm/ls/call/enable/disable` 文案与 `mcp call` 成败判定，**现状按「改造中，见 #281/#282」读**，合并后再复核一次。
+
+---
+
+
 ## 1. 架构目标与关键修正
 
 ### 1.1 核心设计定位
@@ -27,6 +49,8 @@
 ---
 
 ## 2. 总体架构与模块分层
+
+> 现状（2026-11-16）：下图与 §2.1 表中除 `mcpController` / `gtMcpServerManager` / `GtMcpServer` 三个名字仍在，其余（`mcpService`、`TeamMcpManager`、`AgentToolRegistry` 的 MCP 扩展、`gt_mcp_server` 表）**均无对应实现**。实际分层见文首现状块。
 
 ```mermaid
 flowchart TD
@@ -81,6 +105,8 @@ flowchart TD
 
 ### 3.1 数据库表：`gt_mcp_server`
 
+> 现状（2026-11-16）：表名、迁移编号、全部字段均已不同 —— 实际为 `mcp_servers` / `0023_add_mcp_servers.sql` / 11 列（`name,kind,protocol,target,note,config,enable,created_by`），唯一约束改为**全局唯一 name**。完整对照见文首现状块与 report.md T4/T5。
+
 通过迁移脚本 `assets/migrate/0021_add_gt_mcp_servers.sql` 创建，对应模型类 `GtMcpServer`（继承自 `DbModelBase`，复用 `AutoTimestampMixin`）：
 
 | 字段名 | 类型 | 约束与默认值 | 说明 |
@@ -109,6 +135,8 @@ flowchart TD
 ---
 
 ## 4. 运行时生命周期与进程治理
+
+> 现状（2026-11-16）：**整节未实现**，且其前提在当前架构下不存在 —— 没有常驻 MCP 进程池，`mcp_stdio` 的子进程由 mcp2cli 在单次调用内起落（`mcpTool.py:17-18`）。本节保留作为「若将来改回常驻进程」的参考。
 
 ### 4.1 Team 恢复时序（与 `teamService.restore_team` 集成）
 
@@ -166,6 +194,8 @@ stdio 子进程必须严格防范孤儿进程滞留（尤其是在热重载或�
 ## 5. 桥接层与 Agent 工具集成
 
 ### 5.1 命名规范与 Schema 转换
+
+> 现状（2026-11-16）：`mcp__{server}__{tool}` 命名**不存在**（`grep -rn 'mcp__' --include=*.py src/` 空），工具统一由 `mcp_call(name, tool, args, extra, kind)` 调用；「不必包装成 FuncTool」这一判断仍成立。
 
 * **命名空间格式**：`mcp__{server_name}__{tool_name}`
   * 例如：Server 命名为 `sqlite`，工具为 `read_query`，则全局工具名为 `mcp__sqlite__read_query`；
@@ -230,6 +260,8 @@ async def _execute_mcp_tool_dispatch(
 
 ### 5.3 权限解析扩展（`toolRegistry.py`）
 
+> 现状（2026-11-16）：**未实现** —— `ToolCategory` 无 MCP 成员，`toolRegistry` 无 MCP 分支；当前 `mcp_call` 对所有人可用。本节是设计意图，需另立单（见 report.md T8）。
+
 在 [`toolRegistry.py`](file:///Volumes/PDATA/GitDB/TeamAgent/src/service/agentService/toolRegistry.py) 中做两处扩展：
 1. **新增类别枚举**：
    在 `constants.py` 的 `ToolCategory` 中增加 `MCP = "Category:Mcp"`；
@@ -260,6 +292,8 @@ async def _execute_mcp_tool_dispatch(
 
 ### 6.1 超大输出安全截断
 
+> 现状（2026-11-16）：机制有、**阈值不同** —— 上限 `MAX_OUTPUT_CHARS = 20000` 字符（`mcpTool.py:130`），返回体置 `truncated=True`；不是 16384，提示语形态也不同。
+
 MCP 工具（如文件搜索、日志提取、网页抓取）可能返回数十万字符的输出，直接塞给 LLM 会导致上下文溢出（Context Overflow）。
 在 `mcpService.execute_tool` 返回层设置阈值保护：
 * 单次返回文本限制：最大 16,384 字符（约 4,000 Tokens）；
@@ -284,6 +318,8 @@ MCP 标准允许返回 `ImageContent`。一期以纯文本会话为主，当检�
 ---
 
 ## 7. HTTP API 接口设计
+
+> 现状（2026-11-16）：实际只有 4 条、且**不带 team 段**：`/mcp/servers.json`（列表）、`/mcp/servers/save.json`、`/mcp/servers/delete.json`、`/mcp/servers/enable.json`（`src/route.py:70-73`，`src/controller/mcpController.py`）；**无** test / reload 接口。
 
 所有接口挂载于 `/teams/{team_id}/mcp_servers` 路径下，复用系统统一的鉴权与权限拦截：
 

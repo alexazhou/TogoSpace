@@ -5,6 +5,24 @@
 
 ---
 
+> #### 现状（2026-11-16 核对）：本文是**设计意图与选型推理**，实现阶段已整条改向，**不要照本文做实现**
+>
+> 事实基线 `0.5_dev` @ `158c02f2`。逐条差异与依据见 `shared/docs-align/report.md`「MCP」节（#283）。
+>
+> | 本文描述 | 今天的实现（依据） |
+> |---|---|
+> | 按 Team 隔离、每个 Team 一份进程实例 | **全局注册表、不分团队**（Operator 2026-11-15 17:54，#273 合入 `777a7e7f`）；唯一约束 `ux_mcp_servers_name(name)` 全局唯一，无 `team_id` 列（`assets/migrate/0023_add_mcp_servers.sql:39`） |
+> | Web 设置页「MCP 服务」为唯一入口 | **console 命令 + Web 设置页双入口**：`mcp add/rm/ls/call/enable/disable`（`src/service/funcToolService/consoleCommands.py:588-640`）+ 4 条 REST（`src/route.py:70-73`，**无** `/teams/{id}/…` 形式） |
+> | 工具以 `mcp__{server}__{tool}` 注入每个 Agent 的 tool_registry | **Agent 侧只有一个工具 `mcp_call`**，注册项由它按 `name` 解析后替换 target 并注入凭证（`src/service/funcToolService/tools.py:166-179`）；无 `mcp__` 命名空间 |
+> | 「测试连接」预览工具清单 | **无该功能**（`grep -rn "test_connection\|测试连接" src/ frontend/src` 空）；近似能力=`mcp ls <name>` 列工具（`consoleCommands.py:634-636`） |
+> | 仅 Root / 团队 Admin 可增删改 | **写操作不设门槛**（`src/controller/mcpController.py:6-8`，Operator 2026-11-15 20:21，#277 合入 `b565ba05`） |
+> | 环境变量前端脱敏、凭证不落库 | **凭证原样存明文**（#277），打码只在展示面与调用出口（`src/model/dbModel/gtMcpServer.py:94-100`） |
+> | `Transport` 之外还有 `command/args/env/timeout` 字段 | 实际字段：`name/kind/protocol/target/note/config/enable`（`frontend/src/components/settings/McpServerEditorDialog.vue:13-16,54-57`）；`tool_allowlist`/`timeout_sec`/`startup_timeout_sec` **全不存在** |
+>
+> 仍然成立的部分：MCP 与 gtsp 无关（调用不经 gtsp）；工具参数直接复用 MCP 的 JSON Schema，不必包装成 `FuncTool`。
+
+> **console 文案（#281）与 `mcpTool` 判成败（#282）改造中**：两者均**未合主干**（`4defafce` 未入 `0.5_dev`），故本文涉及的 `mcp add/rm/ls/call/enable/disable` 文案与 `mcp call` 成败判定，**现状按「改造中，见 #281/#282」读**，合并后再复核一次。
+
 ## 1. 背景与用户痛点
 
 在 TogoSpace 现有的多 Agent 协作体系中，Agent 拥有两类核心工具能力：
@@ -37,6 +55,8 @@ flowchart LR
 
 ### 2.1 预期的产品效果
 
+> 现状（2026-11-16）：本节 5 条里有 4 条已不成立 —— 「团队级共享与隔离」改为全局注册表（P1）、`mcp__{server}__{tool}` 命名空间不存在（P3）、「测试连接」未实现（P2）、权限收敛与前端脱敏已放开/改为入库明文（P4）。仅「免写代码、配置即接入」成立。详见文首现状块。
+
 * **免写代码，配置即接入**：
   管理员只需在界面填写标准 MCP 启动命令（如 `npx -y @modelcontextprotocol/server-postgres ...`）或可执行文件路径，系统即可自动拉起、协商协议并导入工具清单。
 * **团队级协作共享与隔离**：
@@ -52,6 +72,8 @@ flowchart LR
   * Agent 对 MCP 工具的每一次调用均沉淀至活动日志（Agent Activity）供事后回溯。
 
 ### 2.2 本期范围与非目标（Non-Goals）
+
+> 现状（2026-11-16）：P1 里**已实现**=注册表 CRUD + 启停、stdio（经 mcp2cli 起子进程）、Web「MCP 服务」分区；**未实现**=连通性测试、TSP Driver 工具注入、`Category:Mcp` 权限分类、`restore_team`/`stop_team_runtime` 生命周期集成（均无单号，待立单）。P2/P3 仍未做，除「HTTP/SSE + 自定义 Header」中的 sse/streamable_http 已随 `kind/protocol` 拆分落地（`4caad624`）。依据见 report.md P2/P5。
 
 * **P1（本期交付范围）**：
   * 团队级 MCP Server 配置持久化（CRUD、启停开关）；
@@ -73,6 +95,8 @@ flowchart LR
 ## 3. 核心功能与用户交互流程
 
 ### 3.1 前端管理面板（设置页 MCP 服务）
+
+> 现状（2026-11-16）：面板存在（`frontend/src/components/settings/McpServersSection.vue`，`sections.ts:7` 注册 `mcpServers`），但**字段与交互已重写**：`name` / `kind`（mcp\|openapi\|graphql）/ `protocol`（stdio\|sse\|streamable_http，仅 kind=mcp）/ `target` / `note` / `config`（headers\|env 两层）/ `enable`；**无** args 与独立 env 键值对（启动命令并入 `target`、环境变量并入 `config.env`）、**无**超时设置、**无**测试连接按钮、**无**热重载提示栏。依据见 report.md P6。
 
 在团队设置界面新增 **「MCP 服务」** 分区（位置紧随 Skills 之后）：
 
@@ -118,6 +142,8 @@ flowchart LR
 ---
 
 ## 4. 验收标准（Acceptance Criteria）
+
+> 现状（2026-11-16）：第 1 条「团队内唯一」应读作**全局唯一**（P9）；第 2 条「测试连接」**无此功能**（P10）；第 3、4 条以「Team 恢复时注入工具 / 停止时回收子进程」为前提，而当前**没有常驻 MCP 进程**、工具也不注入（P11/P12），这两条的前提已消失。
 
 1. **配置管理与持久化**：
    * 管理员可在 Web 设置页成功创建、修改、启用/停用、删除 stdio 类型的 MCP Server，且数据在重启后完整保留；
