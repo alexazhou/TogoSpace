@@ -7,10 +7,13 @@
 --   ③ 事件表 agent_task_events 加 action_type / from_stage / to_stage（消除同态流转歧义）；
 --   ④ 存量回填：把 v2 的「1 执行人 + 0/1 审核人」翻译成节点链与游标。
 --      ⚠️ 本迁移**文件级不可重放**，重放保护来自迁移账本（详见 ④ 段前的说明）。
+--      整份脚本包在 BEGIN; … COMMIT; 内：任一句失败则全部回滚（#253 M-1）。
 --
 -- 为什么要冗余 current_stage / current_owner_id 到主表：`list_tasks` 的默认口径
 -- 变成「只看当前持棒人」，这是最高频查询；若每次 join 节点表算游标就无法走索引。
 -- 节点表仍是真值来源，主表两列只是快照（写入一律在 taskService 的同一事务内同步）。
+
+BEGIN;
 
 -- ① 节点表 ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS agent_task_stages (
@@ -21,8 +24,8 @@ CREATE TABLE IF NOT EXISTS agent_task_stages (
     name         TEXT     NOT NULL DEFAULT '',
     owner_id     INTEGER  NOT NULL,
     stage_status TEXT     NOT NULL DEFAULT 'WAITING', -- WAITING / ACTIVE / APPROVED
-    created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
-    updated_at   DATETIME NOT NULL DEFAULT (datetime('now'))
+    created_at   DATETIME NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at   DATETIME NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 -- (task_id, stage_index) 唯一：唯一索引同时就是「按任务取整条链」的查询索引。
@@ -47,15 +50,16 @@ ALTER TABLE agent_task_events ADD COLUMN to_stage INTEGER;
 -- 该错当可忽略并重新记账，整段 executescript 已回滚），真正的重放保护是迁移账本。
 -- 下面的 NOT EXISTS / IS NULL 只是防御性冗余（万一表/列由别的路径先建好），不承担重放保护。
 -- 节点 0 = EXECUTION(assignee_id)；有 reviewer_id 时补节点 1 = REVIEW(reviewer_id)。
+-- 时间戳口径与 0015 一致：datetime('now', 'localtime')（本地时间，与 ORM 的 datetime.now() 同口径；#253 M-2）。
 INSERT INTO agent_task_stages (task_id, stage_index, node_type, name, owner_id, stage_status, created_at, updated_at)
-SELECT t.id, 0, 'EXECUTION', '', t.assignee_id, 'WAITING', datetime('now'), datetime('now')
+SELECT t.id, 0, 'EXECUTION', '', t.assignee_id, 'WAITING', datetime('now', 'localtime'), datetime('now', 'localtime')
 FROM agent_tasks AS t
 WHERE NOT EXISTS (
     SELECT 1 FROM agent_task_stages AS s WHERE s.task_id = t.id
 );
 
 INSERT INTO agent_task_stages (task_id, stage_index, node_type, name, owner_id, stage_status, created_at, updated_at)
-SELECT t.id, 1, 'REVIEW', '', t.reviewer_id, 'WAITING', datetime('now'), datetime('now')
+SELECT t.id, 1, 'REVIEW', '', t.reviewer_id, 'WAITING', datetime('now', 'localtime'), datetime('now', 'localtime')
 FROM agent_tasks AS t
 WHERE t.reviewer_id IS NOT NULL
   AND NOT EXISTS (
@@ -114,3 +118,5 @@ UPDATE agent_task_stages
 SET stage_status = 'ACTIVE'
 WHERE stage_index = 0
   AND task_id IN (SELECT id FROM agent_tasks WHERE status <> 'DONE' AND current_stage = 0);
+
+COMMIT;

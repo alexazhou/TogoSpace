@@ -18,6 +18,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 import db
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "assets/migrate"
@@ -190,9 +192,12 @@ def test_0022_is_not_reapplied_when_ledgered(tmp_path: Path) -> None:
 def test_0022_replay_protection_comes_from_ledger(tmp_path: Path) -> None:
     """钉住事实：重放保护是账本，不是 SQL 里的 NOT EXISTS。
 
-    手工删掉账本行再跑一次：第一条 `ALTER TABLE ... ADD COLUMN` 就会撞
-    `duplicate column name`，`db` 层把该错误当「可忽略」并重新记账，整段
-    `executescript` 已回滚 —— 也就意味着 ④ 的回填不会再跑一次。
+    手工删掉账本行再跑一次：脚本自带的 `BEGIN;` 之后，第一条
+    `ALTER TABLE ... ADD COLUMN` 就会撞 `duplicate column name`；`db` 层把该错误当
+    「可忽略」并重新记账，而**整个脚本因事务回滚而一句都没落下**（#253 M-1 之后的
+    真实机制是「0022 自带 BEGIN/COMMIT + apply_migration 兜底回滚」，不再是早前
+    注释里写的「executescript 已回滚」那种说法——那时建表其实已提交，只是因为
+    ALTER 排在回填之前才没暴露）。也就意味着 ④ 的回填不会再跑一次。
     这条用例存在的价值：**别把 0022 当成可重放脚本**（例如不能拿它去
     「补跑」一个半旧库），也不能因为 SQL 里写了 `NOT EXISTS` 就以为重跑安全。
     """
@@ -246,3 +251,154 @@ def test_0022_header_does_not_claim_replay_safety() -> None:
     )
     assert "不可重放" in text, "头部必须明确写出「文件级不可重放」"
     assert "账本" in text, "必须点明真正的重放保护来源是迁移账本"
+
+
+# ---------------------------------------------------------------------------
+# M-1 / M-2（#253 review_notes）：0022 的原子执行与回填时间戳口径
+# ---------------------------------------------------------------------------
+
+def _table_exists(db_path: Path, name: str) -> bool:
+    with sqlite3.connect(str(db_path)) as conn:
+        return bool(list(conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?", (name,)
+        )))
+
+
+def _columns(db_path: Path, table: str) -> list[str]:
+    with sqlite3.connect(str(db_path)) as conn:
+        return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _ledger_0022_count(db_path: Path) -> int:
+    with sqlite3.connect(str(db_path)) as conn:
+        return list(conn.execute(
+            "SELECT COUNT(*) FROM _migrations WHERE name = ?", (MIGRATION_0022,)
+        ))[0][0]
+
+
+def _injected_0022(tmp_path: Path) -> Path:
+    """把真实 0022 复制一份，在 ④ 第一条回填 INSERT 之后插一条必然失败的语句。
+
+    为什么不改真实文件：真实 0022 是交付物，测试只读它；而「中途失败」必须让脚本
+    真的执行到一半才抛错。注入的是一条 `owner_id` 为 NULL 的 INSERT（该列 NOT NULL）
+    ⇒ `sqlite3.IntegrityError`（不是 `duplicate column name` 那类「可忽略错误」，
+    所以不会被 `_is_ignorable_migration_error` 吞掉）。
+    """
+    sql = (MIGRATIONS_DIR / MIGRATION_0022).read_text(encoding="utf-8")
+    anchor = (
+        "INSERT INTO agent_task_stages (task_id, stage_index, node_type, name, owner_id,"
+        " stage_status, created_at, updated_at)"
+    )
+    end = sql.index(";", sql.index(anchor)) + 1
+    boom = (
+        "\nINSERT INTO agent_task_stages (task_id, stage_index, node_type, owner_id)"
+        " VALUES (999, 9, 'EXECUTION', NULL);\n"
+    )
+    out_dir = tmp_path / "migrate_injected"
+    out_dir.mkdir()
+    target = out_dir / MIGRATION_0022
+    target.write_text(sql[:end] + boom + sql[end:], encoding="utf-8")
+    return target
+
+
+def test_0022_midway_failure_rolls_back_whole_script(tmp_path: Path) -> None:
+    """M-1：④ 回填阶段抛错 ⇒ 整份 0022 原子回滚（表 / 新增列 / 回填行 / 账本全无残留）。
+
+    原缺陷（review_notes M-1）：`conn.executescript()` 会先隐式 COMMIT 掉外层事务、
+    再逐条自动提交执行脚本，而 0022 自身没有 `BEGIN;`/`COMMIT;`。于是回填中途报错时，
+    ① 建表与 ②③ 的 6 条 `ALTER` 已经落库；下次启动重跑 0022 会在第一条 ALTER 上撞
+    `duplicate column name`，被 `_is_ignorable_migration_error` 当作可忽略错误直接记账
+    ⇒ **回填被永久静默跳过**。所以本用例判两段：失败后无残留 + 去掉注入后能正常回填。
+    """
+    db_path = tmp_path / "test.db"
+    _migrate_up_to_0021(db_path)
+    _seed_pre_0022_rows(db_path)
+    injected = _injected_0022(tmp_path)
+
+    with db.connect_sqlite(db_path) as conn:
+        db.ensure_migrations_table(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            db.apply_migration(conn, injected)
+
+    assert not _table_exists(db_path, "agent_task_stages"), (
+        "回填失败后节点表残留 ⇒ 0022 不是原子执行（建表已落库）"
+    )
+    assert not ({"current_stage", "current_owner_id"} & set(_columns(db_path, "agent_tasks"))), (
+        "回填失败后主表游标列残留 ⇒ ② 的 ALTER 已落库"
+    )
+    assert not ({"action_type", "from_stage", "to_stage"} & set(_columns(db_path, "agent_task_events"))), (
+        "回填失败后事件表三列残留 ⇒ ③ 的 ALTER 已落库"
+    )
+    assert _ledger_0022_count(db_path) == 0, "失败后不该记账"
+
+    # 去掉注入（用真实文件重跑）：必须能正常回填；否则就是「半迁移 + 静默跳过」
+    applied = db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR)
+    assert MIGRATION_0022 in applied, applied
+    assert _stages(db_path) == EXPECTED_STAGES, "半迁移后重跑没有回填：回填被静默跳过了"
+
+
+def test_0022_backfill_timestamps_stay_in_local_time(tmp_path: Path) -> None:
+    """M-2：回填的 `created_at` / `updated_at` 必须是**本地时间**。
+
+    原缺陷（review_notes M-2，原为待讨论、按建议方案实现）：`0015` 约定回填用
+    `datetime('now', 'localtime')`（与 ORM 的 `datetime.datetime.now()` 同口径），
+    而 0022 用的是 `datetime('now')`（UTC）⇒ 与 `gtAgentTaskStageManager` 后续写入
+    相差一个时区（本机 +8 小时 = 28800 秒）。
+    判据用「与当前本地时间相差 < 120 秒」：时区错位是 28800 秒量级，两者不会混淆。
+    若本机时区恰为 UTC（偏移 ≈ 0）则本条无法鉴别，跳过并说明。
+    """
+    db_path = tmp_path / "test.db"
+    _migrate_up_to_0021(db_path)
+    _seed_pre_0022_rows(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        tz_offset = list(conn.execute(
+            "SELECT (julianday('now','localtime') - julianday('now')) * 86400"
+        ))[0][0]
+    if abs(tz_offset) < 60:
+        pytest.skip("本机时区为 UTC，时间漂移无法鉴别回填时区")
+
+    db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        created_drift, updated_drift = list(conn.execute(
+            "SELECT MAX(ABS(julianday(created_at) - julianday('now','localtime'))),"
+            "       MAX(ABS(julianday(updated_at) - julianday('now','localtime')))"
+            " FROM agent_task_stages"
+        ))[0]
+
+    tolerance = 120 / 86400  # 120 秒，单位：儒略日
+    assert created_drift is not None and created_drift < tolerance, (
+        f"created_at 与本地时间相差 {created_drift * 86400:.0f} 秒（回填用了 UTC 的 datetime('now')？）"
+    )
+    assert updated_drift is not None and updated_drift < tolerance, (
+        f"updated_at 与本地时间相差 {updated_drift * 86400:.0f} 秒（回填用了 UTC 的 datetime('now')？）"
+    )
+
+
+def test_0022_ignorable_error_leaves_no_half_migration(tmp_path: Path) -> None:
+    """M-1 后半：**被当作「可忽略」的错误**也不得留下半迁移残留。
+
+    这条专门钉 `apply_migration` 的兜底回滚（而不是 0022 自带的 BEGIN/COMMIT）：
+    构造一个「主表已有 current_stage（半迁移）」的库再跑 0022 ⇒ 第一条
+    `ALTER TABLE ... ADD COLUMN current_stage` 撞 `duplicate column name`，被
+    `_is_ignorable_migration_error` 当作可忽略并直接记账。此时连接里还开着脚本的
+    事务（`BEGIN;` 之后失败），若不在记账**之前**先回滚，`with conn:` 会把 ① 建好的
+    节点表连同索引一起提交 —— 于是「账本说已应用、库里只有半个 0022」。
+    """
+    db_path = tmp_path / "test.db"
+    _migrate_up_to_0021(db_path)
+    _seed_pre_0022_rows(db_path)
+    # 半迁移形态：② 的第一条 ALTER 已在库里（其余什么都没做）
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("ALTER TABLE agent_tasks ADD COLUMN current_stage INTEGER NOT NULL DEFAULT 0")
+
+    applied = db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR)
+
+    assert MIGRATION_0022 in applied, "可忽略错误仍应记账（既有契约）"
+    assert not _table_exists(db_path, "agent_task_stages"), (
+        "可忽略错误后节点表残留 ⇒ 记账前没回滚，把半个 0022 提交了"
+    )
+    assert "action_type" not in _columns(db_path, "agent_task_events"), (
+        "可忽略错误后事件表三列残留 ⇒ 同上"
+    )
