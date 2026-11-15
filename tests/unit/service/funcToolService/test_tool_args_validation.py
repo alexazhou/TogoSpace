@@ -41,7 +41,8 @@ WARNING_KEYWORD = "已跳过校验"
 #: 或「抽样」立刻变红——动态用 `len()` 自证会随实现一起漂移，等于没断言。
 #: 32 → 33：webfetch（#191）进默认工具组，故默认组 33、合计 33+5=38。
 # 合并 #203 + #202：默认组 +1(mcp_call)、容器组 +1(update_container_note)
-DEFAULT_TOOL_COUNT = 34
+# #224：MCP 注册表三工具进默认组（默认组 +3）⇒ 37 / 37+6=43。
+DEFAULT_TOOL_COUNT = 38
 CONTAINER_TOOL_COUNT = 6
 
 
@@ -946,38 +947,38 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 114 = 46 + 68（#202 `mcp_call` 带来 +3 required（target）/ +3 optional
-    #   （tool / args / extra）+ 1 个「有默认值但注解不含 None」（action），
-    #   故 108→114、43→46、65→68）。**这里必须拆开看两个口径**
+    # 129 = 50 + 79（#224→#273：MCP 注册表三工具带来 +8 optional（save.name/target/credentials、
+    #   delete.alias、list.name_or_target/tool/args/extra）+ 4 个「有默认值但注解不含
+    #   None」（save.kind/note/overwrite、list.kind）+ 1 个裸 object（save.credentials），
+    #   故 117→129、46→50、71→79）。**这里必须拆开看两个口径**
     #   （否则「总数对」会掩盖反向变动）：
     #   · `p1_required` 数的是「P1 注入后**应被拦**的字段」，不是 `required` 列表长度：
     #     24 个 required + 19 个「有默认值但注解不含 None」= 43
     #     （`save_role_template.type/soul` 改为 Optional 后 required 少了 2；
     #      #196 前：36 required + 19 = 55，见
     #      `test_tool_schema_nullable.NON_OPTIONAL_BUT_DEFAULTED` 注释）
-    #   · `p1_optional` = 108 - 43 = 65（#196 前 100 - 55 = 45）
-    # 114 = 全部参数数（39 工具，含容器组）。#196 前为 100、#202 前为 108。
-    # v3 新增 6 个可选参数（create_task.stages；update_task 的 workflow_action /
-    # target_stage / append_stages / remove_stage_index / reassign_stage）
-    # ⇒ p1_optional 71→77、p2（数组型）13→15、p3_fields 6→7（`reassign_stage` 是
-    # 裸 `{"type":"object"}`，与 `mcp_call.args` 同形态：既算 P1 也算 P3）。
-    # v3：`list_tasks.mine` / `include_upcoming` 是 bool（注解不含 None）⇒ 归 P1-required，
-    # 故 46→48；另 6 个 `Optional[...]` 新参数进 P1-optional（71→77）。
-    assert p1_required + p1_optional == 125, (p1_required, p1_optional)
-    assert p1_required == 48, p1_required
-    assert p1_optional == 77, p1_optional
+    #   · `p1_optional` = 138 - 52 = 86（#196 前 100 - 55 = 45）
+    # 138 = 全部参数数（44 工具，含容器组）。#196 前为 100、#202 前为 108。
+    # v3 新增 6 个可选参数 + 2 个 bool ⇒ 48+77=125；#224→#273 MCP 四工具再 +9 optional
+    # （save.name/target/credentials、delete.name、set.name、list.name_or_target/tool/args/extra）
+    # 与 +5 个「有默认值但注解不含 None」（save.kind/note/overwrite、list.kind、set.enable）
+    # ⇒ p1_required 48→53、p1_optional 77→86。
+    assert p1_required + p1_optional == 139, (p1_required, p1_optional)
+    assert p1_required == 53, p1_required
+    assert p1_optional == 86, p1_optional
     assert p2 == 15, f"P2={p2}"
     # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
-    assert p3_fields == 7, f"P3字段={p3_fields}"
+    # #224→#273：`save_mcp_server.credentials`、`list_mcp_servers.args/extra` 亦是裸 object
+    # ⇒ 7 → 10（v3 的 reassign_stage 已把 6→7）。
+    assert p3_fields == 10, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    # 166 = 39 + 46 + 68 + 13 + 0（#202 实测：工具 38→39、P1 108→114、P3 4→6，
-    # P2 恒 13 —— `mcp_call.args`/`extra` 是裸 `{"type":"object"}`，被计入 P1 与 P3，
-    # 不进 P2）。
-    # （#196 前 148 = 38 + 55 + 45 + 10 + 0；#189 时 146 = 37 + 35 + 64 + 10 + 0）
-    assert total == 180, total  # 40 + 48 + 77 + 15 + 0（40 = P0 根节点 + P3 可枚举）
+    # 198 = 44 + 53 + 86 + 15 + 0（#273 实测口径：工具 40→44、P1 125→138、P2 恒 15，
+    # P3 内部 key 恒 0；p3_fields（7→10，裸 object 计数）不进 total，同 #202 口径）。
+    # （#202 实测：166 = 39 + 46 + 68 + 13 + 0；#196 前 148；#189 时 146）
+    assert total == 198, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

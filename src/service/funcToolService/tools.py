@@ -142,31 +142,277 @@ async def mcp_call(
     `mcp2cli_bad_json`，其中 `mcp2cli_exit` 说明参数或目标有误（附 `stderr`），可直接
     按提示改参数重试。
 
+    **注册表解析（#273，全局注册表）**：target 若命中全局 MCP 注册表的 name
+    （`mcp add` 登记），则自动替换为注册项的 target/kind，并注入其凭证引用（只传
+    引用原文，解析在日志之后、调用之前）；未命中按完整 target 原样透传（既有用法
+    一字不改）。返回体恒带 `resolved_from_registry`（命中 true、未命中 false）；命中
+    时另带 `name` 字段。命中且显式 kind 与注册项不同时报 `mcp_name_kind_conflict`；
+    命中的注册项**已禁用**（enable=0）时报 `mcp_server_disabled`（不是「不存在」）。
+
     Args:
-        target: spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint。
+        target: spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint；
+            也可以是注册表 name（`mcp add` 登记的名字，如 `ctx7`）。
         action: `list` 只列工具，`call` 真调一次。
         tool: action=call 时的工具名（从 list 结果里取）。
         args: action=call 时的参数对象，键名与 list 里该工具的参数名一致。
         kind: 来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。
+            name 命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。
         extra: 透传 **mcp2cli 全局开关**，如 `{"transport": "sse", "search": "关键词"}`。
             `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql`
             生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）；
             `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。
     """
-    return await mcpTool.call_mcp(
+    # ---- 注册表解析（#273：唯一插入点；`mcp ls <name>` 经 list_mcp_servers 复用本入口）----
+    registry_name: str | None = None
+    resolved_from_registry = False
+    credential_refs: dict | None = None
+    name = str(target or "").strip()
+    if name:
+        # 注册表是**增量能力**：未绑库（无库环境直调第 2 跳）时按未命中透传，
+        # 既有调用行为回到注册表之前——新增能力不得打死旧用法。全局注册表
+        # 不再需要 team 上下文（#273：去 team_id）。
+        from model.dbModel.base import database_bound
+
+        if database_bound():
+            from service import mcpRegistryService
+
+            entry = await mcpRegistryService.resolve_name(name)
+            if entry is not None:
+                registry_name = entry.name
+                resolved_from_registry = True
+                # kind 冲突（沿 1331 批准口径，纯值比较）：显式 kind 与注册项不同 ⇒ 拒；
+                # 相同或缺省 ⇒ 放行并取注册值。缺省与显式同值在签名层不可区分
+                # （core.py func(**args)），所以 kind=="openapi"（签名默认）一律视为
+                # 缺省——永不生效分支，此处是它的落法。
+                if kind != entry.kind and kind != _MCP_CALL_DEFAULT_KIND:
+                    return {
+                        "success": False,
+                        "error_code": "mcp_name_kind_conflict",
+                        "resolved_from_registry": True,
+                        "name": registry_name,
+                        "message": (
+                            f"name {registry_name!r} 登记的 kind 是 {entry.kind!r}，与显式传入的 "
+                            f"{kind!r} 不一致。name 命中后 target/kind 以注册项为准；"
+                            "如确需其他 kind，请去掉 --kind 直接调用，或让 leader 重新登记。"
+                        ),
+                    }
+                if not entry.enable:
+                    # 禁用 ≠ 不存在：明确报「已禁用」并指路（#273 enable 语义）。
+                    return {
+                        "success": False,
+                        "error_code": "mcp_server_disabled",
+                        "resolved_from_registry": True,
+                        "name": registry_name,
+                        "message": (
+                            f"server {registry_name!r} 已禁用（enable=0），不能调用。"
+                            "让 leader 执行 `mcp enable " + registry_name + "` 重新启用；"
+                            "`mcp ls` 仍能看到该条目。"
+                        ),
+                    }
+                kind = entry.kind
+                target = entry.target
+                credential_refs = mcpRegistryService.credential_refs_of(entry)
+
+    result = await mcpTool.call_mcp(
         kind=kind,
         target=target,
         action=action,
         tool=tool,
         args=args,
         extra=extra,
+        credential_refs=credential_refs,
     )
+    # 恒出现（沿 1337 附加判据 3）：命中 true + name 字段，未命中恒 false；不做条件字段。
+    result["resolved_from_registry"] = resolved_from_registry
+    if registry_name is not None:
+        result["name"] = registry_name
+    return result
 
 
 def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:
     if _context is None or _context.team_id <= 0:
         return False, 0
     return True, _context.team_id
+
+
+#: `mcp_call` 签名的 kind 默认值（#224 kind 冲突判定用它当「缺省」标记——缺省与显式
+#: 同值在签名层不可区分，设计稿 §3.6 已承认）。
+_MCP_CALL_DEFAULT_KIND = "openapi"
+
+
+async def save_mcp_server(
+    name: Optional[str] = None,
+    kind: str = "mcp",
+    target: Optional[str] = None,
+    note: str = "",
+    credentials: Optional[dict] = None,
+    overwrite: bool = False,
+    _context: ToolCallContext = None,
+) -> dict:
+    """把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp add` 的底层工具）。
+
+    登记**不创建任何 team 内实体**，只存一条指向外部服务的指针；注册表不分 team
+    （#273），所有团队都能用 `mcp call <name>` 复用。默认 insert-only：name 已存在
+    会拒绝，覆盖必须显式 `overwrite=true`。凭证只收 `env:VAR` 形式的**引用**
+    （如 `"env:GITHUB_TOKEN"`），不接受明文；`file:` / `keychain:` 首版未实现、也不降级。
+
+    Args:
+        name: 全局唯一名，小写字母开头、仅含小写字母/数字/下划线/连字符，最长 32 字符（如 `ctx7`）。
+        kind: 来源类型，默认 `mcp`（与 `mcp_call` 的默认 `openapi` **有意不同**：注册表
+            典型用法是 MCP server）；可选 `openapi` / `mcp` / `mcp_stdio` / `graphql`。
+        target: 完整连接描述：MCP server URL / spec 路径或 URL / stdio 启动命令 / GraphQL endpoint。
+        note: 备注说明（给人看的用途描述）。
+        credentials: 凭证引用，形如 `{"headers": {"Authorization": "env:GITHUB_TOKEN"}}`
+            （headers 配 HTTP 类 kind）或 `{"env": {"API_KEY": "env:API_KEY"}}`
+            （env 配 `mcp_stdio`，注入子进程环境变量）。只存引用，永不存明文。
+        overwrite: name 已存在时是否覆盖；默认 false（防误覆盖别人的登记）。
+    """
+    # 注册表全局化（#273）后 team 上下文无作用域语义，不再设 _require_team_context 门；
+    # created_by 仅审计（取 agent_id），无上下文时记 0。
+    from exception import TogoException
+    from service import mcpRegistryService
+
+    try:
+        entry = await mcpRegistryService.save_server(
+            name=str(name or ""),
+            kind=kind,
+            target=str(target or ""),
+            note=str(note or ""),
+            credentials=credentials,
+            overwrite=bool(overwrite),
+            created_by=_context.agent_id if _context is not None else 0,
+        )
+    except TogoException as exc:
+        return toolResult.error_result(exc)
+    return {
+        "success": True,
+        "message": f"name {entry.name!r} 已登记（kind={entry.kind}，全局注册表）。可用 `mcp call {entry.name}` 调用。",
+        "server": mcpRegistryService.entry_summary(entry),
+        "resolved_from_registry": False,
+    }
+
+
+async def delete_mcp_server(
+    name: Optional[str] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """从全局 MCP 注册表删除一个 name（`mcp rm` 的底层工具）。
+
+    只按 name 精确删（不支持按 target 或前缀匹配）；name 不存在返回
+    `mcp_name_not_found`，**不静默成功**。返回体带被删条目的脱敏摘要
+    （target 已打码），当场看到删了什么。
+
+    Args:
+        name: 要删除的 name（必须与登记时的 name 完全一致）。
+    """
+    # 注册表全局化（#273）后 team 上下文无作用域语义，不再设 _require_team_context 门。
+    from exception import TogoException
+    from service import mcpRegistryService
+
+    try:
+        removed = await mcpRegistryService.delete_server(str(name or ""))
+    except TogoException as exc:
+        return toolResult.error_result(exc)
+    return {
+        "success": True,
+        "message": f"name {removed.name!r} 已从全局注册表删除。",
+        "deleted": mcpRegistryService.entry_summary(removed),
+        "resolved_from_registry": False,
+    }
+
+
+async def list_mcp_servers(
+    name_or_target: Optional[str] = None,
+    tool: Optional[str] = None,
+    args: Optional[dict] = None,
+    kind: str = "openapi",
+    extra: Optional[dict] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """无参列出**全局** MCP 注册表；有参时对 name/完整 target 列工具清单（`mcp ls` 的底层工具）。
+
+    **无参**：返回 `{success, servers: [...], count}`——每条只含脱敏摘要
+    （`target_masked` / `has_credentials` / `enable`，凭证只显示 `env:VAR` 引用原文，
+    永不出解析值），**不含** `result`。禁用条目**仍然列出**并标注 enable=false
+    （禁用 ≠ 删除，要看得见才好启用；#273）。
+    **有参**：等价于 `mcp_call(action="list", target=…)`——name 命中则用注册项的
+    target/kind/凭证（禁用项在此分支报 `mcp_server_disabled`），未命中按完整 target
+    原样透传；返回结构沿用 `mcp_call` 的 list 形态（不套 `servers`）。两个分支共用
+    同一条 name 解析（`resolve_name`）。
+
+    Args:
+        name_or_target: 省略 = 列注册表；给出 = name 或完整 target（对它列工具清单）。
+        tool: （有参分支）预留透传，见 `mcp_call`。
+        args: （有参分支）预留透传，见 `mcp_call`。
+        kind: （有参分支）来源类型；name 命中时以注册项为准。
+        extra: （有参分支）透传 mcp2cli 全局开关，见 `mcp_call`。
+    """
+    name = str(name_or_target or "").strip()
+    if not name:
+        from service import mcpRegistryService
+
+        entries = await mcpRegistryService.list_servers()
+        servers = [mcpRegistryService.entry_summary(entry) for entry in entries]
+        body: dict[str, Any] = {
+            "success": True,
+            "servers": servers,
+            "count": len(servers),
+            "resolved_from_registry": False,
+        }
+        if len(servers) > 20:
+            # 沿设计稿 T2：条目超过 20 条时建议收窄（不改任何条款，只加一句提示）。
+            body["message"] = (
+                f"注册表已有 {len(servers)} 条。可考虑让 leader 清理不再使用的 name，"
+                "或按 kind 归类登记（name 前缀区分）。"
+            )
+        return body
+
+    # 有参分支**必须真委托 mcp_call**：--tool/--args/--extra 若「接受但忽略」属静默
+    # 无效（比报错更坏）；name 解析也因此天然复用同一条 resolve_name。
+    return await mcp_call(
+        target=name,
+        action="list",
+        tool=tool,
+        args=args,
+        kind=kind,
+        extra=extra,
+        _context=_context,
+    )
+
+
+async def set_mcp_server_enabled(
+    name: Optional[str] = None,
+    enable: bool = True,
+    _context: ToolCallContext = None,
+) -> dict:
+    """启用 / 禁用全局 MCP 注册表里的一个 name（`mcp enable/disable` 的底层工具，#273）。
+
+    禁用 ≠ 删除：条目保留，`mcp ls` 仍列出并标注 enable=false；禁用的落地语义是
+    `mcp call` 明确报 `mcp_server_disabled`（说「已禁用」，不是「不存在」）。
+    注意：注册表本身从不进入 Agent 可用工具列表，**没有**「禁用⇒该 server 工具从
+    工具列表消失」的结构落地（#273 未做按启用态过滤工具列表），勿如此宣称。
+    name 不存在返回 `mcp_name_not_found`。
+
+    Args:
+        name: 注册表里的 name（须与登记时完全一致）。
+        enable: true=启用，false=禁用。
+    """
+    # 注册表全局化（#273）后 team 上下文无作用域语义，不再设 _require_team_context 门
+    # （console 入口仍由 ADMIN 权限把关；created_by 仅审计，无上下文时记 0）。
+    from exception import TogoException
+    from service import mcpRegistryService
+
+    try:
+        entry = await mcpRegistryService.set_enabled(str(name or ""), bool(enable))
+    except TogoException as exc:
+        return toolResult.error_result(exc)
+    state = "已启用" if enable else "已禁用（`mcp call` 将报 mcp_server_disabled，`mcp ls` 仍可见）"
+    return {
+        "success": True,
+        "message": f"server {entry.name!r} {state}。",
+        "server": mcpRegistryService.entry_summary(entry),
+        "resolved_from_registry": False,
+    }
 
 
 def _resolve_agent_name(agent_id: int, id_to_name: dict[int, str]) -> str:

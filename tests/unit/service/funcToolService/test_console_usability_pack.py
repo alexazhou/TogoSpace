@@ -155,9 +155,14 @@ class TestTaskLsAutoScope:
 
 
 class TestMcpEmptyTargetHint:
-    """A4：缺 target 时报 `missing_target` 并给出 kind 说明与示例。"""
+    """A4：缺 target 时报 `missing_target` 并给出 kind 说明与示例。
 
-    @pytest.mark.parametrize("command", ["mcp ls", "mcp call"])
+    #273 语义变更：`mcp ls` 无参改为**合法**（列全局注册表），不再有「缺 target」
+    场景 ⇒ 本类只对 `mcp call` 断言；`mcp ls` 无参的合法路径由
+    `test_mcp_registry_console.py` 的闭环用例覆盖。
+    """
+
+    @pytest.mark.parametrize("command", ["mcp call"])
     def test_empty_target_lists_kinds_and_examples(self, command: str) -> None:
         result = _run(command)
 
@@ -172,10 +177,14 @@ class TestMcpEmptyTargetHint:
         assert "http" in usage.lower(), usage
 
     def test_hint_block_is_shared_not_copied(self) -> None:
-        """两条 mcp 命令共用同一份文案（各抄一份必然漂移）。"""
+        """缺 target 提示只属于 `mcp call`，且与 MCP_KIND_HINT 同源（不另抄一份）。
+
+        #273：`mcp ls` 无参 = 列全局注册表（合法路径），empty_target_hint 必须为空。
+        """
         ls = cc.COMMAND_INDEX["mcp ls"]
         call = cc.COMMAND_INDEX["mcp call"]
-        assert ls.empty_target_hint == call.empty_target_hint == cc.MCP_KIND_HINT
+        assert call.empty_target_hint == cc.MCP_KIND_HINT
+        assert not ls.empty_target_hint, "`mcp ls` 无参=列注册表（#273），不得再挂缺 target 提示"
 
     def test_other_arity_errors_keep_old_code(self) -> None:
         """对照组：**给多了**参数仍报 `invalid_argument_count`（A4 只改「缺」这一支）。"""

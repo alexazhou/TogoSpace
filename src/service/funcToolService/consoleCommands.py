@@ -586,17 +586,56 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     # 收到 0 个」——而 target 的形态完全取决于 `--kind`，不说清就没法照着改。这里把
     # kind 与 target 的对应关系、两个可抄的示例直接放进失败返回体。
     _spec(
-        "mcp", "ls", "mcp_call", verb="GET",
-        needs_target=True, min_args=1, max_args=1,
-        locator=_loc(name_param="target"),
-        empty_target_hint=MCP_KIND_HINT,
-    ),
-    _spec(
         "mcp", "call", "mcp_call", verb="SAVE",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
         locator=_loc(name_param="target"),
         input_defaults=(("action", "call"),),
         empty_target_hint=MCP_KIND_HINT,
+    ),
+    # MCP 注册表（#224，按 #223 设计稿 §3.5）：
+    #
+    # `mcp call <name>` 与 `mcp call <完整 target>` **无法靠 spec 区分**（一个 spec
+    # 只有一个 legacy_tool），name 解析只能放在工具内部（`tools.mcp_call` 入口的
+    # `resolve_name`，沿 #223 §3.6）——本表对 `mcp call` 一个字符都不改。
+    #
+    # `add`：照抄 dept create（create 族）的 SAVE 形态。动作词用 `add` 是**有意
+    # 偏离**（§3.2.1 已裁定）：create 建的是 team 内新实体，add 登记的是指向外部
+    # 服务的指针；差异已钉进 `_HELP_OVERLAY`（「登记到 team 级注册表，非创建业务
+    # 实体」）。真正拦住多余位置参数的是 accepts_input 分支写死的 upper=1，不是
+    # `max_args=0`（那只是与 dept create 的写法同构，§3.2/C1）。
+    _spec(
+        "mcp", "add", "save_mcp_server", verb="SAVE",
+        accepts_input=True, max_args=0,
+    ),
+    # `rm`：照抄 dept rm / room rm 的 DELETE 形态；只按 name 精确删，不存在时工具层
+    # 返回 mcp_name_not_found（不静默成功，沿 §5.2）。
+    _spec(
+        "mcp", "rm", "delete_mcp_server", verb="DELETE",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="name"),
+    ),
+    # `enable` / `disable`（#273）：同一底层工具 set_mcp_server_enabled，用
+    # input_defaults 把 enable 补成 true/false；禁用≠删除，`mcp ls` 仍可见。
+    _spec(
+        "mcp", "enable", "set_mcp_server_enabled", verb="SAVE",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="name"),
+        input_defaults=(("enable", True),),
+    ),
+    _spec(
+        "mcp", "disable", "set_mcp_server_enabled", verb="SAVE",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="name"),
+        input_defaults=(("enable", False),),
+    ),
+    # `ls`：三条里唯一无法同构的一条（设计稿 §3.3）。需求要求「无参列注册表、
+    # 有参列工具清单」两种形态都到达工具——LIST 丢位置参数、GET 强制 target、
+    # SAVE 的 arity 写死 0~1/1~2，只有 DIRECT 支持 0~1 段位置参数。**这是本设计
+    # 唯一一处新增的机制用法**，三条硬事实见设计稿 §3.3。有参分支由工具委托
+    # `mcp_call`（action=list），name 解析复用同一条 `resolve_name`（C3）。
+    _spec(
+        "mcp", "ls", "list_mcp_servers", verb="DIRECT",
+        min_args=0, max_args=1,
     ),
 )
 

@@ -147,8 +147,11 @@ def test_forward_targets_are_exactly_the_converged_set():
     # （那份清单是 #154 定的 16 项，扩表属 Operator 决策），所以它是「未收敛转发目标」。
     # #222 A6 起 `create_task` 也是同类：`task create` 转发它，同样按 #187 裁定②
     # 不扩 `LEGACY_CONVERGED_TOOLS`（那份 16 项清单属 Operator 决策）。
+    # #224→#273：MCP 注册表四工具同理入组（BOTH 可见面，未进收敛清单）。
     assert set(NON_CONVERGED_FORWARD_TARGETS) == {
         "list_tasks", "get_task_detail", "update_task", "create_task", "mcp_call",
+        "save_mcp_server", "delete_mcp_server", "list_mcp_servers",
+        "set_mcp_server_enabled",
     }, f"未收敛的转发目标集合变了：{set(NON_CONVERGED_FORWARD_TARGETS)}"
     assert set(CONSOLE_ONLY_FORWARD_TARGETS) == {"update_container_note"}, (
         "基准 CONSOLE_ONLY 的转发目标集合变了："
@@ -158,10 +161,12 @@ def test_forward_targets_are_exactly_the_converged_set():
 
 def test_forward_command_count():
     """报总数：全部命令、带转发目标的命令、去重目标数。"""
-    # 30 条 = #222 A6 新增的 `task create`（29 → 30）；转发目标 22 个 = +`create_task`。
-    assert len(cc.COMMAND_SPECS) == 30, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条）"
-    assert len(FORWARD_COMMANDS) == 30
-    assert len(FORWARD_TARGETS) == 22
+    # 34 条 = 30（#222 A6 后）+ #224→#273 MCP 注册表 4 条（add/rm/enable/disable，
+    # 旧 `mcp ls` GET spec 被新 DIRECT spec 取代：净 +3，再 + enable/disable = +2 → 30+2+2）；
+    # 转发目标 26 个 = 22 + create_task + MCP 四工具。
+    assert len(cc.COMMAND_SPECS) == 34, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条）"
+    assert len(FORWARD_COMMANDS) == 34
+    assert len(FORWARD_TARGETS) == 26
     assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "收敛清单必须仍是 16 项（#187 裁定②：本单不动）"
     assert cc.HELP_SPEC.legacy_tool == ""
 
