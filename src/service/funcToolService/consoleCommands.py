@@ -462,11 +462,16 @@ def _spec(
 #: `mcp` 命令缺 target 时的说明块（#222 A4）。
 #:
 #: 放在命令表**外面**：元组字面量里不能赋值，而这段文案两条 mcp 命令共用一份，
-#: 各抄一遍就会漂移（`ls` 说 openapi 默认、`call` 说 mcp 默认，模型照谁写都不对）。
+#: 各抄一遍就会漂移，模型照谁写都不对。
+#:
+#: `kind` 的默认值**只有一处事实**：`mcp ls` 与 `mcp call` 都默认 `openapi`
+#: （`tools.py` 里两条都按 `kind="openapi"` 调 `mcp2cli`，argv 均以 `--spec` 开头）。
+#: 所以「（默认）」标在 `openapi` 行 —— 与 `help` 里的事实句、
+#: `HELP_DETAIL['mcp call']` 的「openapi=…（默认）」同一口径（#281 F1，38 打回项）。
 MCP_KIND_HINT: tuple[str, ...] = (
     "用法：mcp <ls|call> <target> [--kind mcp|openapi|graphql] [--protocol stdio|sse|streamable_http]，target 形态取决于 kind：",
-    "  --kind mcp（默认）      MCP server；配合 --protocol stdio（启动命令）/ sse / streamable_http（URL，缺省）",
-    "  --kind openapi          spec 文件路径或 URL",
+    "  --kind mcp              MCP server；配合 --protocol stdio（启动命令）/ sse / streamable_http（URL，缺省）",
+    "  --kind openapi（默认）  spec 文件路径或 URL",
     "  --kind graphql          GraphQL endpoint",
     "示例：mcp ls ./openapi.json ｜ mcp ls http://127.0.0.1:8000/mcp --kind mcp ｜ mcp ls \"npx -y server\" --kind mcp --protocol stdio",
 )

@@ -278,8 +278,9 @@ MCP_LS_CALL_HINT: str = (
 )
 
 #: `mcp call` / `mcp ls <URL>` 按默认 `openapi` 解析失败时的 kind 提示（#281 P4）：
-#: `mcp ls` 与 `mcp call` 的默认 kind 不同（前者 mcp、后者 openapi），直接传 URL 时
-#: 最容易踩到。固定两步示例，不解析用户输入。
+#: 实测两条命令的 kind **都默认 `openapi`**（`list_mcp_servers` 与 `mcp_call` 缺省
+#: 都按 `openapi` 走，传给 `mcp2cli` 的 argv 均以 `--spec` 开头，直接传 MCP server
+#: 的 URL 会报 405），所以直接传 URL 时最容易踩到。固定两步示例，不解析用户输入。
 MCP_KIND_SUGGESTION: str = (
     "\n若目标是 MCP server，请加 --kind mcp：\n"
     "  mcp ls <URL> --kind mcp\n"

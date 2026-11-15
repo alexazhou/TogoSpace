@@ -107,7 +107,12 @@ def test_p1_example_declared_once_and_shared():
         for idx, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if re.match(r"^MCP_CALL_EXAMPLE\s*:", line)
     ]
-    assert definitions == ["consoleCommands.py:479"], f"示例常量定义行异常：{definitions}"
+    # 只断言「哪一个文件、几条定义」，**不绑行号**：行号会随无关改动漂移
+    # （#281 F1 修 `MCP_KIND_HINT` 就把它从 479 推到 484），绑行号会让判据在
+    # 与「示例单一实现」无关的改动上变红，属噪声。
+    assert [entry.split(":")[0] for entry in definitions] == ["consoleCommands.py"], (
+        f"示例常量应只在 consoleCommands.py 定义一次，实得：{definitions}"
+    )
 
     parsing_src = (
         Path(__file__).resolve().parents[4] / "src/service/funcToolService/consoleParsing.py"
@@ -263,9 +268,39 @@ async def test_p4_no_suggestion_when_kind_explicit_or_not_url(mcp_db, leader_ctx
 
 
 # --------------------------------------------------------------------------- #
-# 污染判据：非 mcp 命令不带 MCP 文案、也不带清单
+# F1（38 R1 打回项）：kind 默认值只能标在 openapi 行
 # --------------------------------------------------------------------------- #
 
+
+@pytest.mark.asyncio
+async def test_f1_kind_default_marked_on_openapi_line(mcp_db):
+    """F1：`mcp call` 空敲的 usage 里，「（默认）」必须在 `--kind openapi` 行，不在 mcp 行。
+
+    事实依据（`f16f0bf9` 实测，真 mcp2cli）：**`mcp ls` 与 `mcp call` 的 kind 都默认
+    `openapi`** —— 两条 argv 均以 `--spec` 开头，直接传 MCP server 的 URL 会报 405。
+    原 `MCP_KIND_HINT` 把「（默认）」标在 `--kind mcp` 行，与同一工具的 help 事实句、
+    `HELP_DETAIL['mcp call']` 的「openapi=…（默认）」自相矛盾（同一个工具两套默认）。
+
+    四档判据：① 错误码仍是 `missing_target`（不因文案改动换码）；② usage 与常量同源
+    （整段相等，不是另抄一份）；③ 「（默认）」全段只出现一次且落在 openapi 行；
+    ④ mcp 行不再带「（默认）」。
+    """
+    result = await console("mcp call")
+    assert result["error_code"] == "missing_target", result
+    assert result["usage"] == list(cc.MCP_KIND_HINT), "usage 必须与 MCP_KIND_HINT 同源"
+
+    lines = result["usage"]
+    with_default = [line for line in lines if "（默认）" in line]
+    assert len(with_default) == 1, f"「（默认）」应只标一处，实得 {with_default!r}"
+    assert "--kind openapi" in with_default[0], f"「（默认）」标错了行：{with_default[0]!r}"
+
+    mcp_line = next(line for line in lines if line.startswith("  --kind mcp"))
+    assert "（默认）" not in mcp_line, f"mcp 行仍标默认：{mcp_line!r}"
+
+
+# --------------------------------------------------------------------------- #
+# 污染判据：非 mcp 命令不带 MCP 文案、也不带清单
+# --------------------------------------------------------------------------- #
 
 @pytest.mark.parametrize("command_spec", ["task ls", "dept get", "agent wake", "room rm"])
 def test_non_mcp_unknown_option_not_polluted(command_spec: str):
