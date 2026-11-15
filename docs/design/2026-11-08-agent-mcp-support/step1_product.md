@@ -11,7 +11,7 @@
 >
 > | 本文描述 | 今天的实现（依据） |
 > |---|---|
-> | 按 Team 隔离、每个 Team 一份进程实例 | **全局注册表、不分团队**（Operator 2026-11-15 17:54，#273 合入 `777a7e7f`）；唯一约束 `ux_mcp_servers_name(name)` 全局唯一，无 `team_id` 列（`assets/migrate/0023_add_mcp_servers.sql:39`） |
+> | 按 Team 隔离、每个 Team 一份进程实例 | **全局注册表、不分团队**（Operator 2026-11-15 17:54，#273 合入 `777a7e7f`）；唯一约束 `ux_mcp_servers_name(name)` 全局唯一，无 `team_id` 列（`assets/migrate/0023_add_mcp_servers.sql:36`） |
 > | Web 设置页「MCP 服务」为唯一入口 | **console 命令 + Web 设置页双入口**：`mcp add/rm/ls/call/enable/disable`（`src/service/funcToolService/consoleCommands.py:588-640`）+ 4 条 REST（`src/route.py:70-73`，**无** `/teams/{id}/…` 形式） |
 > | 工具以 `mcp__{server}__{tool}` 注入每个 Agent 的 tool_registry | **Agent 侧只有一个工具 `mcp_call`**，注册项由它按 `name` 解析后替换 target 并注入凭证（`src/service/funcToolService/tools.py:166-179`）；无 `mcp__` 命名空间 |
 > | 「测试连接」预览工具清单 | **无该功能**（`grep -rn "test_connection\|测试连接" src/ frontend/src` 空）；近似能力=`mcp ls <name>` 列工具（`consoleCommands.py:634-636`） |
@@ -21,7 +21,7 @@
 >
 > 仍然成立的部分：MCP 与 gtsp 无关（调用不经 gtsp）；工具参数直接复用 MCP 的 JSON Schema，不必包装成 `FuncTool`。
 
-> **console 文案（#281）与 `mcpTool` 判成败（#282）改造中**：两者均**未合主干**（`4defafce` 未入 `0.5_dev`），故本文涉及的 `mcp add/rm/ls/call/enable/disable` 文案与 `mcp call` 成败判定，**现状按「改造中，见 #281/#282」读**，合并后再复核一次。
+> **console 文案（#281）与 `mcpTool` 判成败（#282）已合入 `0.5_dev`**（#281 `cba1e886`、#282 `7c24a536`）。本文涉及的 `mcp add/rm/ls/call/enable/disable` 文案与 `mcp call` 成败判定，**现状以主干为准**（原口径已过期，#284 订正）。
 
 ## 1. 背景与用户痛点
 
