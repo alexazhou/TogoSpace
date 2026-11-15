@@ -653,23 +653,46 @@ async def test_disabled_server_call_reports_mcp_server_disabled(
 
 
 @pytest.mark.asyncio
-async def test_disabled_entry_ls_body_says_enable_false(mcp_db, leader_ctx, loaded_tools):
-    """无参 `mcp ls` 返回体的 `enable` 字段必须如实反映两态（可区分）。
+async def test_disabled_entry_ls_body_says_enable_false(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
+):
+    """无参 `mcp ls` 的输出必须把启用/禁用两态标成可区分（工具层 + console 路径同验）。
 
-    打回补判据：`entry_summary` 的 `"enable": bool(entry.enable)` 此前无断言钉住
-    （旧用例只断 DB 列与「仍在列表」）。M 变异（改恒 True）⇒ 本用例红。
+    PM 18:55 口径②（console 路径部分，18:04 复核定稿）：经 `execute_tool_call` 真走
+    `mcp ls`，被禁用那条要带可指认的禁用标记（`enable is False`），且**同一输出里
+    启用项不得带该标记**（两个方向都断——只验单向的话，「写死一律打标记」也能过）。
+
+    变异实测（二条，一次到位）：
+    · `entry_summary` 删掉 `"enable"` 字段 ⇒ 输出里根本没有禁用标记 ⇒ 红；
+    · `entry_summary` 的 enable 改恒 False（一律打标记）⇒ 启用项方向 ⇒ 红。
+    恢复 ⇒ 绿。旧用例只断 DB 列与「仍在列表」，返回体两态不可区分（打回实测）。
     """
     from service.funcToolService.tools import set_mcp_server_enabled
 
-    await _register_server(kind="mcp")
-
-    enabled = await list_mcp_servers(name_or_target=None, _context=leader_ctx)
-    assert enabled["success"] is True
-    assert enabled["servers"][0]["name"] == "ctx7"
-    assert enabled["servers"][0]["enable"] is True
-
+    await _register_server(name="ctx7", kind="mcp")  # 将被禁用
+    await _register_server(
+        name="live-server", kind="mcp", target="https://live.example.com"
+    )  # 保持启用
     await set_mcp_server_enabled(name="ctx7", enable=False, _context=leader_ctx)
+
+    async def _assert_two_states_distinguishable(body: dict):
+        states = {s["name"]: s["enable"] for s in body["servers"]}
+        assert states == {"ctx7": False, "live-server": True}, (
+            "ls 输出必须两态可区分（禁用项带标记、启用项不带）：" f"{states}"
+        )
+
+    # 工具层：list_mcp_servers() 返回体
     listed = await list_mcp_servers(name_or_target=None, _context=leader_ctx)
     assert listed["success"] is True
-    assert [s["name"] for s in listed["servers"]] == ["ctx7"], "禁用条目必须仍可见"
-    assert listed["servers"][0]["enable"] is False, "返回体 enable 必须如实反映禁用态"
+    await _assert_two_states_distinguishable(listed)
+
+    # console 路径：真走 execute_tool_call，拿模型实际看到的 `mcp ls` 输出
+    registry = _build_registry()
+    call = llmApiUtil.OpenAIToolCall(
+        id="tc_console_ls_two_states",
+        function={"name": "console", "arguments": json.dumps({"command": "mcp ls"})},
+    )
+    result = await registry.execute_tool_call(call, context=leader_ctx)
+    payload = result.result if hasattr(result, "result") else result
+    assert payload.get("success") is True, payload
+    await _assert_two_states_distinguishable(payload)
