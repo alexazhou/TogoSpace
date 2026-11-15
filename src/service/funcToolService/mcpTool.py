@@ -374,6 +374,30 @@ _IGNORED_EXTRA: dict[str, dict[str, str]] = {
     },
 }
 
+#: console/工具层**统一不支持**的 session 开关（Operator 2026-11-16 02:27 追加范围）。
+#:
+#: 事实（Operator 实测，2026-11-16）：mcp2cli 起会话 daemon 用的是
+#: `subprocess.Popen([sys.executable, "-c", "import mcp2cli; mcp2cli._run_session_daemon(config)"])`。
+#: 开发环境 `sys.executable` 是 `.venv/bin/python` ⇒ 能用；**打包产物里没有 Python 解释器**
+#: （`Togobot.app/Contents/Resources/backend/` 只有 `Togobot-backend` + `_internal/`），
+#: 打包后 `-c` 那段不会被当 Python 执行 ⇒ 会话起不来。
+#:
+#: 决策：不实现会话支持、**不按 frozen/非 frozen 分支行为**（同一命令在不同环境行为不一致
+#: 是最坏的形态），统一「不支持」：help 写明 + 传入时直接给 `mcp_unsupported_extra`
+#: （复用既有码，语义就是「这个 extra 开关在本工具里不生效」，不新增错误码）。
+_SESSION_EXTRA_KEYS = frozenset({
+    "session", "session-start", "session-stop", "session-list",
+    "session_start", "session_stop", "session_list",
+})
+
+#: session 开关被拒时给模型/人看的原因（含替代做法）。
+_SESSION_EXTRA_REASON = (
+    "console 不支持 session 开关（--session / --session-start / --session-stop / --session-list）："
+    "它们依赖 mcp2cli 起会话 daemon（subprocess 调 `sys.executable -c`），"
+    "而打包产物里没有 Python 解释器 ⇒ 会话起不来。"
+    "直接用 `mcp call` / `mcp ls` 每次直连即可（列表与会话复用无关，功能不受影响）。"
+)
+
 
 def _extra_unsupported_reason(key: str, kind: str) -> str | None:
     """`extra` 里这个开关是否**确定不生效**；是则返回给模型看的原因。
@@ -381,7 +405,12 @@ def _extra_unsupported_reason(key: str, kind: str) -> str | None:
     为什么要主动拒：模型照着工具说明写了 `extra={"head": 1}`，mcp2cli 会收下它、
     悄悄忽略，然后回一份**完整**响应 —— 模型以为限了量、实际没限，最后撞上截断。
     静默无效比报错更贵，所以这类开关直接给 `mcp_unsupported_extra`。
+
+    session 族（#281 · Operator 02:27）排在 `--json` 之前判：它不是「被 --json 遮蔽」，
+    而是**本工具整体不支持**，原因完全不同，文案要能直接把人指回正确用法。
     """
+    if key in _SESSION_EXTRA_KEYS:
+        return _SESSION_EXTRA_REASON
     if key in _SHADOWED_BY_JSON:
         return f"本工具固定带 --json，上游 output_result 会先走 --json 分支，--{key} 永不生效。"
     return _IGNORED_EXTRA.get(kind, {}).get(key)

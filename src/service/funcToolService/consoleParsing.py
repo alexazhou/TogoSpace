@@ -124,6 +124,33 @@ def parse_boolean_value(raw: str, *, name: str, command: str) -> bool:
     )
 
 
+def _unknown_option_error(spec: cc.CommandSpec, name: str) -> ConsoleError:
+    """未知选项 / 「位置参数被写成选项」的**唯一**构造点（#281 P1 + P2）。
+
+    message 是「一行可以直接复制去执行的正确调用」，而不是「可用选项」清单：
+
+        未知选项：--library-name。MCP 工具的参数请放进 --args。正确调用：
+          mcp call <名称> --tool <工具名> --args '{"键":"值"}'
+
+    示例与领域说明都来自命令自己（`CommandSpec.example` / `option_tip`）——**没有
+    example 的命令只报「未知选项：--x。」**，绝不借用别的命令的文案：`unknown_option`
+    是 dept/agent/room/task 共用的通用码，MCP 专属那句话若全局套上，`task ls --bogus`
+    会弹出「MCP 工具的参数请放进 --args」（#281 单的污染判据）。
+
+    P2 复用同一段：`mcp call --target x` 里的 `--target` 对 `mcp call` 就是「不被接受的
+    选项」，与 P1 性质相同 ⇒ 同一个函数产出，不新增第二份文案、不新增错误码。
+    """
+    if not spec.example:
+        # 无示例可给的命令：不再列「可用选项」清单（#281 P1），只报名字；
+        # `example=spec.key` 保留（返回体里仍能看到这条命令怎么写）。
+        return ConsoleError("unknown_option", f"未知选项：--{name}。", example=spec.key)
+    return ConsoleError(
+        "unknown_option",
+        f"未知选项：--{name}。{spec.option_tip or ''}正确调用：\n  {spec.example}",
+        example=spec.example,
+    )
+
+
 def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], dict[str, Any], str | None]:
     """把 token 拆成 (位置参数, 选项, 输入来源)。
 
@@ -215,17 +242,18 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
                 idx += 1
                 continue
             if name not in allowed:
-                # 可用清单只展示 kebab + 短别名（#221 需求 3：旧名是兼容期别名，
-                # 不在展示面露脸把用户往旧写法引）；**判定**仍用含旧名的白名单。
-                hint = (
-                    f"可用选项：{' | '.join('--' + o for o in spec.display_options)}"
-                    if spec.display_options else "这条命令不接受选项"
-                )
-                raise ConsoleError(
-                    "unknown_option",
-                    f"未知选项：--{name}。{hint}",
-                    example=spec.key,
-                )
+                raise _unknown_option_error(spec, name)
+            # #281 P2：位置参数承载的参数被写成选项（`mcp call --target x`）。
+            # 只在该命令声明了 `example` 时才特例（目前仅 `mcp call`）：其它命令的
+            # `--name` 形态（如 `dept get --name x`）是**合法选项**，不能动。
+            # 位置参数已给出时（`mcp call ctx7 --target https://x`）仍走原来的
+            # `ambiguous_input_source` 分支——既有契约（§3.6-5）零改动。
+            if (
+                spec.example
+                and name in spec.positional_param_names
+                and not positional
+            ):
+                raise _unknown_option_error(spec, name)
             if name in boolean_options:
                 _store(
                     name,

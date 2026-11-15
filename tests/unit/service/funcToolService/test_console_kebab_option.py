@@ -169,13 +169,25 @@ class TestHelpShowsKebabOnly:
         assert "--role-name" in detail, f"别名没按 kebab 展示：\n{detail}"
         assert "--role_name" not in detail
 
-    def test_unknown_option_hint_lists_kebab_only(self) -> None:
-        """未知选项报错的可用清单只列 kebab + 短别名（判定白名单仍收旧名）。"""
+    def test_unknown_option_hint_has_no_option_list(self) -> None:
+        """未知选项报错**不再列「可用选项」清单**，改为一行可复制的正确调用（#281 P1）。
+
+        判据三档（防恒绿）：
+        1. 不含「可用选项」字样（旧形态彻底消失）；
+        2. 不含 `--title_keyword`（旧名不能被带回来）；
+        3. 没有 `example` 的命令只报名字——`task ls` 未被 MCP 文案污染（#281 污染判据），
+           且 `example` 字段仍带命令名（返回体里还能看到怎么写）。
+        """
         spec = cc.COMMAND_INDEX["task ls"]
+        assert spec.example == "", "task ls 不该有示例文案（示例只挂在确有正确调用形态的 mcp call 上）"
         with pytest.raises(cp.ConsoleError) as caught:
             cp._parse_options(spec, ["--title_keyword_typo", "x"])
         message = caught.value.message
-        assert "--title-keyword" in message, f"hint 没列 kebab 主形态：{message!r}"
-        # 旧名（title_keyword）不在 hint 清单里：展示面不往旧写法引。
-        hint_part = message.split("可用选项")[-1]
-        assert "--title_keyword |" not in hint_part, f"hint 混入旧名：{hint_part!r}"
+        assert "可用选项" not in message, f"清单未移除：{message!r}"
+        # 选项名本身是 `--title_keyword_typo`（含旧名前缀），所以只能查「旧名作为
+        # 独立选项出现在清单里」的形态 —— 清单已整体消失，这里钉 kebab 主形态也不出现。
+        assert "--title-keyword" not in message and "--title_keyword |" not in message, (
+            f"旧名/主形态混入：{message!r}"
+        )
+        assert message == "未知选项：--title_keyword_typo。", f"文案形态变了：{message!r}"
+        assert caught.value.extra.get("example") == "task ls"

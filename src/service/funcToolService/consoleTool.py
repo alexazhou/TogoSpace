@@ -91,6 +91,16 @@ def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str
     for resource, resource_specs in grouped.items():
         actions = "|".join(spec.action for spec in resource_specs if spec.action)
         lines.append(f"{resource:<{width}}{actions}".rstrip())
+    # #281 P4：`mcp` 的 kind 默认值是「直接传 URL 就踩坑」的根源（踩了只看到
+    # 「405 / 解析失败」，不知道要加 `--kind mcp`）。放在摘要首屏，比埋在参数说明深处有效。
+    # ⚠️ 事实口径（#281 实测 2026-11-16 02:2x，真 mcp2cli）：`mcp ls` 与 `mcp call`
+    # **都**默认 `openapi`（`list_mcp_servers` 签名 kind="openapi"，有参分支原样透传给
+    # `mcp_call`）；两条命令直接传 MCP URL 都报 `mcp2cli_error`（405）。文档
+    # `mcp_console_usability.md` P4 写的「`mcp ls` 默认 `mcp`」与代码不符，文案以实测为准。
+    lines.append(
+        "mcp：kind 默认 openapi（mcp ls / mcp call 相同）；目标是 MCP server 时请加 --kind mcp。"
+        f"例：{cc.MCP_CALL_EXAMPLE}"
+    )
     lines.append("用法：<资源> <操作> [位置参数] [--选项 ...]")
     lines.append("create/update 的配置输入（可选）：'<json>' 或 --from payload（payload 字段传 JSON object），也可只用 --选项")
     # 重复选项的处置是**全局规则**（#218 翻 #187-④），不属于某条命令，所以放摘要。
@@ -199,6 +209,9 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "有参列的是 openapi spec 时：⚠️ 若 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发）；"
         "此时请改用完整 URL 的 target，或在该 spec 里补 servers。",
         "count 超过 20 时返回体会建议收窄；写入不要求管理员权限（#277）。",
+        # #281 · Operator 02:27 追加：有参分支的 --extra 同样不支持 session 一族。
+        "--extra 里不支持 session 开关（--session / --session-start / --session-stop / --session-list）："
+        "依赖 mcp2cli 起会话 daemon，打包产物里没有 Python 解释器 ⇒ 起不来；传了直接报 mcp_unsupported_extra。",
     ),
     "task ls": (
         "只列未完结任务（要含已完结请用 --status 显式列出，如 --status DONE,CANCELLED）。",
@@ -219,6 +232,11 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "表现为 404 或打错服务）；请在 spec 里补 servers，或直接用带完整 path 的 URL。"
         "该限制由 mcp2cli 的 spec 解析决定，本工具不改写你的 target。",
         "--args 建议用 --from payload 传（嵌套结构免引号转义）。",
+        # #281 · Operator 02:27 追加：session 一族在 console 里**不支持**，必须写明，
+        # 否则使用者会传了之后撞上一堆看不懂的失败（打包产物无 python 解释器，daemon 起不来）。
+        "--extra 里不支持 session 开关：--session / --session-start / --session-stop / --session-list。"
+        "原因：它们依赖 mcp2cli 起会话 daemon（sys.executable -c），打包产物里没有 Python 解释器 ⇒ 会话起不来；"
+        "传了会直接报 mcp_unsupported_extra。每次 mcp call 直连即可，功能不受影响。",
     ),
     "task update": (
         "配置字段：new_status / note / reviewer_id。撤销验收人用 --remove-field reviewer_id。",

@@ -463,7 +463,7 @@
         }
       },
       "extra": {
-        "description": "（有参分支）透传 mcp2cli 全局开关，见 `mcp_call`。",
+        "description": "（有参分支）透传 mcp2cli 全局开关，见 `mcp_call`。**不支持 session 开关** （`--session` / `--session-start` / `--session-stop` / `--session-list`）： 依赖 mcp2cli 起会话 daemon，打包产物无 Python 解释器 ⇒ 起不来，传了直接拒。",
         "schema": {
           "type": [
             "object",
@@ -676,7 +676,7 @@
         }
       },
       "extra": {
-        "description": "透传 **mcp2cli 全局开关**，如 `{\"transport\": \"sse\", \"search\": \"关键词\"}`。 `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql` 生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）； `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。",
+        "description": "透传 **mcp2cli 全局开关**，如 `{\"transport\": \"sse\", \"search\": \"关键词\"}`。 `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql` 生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）； `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。 不支持 session 开关**：`--session` / `--session-start` / `--session-stop` / `--session-list` 一律不可用——它们依赖 mcp2cli 起会话 daemon（`sys.executable -c`）， 而打包产物里没有 Python 解释器 ⇒ 会话起不来；传了直接给 `mcp_unsupported_extra`， 不要重试。每次 `mcp call` 直连即可，调用功能不受影响。",
         "schema": {
           "type": [
             "object",

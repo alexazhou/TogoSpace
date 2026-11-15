@@ -70,6 +70,12 @@ def test_help_lists_exactly_the_schema_params() -> None:
     kebab 口径（#221）：help 行展示的是命令行形态（`--clear-fields`），比对时
     schema 真名先过 `to_kebab`；反向比对用 `display_options`（kebab + 短别名，
     不含兼容旧名 —— help 不展示旧名，旧名若出现在 help 行反而要红）。
+
+    #281 P1 口径更新：`display_options` 现在**排除位置参数**（`mcp call` 的 `target`、
+    `mcp rm` 的 `name` …），而 help 里这些参数仍会出现——它们是**位置参数声明行**
+    （`--target <string>（位置参数：值必须写在命令名后面）`），本来就不在选项白名单里。
+    所以反向比对的允许集 = `display_options` ∪ `positional_param_names`。
+    保护力不变：help 里出现任何既不是选项、也不是本命令位置参数的名字，仍然红。
     """
     problems: list[str] = []
 
@@ -83,7 +89,10 @@ def test_help_lists_exactly_the_schema_params() -> None:
         )
 
         missing = props - listed
-        extra = listed - set(spec.display_options)
+        allowed_display = set(spec.display_options) | {
+            cc.to_kebab(name) for name in spec.positional_param_names
+        }
+        extra = listed - allowed_display
         if missing:
             problems.append(f"{spec.key}: schema 有但 help 没列 {sorted(missing)}")
         if extra:

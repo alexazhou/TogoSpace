@@ -779,7 +779,13 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: `protocol: Optional[str] = None`（MCP 传输方式 stdio/sse/streamable_http，仅
 #: kind=mcp 有意义，其余 kind 必须留空），`kind` / `target` / `config` 说明同步
 #: 重写；**工具数 44、参数数 139 → 140**（+1 可选参数）。
-BASELINE_TEXT_DIGEST = "e9083278039db3f805f02941f623e973193ac4080c8a034fa7b4bd699240ffa8"
+#: #281 重算（`e9083278…` → `e15daaec…`）：**只有两处参数 description 变化**，
+#: `mcp_call.extra` 与 `list_mcp_servers.extra` 各加一段「**不支持 session 开关**
+#: （`--session` / `--session-start` / `--session-stop` / `--session-list`）：依赖 mcp2cli
+#: 起会话 daemon（`sys.executable -c`），打包产物里没有 Python 解释器 ⇒ 起不来，传了直接
+#: 报 mcp_unsupported_extra」（Operator 2026-11-16 02:27 追加范围）。**工具数 44、
+#: 参数数 140 均不变**；其余 42 个工具的 description / required 逐字未动。
+BASELINE_TEXT_DIGEST = "e15daaec9f454e2f3c0d155b83745a27ece19736c4b8f88842071caf3d5644ba"
 
 
 def _text_digest() -> tuple[str, int, int]:
