@@ -21,6 +21,8 @@
 >
 > 仍然成立的部分：MCP 与 gtsp 无关（调用不经 gtsp）；工具参数直接复用 MCP 的 JSON Schema，不必包装成 `FuncTool`。
 
+> **console 文案（#281）与 `mcpTool` 判成败（#282）改造中**：两者均**未合主干**（`4defafce` 未入 `0.5_dev`），故本文涉及的 `mcp add/rm/ls/call/enable/disable` 文案与 `mcp call` 成败判定，**现状按「改造中，见 #281/#282」读**，合并后再复核一次。
+
 ## 1. 背景与用户痛点
 
 在 TogoSpace 现有的多 Agent 协作体系中，Agent 拥有两类核心工具能力：
