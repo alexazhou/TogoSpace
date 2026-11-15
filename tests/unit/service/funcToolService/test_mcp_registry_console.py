@@ -587,6 +587,10 @@ async def test_exception_log_exit_masks_secret(
 
     log_text = "\n".join(rec.getMessage() for rec in caplog.records)
     assert "--auth-header" in log_text, log_text  # argv 结构可见
+    # 正向（#278）：该 warning 出口的**行文本本身**必须存在——`--auth-header` 由
+    # `mcp_call: argv=` 的 info 行就能满足，守不到这条出口；这里断言的串只可能由
+    # `except Exception` 分支产生，整行被删 ⇒ 本用例必红。
+    assert "mcp2cli 调用异常" in log_text, log_text
     # 反向（F6 判据）：原始值 + repr 形态，在日志原文与去转义文本里都 0 命中
     for value in (_SECRET, _TRICKY):
         for form in _secret_forms(value):
