@@ -20,7 +20,6 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const templates = ref<RoleTemplateSummary[]>([]);
-const selectedTemplateId = ref<number | null>(null);
 const isLoading = ref(false);
 const statusText = ref('');
 const editorDialogRef = ref<InstanceType<typeof RoleTemplateEditorDialog> | null>(null);
@@ -43,21 +42,12 @@ function buildSoulPreview(soul: string | undefined): string {
   return normalized.length > 72 ? `${normalized.slice(0, 72)}...` : normalized;
 }
 
-async function loadRoleSettings(preferredId?: number | null): Promise<void> {
+async function loadRoleSettings(): Promise<void> {
   isLoading.value = true;
   statusText.value = '';
 
   try {
-    const nextTemplates = await getRoleTemplates();
-    templates.value = nextTemplates;
-
-    if (preferredId !== null && preferredId !== undefined && nextTemplates.some((template) => template.id === preferredId)) {
-      selectedTemplateId.value = preferredId;
-    } else if (selectedTemplateId.value !== null && nextTemplates.some((template) => template.id === selectedTemplateId.value)) {
-      return;
-    } else {
-      selectedTemplateId.value = nextTemplates[0]?.id ?? null;
-    }
+    templates.value = await getRoleTemplates();
   } catch (error) {
     console.error(error);
     statusText.value = t('settings.roles.loadFailed');
@@ -67,17 +57,15 @@ async function loadRoleSettings(preferredId?: number | null): Promise<void> {
 }
 
 function openCreate(): void {
-  selectedTemplateId.value = null;
   editorDialogRef.value?.openCreate();
 }
 
 function openEdit(templateId: number): void {
-  selectedTemplateId.value = templateId;
   void editorDialogRef.value?.openEdit(templateId);
 }
 
-function handleDialogChanged(payload: { preferredId: number | null }): void {
-  void loadRoleSettings(payload.preferredId);
+function handleDialogChanged(): void {
+  void loadRoleSettings();
 }
 
 onMounted(() => {
@@ -112,12 +100,7 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr
-              v-for="template in templates"
-              :key="template.id"
-              :class="{ active: selectedTemplateId === template.id }"
-              @click="selectedTemplateId = template.id"
-            >
+            <tr v-for="template in templates" :key="template.id">
               <td class="roles-cell-id">#{{ template.id }}</td>
               <td class="roles-cell-name">
                 <strong>{{ displayName(template) }}</strong>
@@ -199,11 +182,6 @@ onMounted(() => {
 
 .roles-cell-actions :deep(.ghost-button) {
   white-space: nowrap;
-}
-
-.ui-table tbody tr.active td {
-  background: var(--settings-table-row-active);
-  box-shadow: none;
 }
 
 @media (max-width: 780px) {
