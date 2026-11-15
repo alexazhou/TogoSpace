@@ -1050,3 +1050,93 @@ class TestReviewFix253(_WorkflowCase):
             team_id=team_id, caller_id=carol, task_id=task_id, new_status="IN_PROGRESS", note="新人认领",
         )
         assert claimed["success"] is True, f"新负责人认领被拒：{claimed}"
+
+    # ---------------- S-2：advance/reject 不能绕过 PENDING 依赖与 ON_HOLD ----------------
+
+    async def test_s2_advance_rejected_when_dependency_unmet(self):
+        """`PENDING`（依赖未完成）时 `advance` 必须被拒并报 `dependency_not_met`。"""
+        team_id, alice, bob = await self._agents()
+        blocker = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S2-前置未完成", assignee_id=bob,
+        )
+        assert blocker["success"] is True, blocker
+        blocked = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S2-依赖未满足",
+            assignee_id=bob, depends_on=[blocker["task_id"]],
+        )
+        assert blocked["success"] is True, blocked
+        task_id = blocked["task_id"]
+        assert _status_of(await self._task(team_id, task_id)) == "PENDING", "前置：依赖未完成应为 PENDING"
+
+        result = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="硬推",
+        )
+        assert result["success"] is False, f"PENDING 任务被 advance 绕过依赖直接推进：{result}"
+        assert result["error_code"] == "dependency_not_met", result
+        assert _status_of(await self._task(team_id, task_id)) == "PENDING", "被拒后状态不该变"
+
+    async def test_s2_advance_and_reject_rejected_when_on_hold(self):
+        """`ON_HOLD` 时 `advance` 与 `reject` 都必须被拒（先恢复在途状态）。"""
+        team_id, alice, bob = await self._agents()
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S2-搁置中", assignee_id=bob, status="ON_HOLD",
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        assert _status_of(await self._task(team_id, task_id)) == "ON_HOLD", "前置：创建即搁置"
+
+        advanced = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="搁置中硬推",
+        )
+        assert advanced["success"] is False, f"ON_HOLD 任务被 advance 绕过：{advanced}"
+        assert advanced["error_code"] == "task_on_hold", advanced
+
+        rejected = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id,
+            workflow_action="reject", target_stage=0, note="搁置中硬打回",
+        )
+        assert rejected["success"] is False, f"ON_HOLD 任务被 reject 绕过：{rejected}"
+        assert rejected["error_code"] == "task_on_hold", rejected
+
+    # ---------------- S-6：末节点是 EXECUTION 时 v2 的 DONE 写法不该被误拒 ----------------
+
+    async def test_s6_last_execution_node_allows_legacy_done(self):
+        """`[EXEC(bob), REVIEW(alice), EXEC(bob)]` 走到末节点（EXECUTION）时，`new_status="DONE"` 应被允许。
+
+        原缺陷：`reviewer_id`（最后一个 REVIEW 节点负责人）非空 ⇒ 被 `review_required` 误拒，
+        尽管当前已在末节点、后面没有任何待审节点。
+        """
+        team_id, alice, bob = await self._agents()
+        # `stages` 与 `reviewer_id` 互斥，故三段链整体由 stages 描述：
+        # [EXECUTION(bob 由 assignee 决定), REVIEW(alice), EXECUTION(bob)]
+        created = await taskService.create_task(
+            team_id=team_id, creator_id=alice, title="S6-末节点执行",
+            assignee_id=bob,
+            stages=[
+                {"owner_id": alice, "node_type": "REVIEW", "name": "初审"},
+                {"owner_id": bob, "node_type": "EXECUTION", "name": "返工收尾"},
+            ],
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        assert [s[1] for s in await self._stages(task_id)] == ["EXECUTION", "REVIEW", "EXECUTION"], (
+            f"前置：应为三段链，实际 {await self._stages(task_id)}"
+        )
+
+        await taskService.update_task(team_id=team_id, caller_id=bob, task_id=task_id, new_status="IN_PROGRESS")
+        first = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, workflow_action="advance", note="交初审",
+        )
+        assert first["success"] is True, first
+        second = await taskService.update_task(
+            team_id=team_id, caller_id=alice, task_id=task_id, workflow_action="advance", note="初审通过",
+        )
+        assert second["success"] is True, second
+        task = await self._task(team_id, task_id)
+        assert (_status_of(task), task["current_stage"]) == ("IN_PROGRESS", 2), "前置：棒应在末节点"
+
+        done = await taskService.update_task(
+            team_id=team_id, caller_id=bob, task_id=task_id, new_status="DONE", note="末节点完成",
+        )
+        assert done["success"] is True, f"末节点 EXECUTION 的 v2 DONE 写法被误拒：{done}"
+        assert _status_of(await self._task(team_id, task_id)) == "DONE"

@@ -1108,6 +1108,34 @@ async def _apply_workflow_action(
     old_status = task.status
     cursor = _effective_cursor(task, stages)
     last_index = len(stages) - 1
+
+    # S-2（#253，原为待讨论、按建议方案实现）：交棒/打回必须走与 v2 状态流转同一套
+    # 状态前置条件。否则 PENDING（依赖未满足）与 ON_HOLD（搁置中）都能绕过闸门直接被
+    # 推进到 REVIEWING/DONE —— 依赖机制与搁置语义形同虚设。
+    if old_status == TaskStatus.ON_HOLD:
+        return {
+            "success": False,
+            "message": "任务处于搁置（ON_HOLD），请先恢复为 IN_PROGRESS 再交棒/打回",
+            "error_code": "task_on_hold",
+        }
+    if old_status == TaskStatus.PENDING:
+        if task.depends_on:
+            dep_tasks = await gtAgentTaskManager.get_tasks_by_ids(task.depends_on)
+            unfinished = [dep.id for dep in dep_tasks if dep.status != TaskStatus.DONE]
+            if unfinished:
+                return {
+                    "success": False,
+                    "message": f"存在未完成的依赖任务，无法交棒/打回：{unfinished}",
+                    "error_code": "dependency_not_met",
+                }
+        # 依赖已就绪但仍是 PENDING：文档给了「可允许推进 / 要求先流转」两选一，
+        # 这里取更保守的一支 —— 先流转（认领）再推进，与 v2 `claim` 语义一致。
+        return {
+            "success": False,
+            "message": "任务仍是 PENDING（依赖已就绪但尚未认领），请先流转为 IN_PROGRESS 再交棒",
+            "error_code": "task_not_started",
+        }
+
     if not _is_holder(task, stages, caller_id):
         return {
             "success": False,
@@ -1730,11 +1758,18 @@ async def _update_task_impl(
                     "error_code": "dependency_not_met",
                 }
 
-    # 设有验收人时，禁止绕过验收直接 → DONE（仅允许 REVIEWING → DONE）
+    # 设有验收人时，禁止绕过验收直接 → DONE（仅允许 REVIEWING → DONE）。
+    # S-6（#253，原为待讨论、按建议方案实现）：`reviewer_id` 只是「最后一个 REVIEW 节点
+    # 负责人」的兼容快照；当游标已在**末节点**（例如 [EXEC, REVIEW, EXEC] 停在节点 2）时，
+    # 后面没有任何待审节点，再拦就是误拒。故本闸门只在「后面还有节点」时生效，
+    # 与 `_plan_for_compat_transition` 的末节点判定对齐。
+    done_cursor = _effective_cursor(task, transition_stages)
+    done_last_index = len(transition_stages) - 1
     if (
         target == TaskStatus.DONE
         and old_status != TaskStatus.REVIEWING
         and task.reviewer_id is not None
+        and done_cursor < done_last_index
     ):
         return {
             "success": False,
