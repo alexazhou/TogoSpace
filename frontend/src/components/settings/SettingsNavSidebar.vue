@@ -80,7 +80,7 @@ const navEntries = computed(() =>
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
 }
 
 .nav-group-label {
@@ -96,7 +96,7 @@ const navEntries = computed(() =>
   border-radius: 12px;
   background: transparent;
   color: inherit;
-  padding: 10px 12px;
+  padding: 7px 12px;
   text-align: left;
   cursor: pointer;
   transition:
