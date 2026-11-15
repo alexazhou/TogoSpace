@@ -1082,7 +1082,7 @@
     "description": "把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp add` 的底层工具）。",
     "parameters": {
       "credentials": {
-        "description": "凭证引用，形如 `{\"headers\": {\"Authorization\": \"env:GITHUB_TOKEN\"}}` （headers 配 HTTP 类 kind）或 `{\"env\": {\"API_KEY\": \"env:API_KEY\"}}` （env 配 `mcp_stdio`，注入子进程环境变量）。只存引用，永不存明文。",
+        "description": "凭证值，形如 `{\"headers\": {\"Authorization\": \"Bearer sk-...\"}}` （headers 配 HTTP 类 kind）或 `{\"env\": {\"API_KEY\": \"v123...\"}}` （env 配 `mcp_stdio`，注入子进程环境变量）。**值原样存**（#277）； 查看面只见掩码。",
         "schema": {
           "type": [
             "object",

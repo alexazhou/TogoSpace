@@ -22,6 +22,7 @@ export function useSettingsNavItems() {
       note: t('settings.nav.thirdPartyServicesNote'),
     },
     { id: 'skills', label: t('settings.nav.skills'), note: t('settings.nav.skillsNote') },
+    { id: 'mcpServers', label: t('settings.nav.mcpServers'), note: t('settings.nav.mcpServersNote') },
     { id: 'maintenance', label: t('settings.nav.maintenance'), note: t('settings.nav.maintenanceNote') },
     { id: 'advanced', label: t('settings.nav.advanced'), note: t('settings.nav.advancedNote') },
     { id: 'quickInit', label: t('settings.nav.quickInit'), note: t('settings.nav.quickInitNote') },

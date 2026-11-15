@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import ipaddress
 import logging
 import os
 import signal
@@ -39,6 +40,33 @@ _RUN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../run")
 _PID_FILE = os.path.join(_RUN_DIR, "backend.pid")
 _shutdown_event: asyncio.Event | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _is_loopback_bind(host: str) -> bool:
+    """`localhost` 与回环地址（127.x / ::1）都算回环。解析失败按非回环处理（宁多勿漏）。"""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _warn_exposure_if_unsafe(bind_host: str, auth_enabled: bool) -> None:
+    """裸跑形态暴露面告警（#277 追加，Operator 20:30 决策 A）。
+
+    只做「可发现」：**实际 bind 非回环且 `auth.enabled=false`** ⇒ 打一条醒目告警，
+    **不阻断启动**、不改默认值、不改鉴权行为、不加配置项。告警只描述形态，
+    **不带 token 或任何凭证值**（判据 #1694：告警行 0 命中凭证）。
+    桌面端（desktopEntry.py）强制 127.0.0.1 + auth.enabled=True，天然不触发。
+    """
+    if _is_loopback_bind(bind_host) or auth_enabled:
+        return
+    logging.getLogger(__name__).warning(
+        "[安全告警] 后端监听 %s 且未开启鉴权，同网络内其他机器可直接访问，"
+        "包括 MCP 凭证接口；如非必要请改为 127.0.0.1 或开启 auth。",
+        bind_host,
+    )
 
 
 @dataclass(frozen=True)
@@ -227,6 +255,8 @@ async def main(
         # 只在**真正 bind 成功之后**打这行（#274 N-3）：迁移守卫拒绝启动时不该出现任何
         # 「监听/已就绪」字样，否则 `grep 监听地址` 会把它误读成「已经起来了」。
         logger.info("[启动] 已监听：%s:%d（HTTP 服务已就绪）", bind_host, bind_port)
+        # 出口告警（#277 F1）：bind 非回环 + 未开鉴权 ⇒ 提醒暴露面（不阻断启动）。
+        _warn_exposure_if_unsafe(bind_host, app_config.setting.auth.enabled)
         if callbacks is not None and callbacks.on_ready is not None:
             callbacks.on_ready(bind_host, bind_port)
         await _shutdown_event.wait()

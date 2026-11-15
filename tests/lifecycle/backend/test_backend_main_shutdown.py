@@ -78,6 +78,7 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
         db_path="/tmp/test.db",
         workspace_root="/tmp/workspace",
         demo_mode=SimpleNamespace(read_only=False),
+        auth=SimpleNamespace(enabled=True),  # #277：main 新增读 auth.enabled（告警判据）
     )
     fake_app_config = SimpleNamespace(setting=fake_setting)
 
@@ -220,6 +221,7 @@ async def test_main_restores_team_and_blocks_schedule_in_demo_readonly(monkeypat
         db_path="/tmp/test.db",
         workspace_root="/tmp/workspace",
         demo_mode=SimpleNamespace(read_only=True),
+        auth=SimpleNamespace(enabled=True),  # #277：main 新增读 auth.enabled（告警判据）
     )
     fake_app_config = SimpleNamespace(setting=fake_setting)
 

@@ -143,11 +143,12 @@ async def mcp_call(
     按提示改参数重试。
 
     **注册表解析（#273，全局注册表）**：target 若命中全局 MCP 注册表的 name
-    （`mcp add` 登记），则自动替换为注册项的 target/kind，并注入其凭证引用（只传
-    引用原文，解析在日志之后、调用之前）；未命中按完整 target 原样透传（既有用法
-    一字不改）。返回体恒带 `resolved_from_registry`（命中 true、未命中 false）；命中
-    时另带 `name` 字段。命中且显式 kind 与注册项不同时报 `mcp_name_kind_conflict`；
-    命中的注册项**已禁用**（enable=0）时报 `mcp_server_disabled`（不是「不存在」）。
+    （`mcp add` 登记），则自动替换为注册项的 target/kind，并注入其凭证值
+    （#277 起原样存值、明文注入；日志与返回体由 mcpTool 出口打码）；未命中按完整
+    target 原样透传（既有用法一字不改）。返回体恒带 `resolved_from_registry`（命中
+    true、未命中 false）；命中时另带 `name` 字段。命中且显式 kind 与注册项不同时报
+    `mcp_name_kind_conflict`；命中的注册项**已禁用**（enable=0）时报
+    `mcp_server_disabled`（不是「不存在」）。
 
     Args:
         target: spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint；
@@ -165,7 +166,7 @@ async def mcp_call(
     # ---- 注册表解析（#273：唯一插入点；`mcp ls <name>` 经 list_mcp_servers 复用本入口）----
     registry_name: str | None = None
     resolved_from_registry = False
-    credential_refs: dict | None = None
+    credentials: dict | None = None
     name = str(target or "").strip()
     if name:
         # 注册表是**增量能力**：未绑库（无库环境直调第 2 跳）时按未命中透传，
@@ -211,7 +212,8 @@ async def mcp_call(
                     }
                 kind = entry.kind
                 target = entry.target
-                credential_refs = mcpRegistryService.credential_refs_of(entry)
+                # #277：凭证原样存值，注入直接用字面值（明文）；出口打码在 mcpTool。
+                credentials = mcpRegistryService.credentials_of(entry)
 
     result = await mcpTool.call_mcp(
         kind=kind,
@@ -220,7 +222,7 @@ async def mcp_call(
         tool=tool,
         args=args,
         extra=extra,
-        credential_refs=credential_refs,
+        credentials=credentials,
     )
     # 恒出现（沿 1337 附加判据 3）：命中 true + name 字段，未命中恒 false；不做条件字段。
     result["resolved_from_registry"] = resolved_from_registry
@@ -253,8 +255,9 @@ async def save_mcp_server(
 
     登记**不创建任何 team 内实体**，只存一条指向外部服务的指针；注册表不分 team
     （#273），所有团队都能用 `mcp call <name>` 复用。默认 insert-only：name 已存在
-    会拒绝，覆盖必须显式 `overwrite=true`。凭证只收 `env:VAR` 形式的**引用**
-    （如 `"env:GITHUB_TOKEN"`），不接受明文；`file:` / `keychain:` 首版未实现、也不降级。
+    会拒绝，覆盖必须显式 `overwrite=true`。凭证**原样存值**（#277，Operator 需求变更：
+    不再校验前缀，明文直接入库；`env:` / `file:` / `keychain:` 引用语法一并移除，
+    不做兼容）；展示面（ls / 日志 / 异常文案）统一打码。
 
     Args:
         name: 全局唯一名，小写字母开头、仅含小写字母/数字/下划线/连字符，最长 32 字符（如 `ctx7`）。
@@ -262,9 +265,10 @@ async def save_mcp_server(
             典型用法是 MCP server）；可选 `openapi` / `mcp` / `mcp_stdio` / `graphql`。
         target: 完整连接描述：MCP server URL / spec 路径或 URL / stdio 启动命令 / GraphQL endpoint。
         note: 备注说明（给人看的用途描述）。
-        credentials: 凭证引用，形如 `{"headers": {"Authorization": "env:GITHUB_TOKEN"}}`
-            （headers 配 HTTP 类 kind）或 `{"env": {"API_KEY": "env:API_KEY"}}`
-            （env 配 `mcp_stdio`，注入子进程环境变量）。只存引用，永不存明文。
+        credentials: 凭证值，形如 `{"headers": {"Authorization": "Bearer sk-..."}}`
+            （headers 配 HTTP 类 kind）或 `{"env": {"API_KEY": "v123..."}}`
+            （env 配 `mcp_stdio`，注入子进程环境变量）。**值原样存**（#277）；
+            查看面只见掩码。
         overwrite: name 已存在时是否覆盖；默认 false（防误覆盖别人的登记）。
     """
     # 注册表全局化（#273）后 team 上下文无作用域语义，不再设 _require_team_context 门；
@@ -332,8 +336,9 @@ async def list_mcp_servers(
     """无参列出**全局** MCP 注册表；有参时对 name/完整 target 列工具清单（`mcp ls` 的底层工具）。
 
     **无参**：返回 `{success, servers: [...], count}`——每条只含脱敏摘要
-    （`target_masked` / `has_credentials` / `enable`，凭证只显示 `env:VAR` 引用原文，
-    永不出解析值），**不含** `result`。禁用条目**仍然列出**并标注 enable=false
+    （`target_masked` / `credentials_masked` / `has_credentials` / `enable`；#277 起
+    凭证给**掩码**——保留少量前缀便于识别、主体 `***`，启用/禁用两态同一份代码
+    路径、打码形态一致），**不含** `result`。禁用条目**仍然列出**并标注 enable=false
     （禁用 ≠ 删除，要看得见才好启用；#273）。
     **有参**：等价于 `mcp_call(action="list", target=…)`——name 命中则用注册项的
     target/kind/凭证（禁用项在此分支报 `mcp_server_disabled`），未命中按完整 target

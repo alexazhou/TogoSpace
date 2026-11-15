@@ -89,7 +89,6 @@ import contextlib
 import io
 import json
 import logging
-import os
 import sys
 import threading
 from typing import TYPE_CHECKING, Any, cast
@@ -192,7 +191,7 @@ def build_argv(
     tool: str | None,
     args: dict[str, Any] | None,
     extra: dict[str, Any] | None,
-    credential_refs: dict[str, Any] | None = None,
+    credentials: dict[str, Any] | None = None,
 ) -> list[str]:
     """按 mcp2cli 的 CLI 语法拼出 argv（纯函数，便于单测直接断言）。
 
@@ -201,12 +200,12 @@ def build_argv(
     `extra` 里的全局开关必须排在工具名**之前** —— 排在后面不会报「未知开关」，而是让
     工具子 parser `exit(2)` 并喷一整页 usage（实测：`get-a --head 1` → 退出码 2）。
 
-    `credential_refs`（#224，1331 硬条件 ⅰ）：注册表条目的凭证**引用**（只允许
-    `env:VAR` 引用原文，由 `tools.mcp_call` 从注册表组装，不占模型可见 schema）。
-    headers 层 → `--auth-header "名:env:VAR"`、env 层（stdio 子进程环境）→
-    `--env "VAR=env:SRC"`，同样必须落在工具名之前。**这里只放引用原文，永不解析**：
-    解析替换发生在 `call_mcp` 的 argv 日志**之后**、真正分派之前（硬条件 ⅱ），
-    由 `_with_resolved_credentials` 做——日志与返回体里 grep 不到任何解析后的值。
+    `credentials`（#224→#277）：注册表条目的凭证**值**（#277 起原样存值，明文，
+    由 `tools.mcp_call` 从注册表组装，不占模型可见 schema）。headers 层 →
+    `--auth-header "名:值"`、env 层（stdio 子进程环境）→ `--env "VAR=值"`，
+    同样必须落在工具名之前。**明文由此直接进 argv ⇒ 脱敏改为出口打码**：
+    日志、返回体、异常文案在输出前把凭证值替换为 `***`（`_mask_deep`）——
+    旧的「先放引用、日志之后再解析」保护已随 #277 删除。
     """
     flag = _SOURCE_FLAGS.get(kind)
     if flag is None:
@@ -243,9 +242,9 @@ def build_argv(
         else:
             argv.extend([name, json.dumps(value, ensure_ascii=False)])
 
-    # 凭证引用段：同为全局开关，排在工具名之前、extra 之后（顺序语义见 docstring）。
-    # 值是引用原文（env:VAR），解析在日志之后由 _with_resolved_credentials 做。
-    argv.extend(_credential_segments(credential_refs))
+    # 凭证段：同为全局开关，排在工具名之前、extra 之后（顺序语义见 docstring）。
+    # #277 起值是**明文**（注册表原样存值），注入直接用字面值，无解析链。
+    argv.extend(_credential_segments(credentials))
 
     if normalized == "list":
         argv.append("--list")
@@ -260,81 +259,75 @@ def build_argv(
 
 
 # ---------------------------------------------------------------------------
-# 凭证引用 → 值的解析（#224，1331 硬条件 ⅱ）
+# 凭证值的出口打码（#277 硬性判据）
 #
-# 时序写死：build_argv 只放引用原文 → call_mcp 打 argv 日志 → **这里解析替换** →
-# 真正分派。日志与返回体里的 argv 永远是引用形态；解析后的值只出现在交给
-# `_main_impl` 的那份运行时 argv 里（openapi/mcp/graphql 三态是进程内库调用，
-# 不产生命令行进程列表）。解析失败报 `credential_unresolved`，**不传空值**——
-# 空值会让上游回 401，排查方向直接跑偏（设计稿 §4.3 B3/B4）。
+# #277 起凭证值明文直进 argv ⇒ 旧「先放引用、日志之后再解析」的保护失效。
+# 新的等价保护：**所有出口（日志、返回体、异常文案）在输出前把凭证值替换为 `***`**。
+# 打码用「精确子串替换」而不是段定位：stderr / 上游响应体里出现该值的任何位置
+# 都要打掉，不能只盯我们自己写入的段。
 # ---------------------------------------------------------------------------
 
 
-def _credential_segments(credential_refs: dict[str, Any] | None) -> list[str]:
-    """凭证引用 → argv 段（引用原文形态；`build_argv` 与解析定位共用同一份生成逻辑）。
+def _credential_segments(credentials: dict[str, Any] | None) -> list[str]:
+    """凭证值 → argv 段（明文形态；`build_argv` 与打码定位共用同一份生成逻辑）。
 
     返回 [flag, value, flag, value, ...] 平铺段。
     """
-    refs = credential_refs or {}
+    creds = credentials or {}
     segments: list[str] = []
-    for name, ref in (refs.get("headers") or {}).items():
-        segments.extend(["--auth-header", f"{name}:{ref}"])
-    for var, ref in (refs.get("env") or {}).items():
-        segments.extend(["--env", f"{var}={ref}"])
+    for name, value in (creds.get("headers") or {}).items():
+        segments.extend(["--auth-header", f"{name}:{value}"])
+    for var, value in (creds.get("env") or {}).items():
+        segments.extend(["--env", f"{var}={value}"])
     return segments
 
 
-def _resolve_credential_ref(ref: str) -> str:
-    """`env:VAR` → 环境变量值。首版只支持 env:（其余在登记时已被拒，这里是防御）。"""
-    scheme, _, var = str(ref).partition(":")
-    var = var.strip()
-    if scheme != "env" or not var:
-        raise McpCallError(
-            "credential_unresolved",
-            f"凭证引用 {ref!r} 当前不可解析（首版只支持 env: 引用）。",
-        )
-    value = os.environ.get(var)
-    if not value:
-        raise McpCallError(
-            "credential_unresolved",
-            f"凭证引用 {ref!r} 在当前机器上不可解析：环境变量 {var} 未设置（或不为空值）。"
-            "跨机迁移后出现此错误属预期行为——请在目标机器配置该环境变量后重试"
-            "（设计稿 §4.3 B4），不要改登记项去绕过。",
-        )
-    return value
+def _secret_values(credentials: dict[str, Any] | None) -> list[str]:
+    """收集这次调用会用到的**明文凭证值**（打码靶子清单）。"""
+    creds = credentials or {}
+    secrets: list[str] = []
+    for layer in ("headers", "env"):
+        for _name, value in (creds.get(layer) or {}).items():
+            if isinstance(value, str) and value.strip():
+                secrets.append(value)
+    return secrets
 
 
-def _with_resolved_credentials(
-    argv: list[str], credential_refs: dict[str, Any] | None
-) -> list[str]:
-    """把 argv 里**由本模块写入的凭证引用段**替换成解析后的值（整串精确匹配定位）。
+def _secret_mask_forms(secrets: list[str]) -> list[str]:
+    """打码靶子全集 = 原始值 + **repr 转义形态**（38 二轮 F6）。
 
-    为什么用「期望段整串相等」而不是正则扫描：target / 用户 extra 里完全可能出现
-    含 `env:` 字样的合法数据（如 URL query），按模式扫会误伤；期望段由
-    `_credential_segments` 从同一份 refs 生成，与 `build_argv` 写入的段逐字节相同，
-    只有我们自己写入的那几段能精确命中。
+    值经 `repr` / `str(list)` 渲染进异常文案或日志时（如上游回显 argv、
+    `f"...argv={argv}"`），`\\` → `\\\\`、引号按分隔符规则改写，明文串不再
+    **字面**出现 ⇒ `_mask_deep` 的精确子串匹配只搜原始值会漏，留下可还原明文。
+    repr 形态由 Python 对该值确定性生成（分隔符选择随值内容而定），把两种形态
+    都列为 replace 靶子，即同时覆盖「值直接拼进文本」与「值经 repr 渲染进文本」
+    两类出口；判据对**原始 / repr / 去转义（逐轮）三形态**全搜（任一命中即失败）。
     """
-    refs = credential_refs or {}
-    if not refs:
-        return argv
-    expected = _credential_segments(refs)
-    if not expected:
-        return argv
-    resolved = list(argv)
-    for index in range(len(resolved) - 1):
-        for slot in range(0, len(expected) - 1, 2):
-            if resolved[index] != expected[slot] or resolved[index + 1] != expected[slot + 1]:
-                continue
-            placeholder = expected[slot + 1]
-            if expected[slot] == "--env":
-                # --env 段："VAR=env:SRC" → "VAR=<值>"
-                var, _, ref = placeholder.partition("=")
-                resolved[index + 1] = f"{var}={_resolve_credential_ref(ref)}"
-            else:
-                # --auth-header 段："Name:env:VAR" → "Name:<值>"
-                name, _, ref = placeholder.partition(":env:")
-                resolved[index + 1] = f"{name}:{_resolve_credential_ref('env:' + ref)}"
-    return resolved
+    forms: list[str] = []
+    for value in secrets:
+        if value not in forms:
+            forms.append(value)
+        escaped = repr(value)[1:-1]
+        if escaped != value and escaped not in forms:
+            forms.append(escaped)
+    return forms
+
+
+def _mask_deep(value: Any, secrets: list[str]) -> Any:
+    """递归打码：str 里出现的任何凭证明文值替换为 `***`（只打我们自己的靶子）。"""
+    if not secrets:
+        return value
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "***")
+        return value
+    if isinstance(value, list):
+        return [_mask_deep(item, secrets) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_mask_deep(item, secrets) for item in value)
+    if isinstance(value, dict):
+        return {key: _mask_deep(item, secrets) for key, item in value.items()}
+    return value
 
 
 #: 与固定 `--json` 冲突、传了也不生效的全局开关（上游 `output_result` 里
@@ -450,8 +443,12 @@ class _ThreadIsolatedStream(io.TextIOBase):
         return self._buf.getvalue()
 
 
-def _run_argv_sync(argv: list[str]) -> dict[str, Any]:
+def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[str, Any]:
     """同步跑一次 mcp2cli 分派（在线程里执行）。返回结构化结果，不抛异常。
+
+    `secrets`（#277 打回修复 F2）：异常路径的 `logger.warning` 会把 `%r(exc)`
+    整段写进日志，异常文案常含上游回显的完整 argv（即明文凭证），所以打码
+    必须做在**这条日志出口本身**——不能指望外层 `_mask_deep`（它只管返回体）。
 
     **整段持 `_STDOUT_LOCK`**：`redirect_stdout` 换的是进程级 `sys.stdout`，两个线程
     同时进来就会互相截获输出。锁加在这里（而不是 `call_mcp` 里 `async with`）是因为
@@ -490,7 +487,17 @@ def _run_argv_sync(argv: list[str]) -> dict[str, Any]:
             "stderr": _truncate(stderr.getvalue())[0],
         }
     except Exception as exc:  # noqa: BLE001 —— 任何异常都转结构化失败，不往上冒
-        logger.warning("mcp2cli 调用异常: %r", exc)
+        # 出口打码（#277 F2/F6）：打码必须作用在**日志最终输出的形态**上。
+        # 不用 `%r`+先 repr：repr 先转义（' → \'、\ → \\、换行/制表同理），明文串
+        # 不再字面出现 ⇒ `_mask_deep` 的精确子串匹配落空，日志留下**可还原明文**
+        # （38 二轮 F6 实测：`sk-ab'cd-…` ⇒ `sk-ab\'cd-…`，去反斜杠即还原）。
+        # `%s` 直接插值、输出前无再变换 ⇒ `_mask_deep(str)` 的结果就是最终形态；
+        # 靶子含 repr 形态（_secret_mask_forms），连异常文案里 repr 渲染过的
+        # argv（上游回显）也一并打掉。
+        logger.warning(
+            "mcp2cli 调用异常: %s",
+            _mask_deep(f"{type(exc).__name__}: {exc}", secrets or []),
+        )
         return {
             "success": False,
             "error_code": "mcp2cli_error",
@@ -564,33 +571,32 @@ async def call_mcp(
     args: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    credential_refs: dict[str, Any] | None = None,
+    credentials: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """跑一次 mcp2cli 调用并把结果收成工具返回体（不抛异常）。
 
-    `credential_refs`（#224）只收**引用原文**（`env:VAR` 形态，由 `tools.mcp_call`
-    从注册表条目组装）。时序（1331 硬条件 ⅱ）：argv 日志打的是解析**前**的
-    （引用原样）；解析替换在日志之后、真正分派之前；返回体回填的 argv 也是引用
-    形态 —— 日志与返回体里 grep 不到任何解析后的值。
+    `credentials`（#224→#277）是注册表条目的凭证**值**（明文，由 `tools.mcp_call`
+    从注册表条目组装）。#277 起值直接进 argv，**脱敏改为出口打码**：日志行、
+    返回体（含 argv / stderr / raw_excerpt / result 嵌套）里的明文值一律替换为
+    `***`（`_mask_deep`）——旧「先放引用、日志之后再解析」的时序保护已删。
     """
+    # 出口打码（#277 F2/F6）：靶子=原始值+repr 转义形态（值经 repr 渲染进文本的
+    # 出口靠原始值匹配不到，见 _secret_mask_forms）。
+    secrets = _secret_mask_forms(_secret_values(credentials))
     try:
         argv = build_argv(
             kind=kind, target=target, action=action, tool=tool, args=args, extra=extra,
-            credential_refs=credential_refs,
+            credentials=credentials,
         )
     except McpCallError as exc:
-        return {"success": False, "error_code": exc.error_code, "message": exc.message}
+        return _mask_deep({"success": False, "error_code": exc.error_code, "message": exc.message}, secrets)
 
-    logger.info("mcp_call: argv=%r", argv)
-    try:
-        # 解析替换发生在打日志之后、真正发起调用之前（硬条件 ⅱ）。
-        runtime_argv = _with_resolved_credentials(argv, credential_refs)
-    except McpCallError as exc:
-        return {"success": False, "error_code": exc.error_code, "message": exc.message}
+    # 出口打码（#277）：日志里的 argv 只能是掩码形态。
+    logger.info("mcp_call: argv=%r", _mask_deep(argv, secrets))
 
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(_run_argv_sync, runtime_argv), timeout=timeout
+            asyncio.to_thread(_run_argv_sync, argv, secrets), timeout=timeout
         )
     except asyncio.TimeoutError:
         # 注意：这里**只是不再等**，worker 线程仍在跑、仍持着 `_STDOUT_LOCK`
@@ -598,11 +604,15 @@ async def call_mcp(
         # 后续 `mcp_call` 可能仍要排队等那个孤儿 worker 结束 —— 详见文件头
         # 「已知限制：timeout 到点不释放锁」。这不是可修的错误，别改成 `return`
         # 之后假装锁已释放。
-        return {
-            "success": False,
-            "error_code": "mcp_call_timeout",
-            "message": f"mcp2cli 调用超过 {timeout} 秒未返回（目标不可达或响应过慢）。",
-            "argv": argv,
-        }
+        return _mask_deep(
+            {
+                "success": False,
+                "error_code": "mcp_call_timeout",
+                "message": f"mcp2cli 调用超过 {timeout} 秒未返回（目标不可达或响应过慢）。",
+                "argv": argv,
+            },
+            secrets,
+        )
     result.setdefault("argv", argv)
-    return result
+    # 出口打码（#277）：返回体（含嵌套 result / stderr / raw_excerpt）全量过一遍。
+    return _mask_deep(result, secrets)

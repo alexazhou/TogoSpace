@@ -372,7 +372,6 @@ EXPECTED_TOOL_CATEGORIES = {
     "delete_container": ToolCategory.EXECUTE,
     "delete_dept": ToolCategory.ADMIN,
     # #224：MCP 注册表三工具（归属理由见 CATEGORY_CONFIG 处注释）。
-    "delete_mcp_server": ToolCategory.ADMIN,
     "delete_role_template": ToolCategory.ADMIN,
     "delete_room": ToolCategory.ADMIN,
     "edit": ToolCategory.WRITE,
@@ -402,6 +401,8 @@ EXPECTED_TOOL_CATEGORIES = {
     "memory_read": ToolCategory.BASIC,
     "memory_search": ToolCategory.BASIC,
     "memory_update": ToolCategory.BASIC,
+    # #277：MCP 注册表三工具归 WRITE（Operator 20:21：写入不再要求管理员权限）。
+    "delete_mcp_server": ToolCategory.WRITE,
     "process_list": ToolCategory.EXECUTE,
     "process_output": ToolCategory.EXECUTE,
     "process_stop": ToolCategory.EXECUTE,
@@ -410,10 +411,11 @@ EXPECTED_TOOL_CATEGORIES = {
     "reload_team": ToolCategory.ADMIN,
     "save_agent": ToolCategory.ADMIN,
     "save_dept": ToolCategory.ADMIN,
-    "save_mcp_server": ToolCategory.ADMIN,
+    # #277：MCP 注册表三工具归 WRITE（Operator 20:21：写入不再要求管理员权限）。
+    "save_mcp_server": ToolCategory.WRITE,
     "save_role_template": ToolCategory.ADMIN,
     "save_room": ToolCategory.ADMIN,
-    "set_mcp_server_enabled": ToolCategory.ADMIN,
+    "set_mcp_server_enabled": ToolCategory.WRITE,
     "send_chat_msg": ToolCategory.BASIC,
     "start_chat": ToolCategory.BASIC,
     "update_task": ToolCategory.BASIC,

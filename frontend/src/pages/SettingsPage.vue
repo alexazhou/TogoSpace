@@ -8,6 +8,7 @@ import { showGlobalSuccessToast, showQuickInit, totalMessageCount, appVersion, a
 import ModelsSettingsSection from '../components/settings/ModelsSettingsSection.vue';
 import RolesSettingsSection from '../components/settings/RolesSettingsSection.vue';
 import SkillsSettingsSection from '../components/settings/SkillsSettingsSection.vue';
+import McpServersSection from '../components/settings/McpServersSection.vue';
 import SettingsNavSidebar from '../components/settings/SettingsNavSidebar.vue';
 import SystemMaintenanceSection from '../components/settings/SystemMaintenanceSection.vue';
 import AdvancedSettingsSection from '../components/settings/AdvancedSettingsSection.vue';
@@ -436,6 +437,12 @@ watch(
 
         <SkillsSettingsSection
           v-else-if="currentSectionId === 'skills'"
+          :breadcrumb-items="breadcrumbItems"
+          @navigate-breadcrumb="handleBreadcrumbNavigate"
+        />
+
+        <McpServersSection
+          v-else-if="currentSectionId === 'mcpServers'"
           :breadcrumb-items="breadcrumbItems"
           @navigate-breadcrumb="handleBreadcrumbNavigate"
         />

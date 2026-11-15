@@ -4,7 +4,7 @@ import os
 import tornado.web
 
 import appPaths
-from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController, thirdPartyController, taskController
+from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController, thirdPartyController, taskController, mcpController
 
 _FRONTEND_DIST = os.path.join(appPaths.ASSETS_DIR, "frontend")
 
@@ -64,6 +64,13 @@ application = tornado.web.Application([
     (r"/config/third_party_services.json",           thirdPartyController.ThirdPartyServicesConfigHandler),
     (r"/config/third_party_services/deepseek/test.json", thirdPartyController.DeepSeekSearchTestHandler),
     (r"/config/third_party_services/xiaomi_mimo/test.json", thirdPartyController.XiaomiMiMoSearchTestHandler),
+
+    # MCP 服务管理（#277）：GET 列表 / save 新增覆盖 / delete 删除 / enable 启停。
+    # 业务校验全在 mcpRegistryService（Controller 不复制规则）。
+    (r"/mcp/servers.json",                           mcpController.McpServerListHandler),
+    (r"/mcp/servers/save.json",                      mcpController.McpServerSaveHandler),
+    (r"/mcp/servers/delete.json",                    mcpController.McpServerDeleteHandler),
+    (r"/mcp/servers/enable.json",                    mcpController.McpServerEnableHandler),
 
     # System Status & Quick Init (V13)
     (r"/system/status.json",                         systemController.SystemStatusHandler),

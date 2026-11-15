@@ -4,6 +4,7 @@ export const SETTINGS_ROUTE_SECTIONS = [
   'models',
   'thirdPartyServices',
   'skills',
+  'mcpServers',
   'maintenance',
   'advanced',
 ] as const;
@@ -18,6 +19,7 @@ export const SETTINGS_NAV_ITEMS = [
   'models',
   'thirdPartyServices',
   'skills',
+  'mcpServers',
   'maintenance',
   'advanced',
   'quickInit',

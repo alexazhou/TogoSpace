@@ -26,15 +26,14 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "webfetch": ToolCategory.READ,
     # mcp2cli 接入（#202）：会真去调外部 API（可能有副作用），归执行类。
     "mcp_call": ToolCategory.EXECUTE,
-    # MCP 注册表（#224→#273，裁定 T6 归 ADMIN）：save/delete/enable 改的是全局共享配置——
-    # 真正理由是 §5.4 别名劫持（BASIC 下可删别人的别名再抢注，全团队的 call 都会
-    # 打到攻击者 server 且返回内容被模型采信），与凭证纪律无关。list 只读归 BASIC
-    # （与 get_room_info 同层，否则没 Admin 的 Agent 连看都看不到）。
+    # MCP 注册表（#224→#273，#277 权限放宽）：写入类（save/delete/enable）归 WRITE——
+    # Operator 20:21/20:22 明确「写入不再要求管理员权限」，普通成员即可 add/rm/enable。
+    # list 只读归 BASIC（与 get_room_info 同层，否则没任何权限的 Agent 连看都看不到）。
     "list_mcp_servers": ToolCategory.BASIC,
-    "save_mcp_server": ToolCategory.ADMIN,
-    "delete_mcp_server": ToolCategory.ADMIN,
-    # 启用/禁用与删除同级：禁用影响的是全局共享资源（#273），普通成员不能改。
-    "set_mcp_server_enabled": ToolCategory.ADMIN,
+    "save_mcp_server": ToolCategory.WRITE,
+    "delete_mcp_server": ToolCategory.WRITE,
+    # 启用/禁用与写入同级（#277：不再要求管理员）。
+    "set_mcp_server_enabled": ToolCategory.WRITE,
     "get_dept_info": ToolCategory.BASIC,
     "get_room_info": ToolCategory.BASIC,
     "get_agent_info": ToolCategory.BASIC,
@@ -106,28 +105,14 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
 }
 
 
-#: ADMIN 类工具被 enabled 拒绝时的「可解释失败」文案（#224，#223 设计稿 §3.7）。
+#: ADMIN 类工具被 enabled 拒绝时的「可解释失败」文案（#224 引入）。
 #:
 #: 为什么需要：ADMIN 工具对普通 Agent 是 enabled=False，统一在 `execute_tool_call`
-#: 的 enabled 分支被拦、返回裸的「工具无权限使用」——对 MCP 注册表这条不够（设计稿
-#: 明确要求 admin_denied + 可执行建议，console 面与直调面都要）。只收「拒绝是设计
-#: 预期、且裸权限错误会把 Agent 引向死胡同」的工具；不在表里的工具（save_agent 等）
-#: 既有文案一字不动（既有用例按原文断言）。
-_TOOL_PERMISSION_DENIED_HINTS: dict[str, str] = {
-    "save_mcp_server": (
-        "admin_denied：MCP 注册表是团队级共享资源，普通成员不能登记。"
-        "请把需求转给上级或团队 leader 并说明用途，例如："
-        "「请登记 MCP 别名 ctx7 → https://mcp.context7.com/mcp（kind=mcp）」。"
-    ),
-    "delete_mcp_server": (
-        "admin_denied：MCP 注册表是全局共享资源，普通成员不能删除登记项。"
-        "请把要移除的 name 转给上级或团队 leader 处理。"
-    ),
-    "set_mcp_server_enabled": (
-        "admin_denied：MCP 注册表是全局共享资源，普通成员不能启用/禁用登记项"
-        "（禁用影响所有团队的可用工具）。请把要启用的 name 转给上级或团队 leader 处理。"
-    ),
-}
+#: 的 enabled 分支被拦、返回裸的「工具无权限使用」——某些工具需要 admin_denied +
+#: 可执行建议（console 面与直调面都要）。只收「拒绝是设计预期、且裸权限错误会把
+#: Agent 引向死胡同」的工具。**当前为空**：MCP 注册表三工具 #277 起归 WRITE、不再
+#: 要求管理员（Operator 20:21 需求），保留本表结构供未来 ADMIN 工具复用。
+_TOOL_PERMISSION_DENIED_HINTS: dict[str, str] = {}
 
 
 def validate_tool_allow_specs(allow_specs: list[str]) -> str | None:

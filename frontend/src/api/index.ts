@@ -125,3 +125,12 @@ export {
   testDeepSeekSearchService,
   testXiaomiMimoSearchService,
 } from './llm';
+
+export {
+  listMcpServers,
+  saveMcpServer,
+  deleteMcpServer,
+  setMcpServerEnabled,
+  type McpServerEntry,
+  type McpServerSavePayload,
+} from './mcp';

@@ -8,11 +8,13 @@
 报「已禁用」、`mcp ls` 仍列出并标注；注册表本身不进 Agent 工具列表，「禁用⇒工具
 列表消失」无结构落地）。
 
-凭证纪律（设计稿 §4，1337 附加判据 2）：
-- 注册表只存**引用**（`env:VAR` 形态），明文一律拒绝（`mcp_inline_credential_refused`）；
-- `file:` / `keychain:` 报「未实现」，**不降级成明文**（`mcp_credential_ref_unimplemented`）；
-- 解析（`env:VAR` → 环境变量值）发生在 mcpTool 的日志**之后**、分派调用之前
-  （1331 硬条件 ⅱ），本层不解析、不持有任何凭证值。
+凭证纪律（#277，Operator 2026-11-15 20:21/20:22 需求变更，覆盖 #273 的「只存引用」）：
+- **值原样存**（明文），不再校验/要求任何前缀（`env:` / `file:` / `keychain:` 三种
+  引用语法一并移除，不做兼容）；结构校验保留（headers/env 两层 + kind 匹配）；
+- 明文由此会进 argv ⇒ **脱敏改为「出口打码」**：日志、异常文案、返回体在输出前
+  把凭证值替换为 `***`（`mcpTool._mask_secret_values` / `mask_credentials_for_display`），
+  本层不负责输出面；
+- 解析链（`env:VAR` → 环境变量值）已删除（#277）：注入直接用字面值。
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ import peewee
 from exception import TogoException
 from model.dbModel.gtMcpServer import (
     GtMcpServer,
+    mask_credentials_for_display,
     mask_target,
 )
 from dal.db import gtMcpServerManager
@@ -49,9 +52,6 @@ _ERROR_NAME_EXISTS = "mcp_name_exists"
 _ERROR_NAME_NOT_FOUND = "mcp_name_not_found"
 _ERROR_SERVER_DISABLED = "mcp_server_disabled"
 _ERROR_CREDENTIALS_INVALID = "mcp_invalid_credentials"
-_ERROR_CREDENTIAL_REFUSED = "mcp_inline_credential_refused"
-_ERROR_CREDENTIAL_UNIMPLEMENTED = "mcp_credential_ref_unimplemented"
-_ERROR_CREDENTIAL_REF_INVALID = "mcp_invalid_credential_ref"
 _ERROR_CREDENTIAL_KIND_MISMATCH = "mcp_credential_kind_mismatch"
 
 
@@ -90,19 +90,21 @@ def validate_target(target: str) -> str:
 
 
 def validate_credentials(credentials: dict | None, kind: str) -> dict:
-    """凭证结构校验（设计稿 §4.3 B1/B6）。只存引用；返回归一后的存储形态。
+    """凭证**结构**校验（#277：值原样存，不再校验前缀）。返回归一后的存储形态。
 
-    - `{}` / `None` ⇒ `{}`（空凭证统一存 `{}`，E1）；
-    - 结构只能是 `{"headers": {...}, "env": {...}}` 两层，一个 key 一个引用；
-    - 值必须是 `env:` 引用（首版唯一实现）；明文 ⇒ `mcp_inline_credential_refused`；
-      `file:` / `keychain:` ⇒ 未实现，不降级；其他前缀 ⇒ `mcp_invalid_credential_ref`；
+    - `{}` / `None` ⇒ `{}`（空凭证统一存 `{}`）；
+    - 结构只能是 `{"headers": {...}, "env": {...}}` 两层；**值原样存**（明文，
+      不做任何前缀/形态校验——Operator 20:21 明确改为直接存值）；
     - headers 层只配 HTTP 类 kind、env 层只配 `mcp_stdio`（错配 ⇒
       `mcp_credential_kind_mismatch`）——静默存下调用时永不生效的凭证，比报错更坏。
+
+    值是明文 ⇒ 脱敏责任在**输出面**（日志/返回体/异常文案打码，见模块 docstring），
+    校验层不做打码（存的就是值，展示才打码）。
     """
     if not credentials:
         return {}
     if not isinstance(credentials, dict):
-        raise _fail(_ERROR_CREDENTIALS_INVALID, "credentials 必须是对象：{\"headers\":{名:引用},\"env\":{变量:引用}}。")
+        raise _fail(_ERROR_CREDENTIALS_INVALID, "credentials 必须是对象：{\"headers\":{名:值},\"env\":{变量:值}}。")
 
     unknown_layers = sorted(set(credentials) - {"headers", "env"})
     if unknown_layers:
@@ -117,10 +119,12 @@ def validate_credentials(credentials: dict | None, kind: str) -> dict:
         if values in (None, {}, []):
             continue
         if not isinstance(values, dict):
-            raise _fail(_ERROR_CREDENTIALS_INVALID, f"credentials.{layer} 必须是「名称 → 引用」的对象。")
+            raise _fail(_ERROR_CREDENTIALS_INVALID, f"credentials.{layer} 必须是「名称 → 值」的对象。")
         layer_out: dict[str, str] = {}
-        for name, ref in values.items():
-            layer_out[str(name)] = _validate_credential_ref(ref, layer)
+        for name, value in values.items():
+            if not isinstance(value, str) or not value.strip():
+                raise _fail(_ERROR_CREDENTIALS_INVALID, f"credentials.{layer} 的值必须是非空字符串。")
+            layer_out[str(name)] = value.strip()
         normalized[layer] = layer_out
 
     if "headers" in normalized and kind not in _HTTP_KINDS:
@@ -134,27 +138,6 @@ def validate_credentials(credentials: dict | None, kind: str) -> dict:
             f"env 凭证只对 kind=mcp_stdio 有意义（注入子进程环境变量），当前 kind={kind}。",
         )
     return normalized
-
-
-def _validate_credential_ref(ref: object, layer: str) -> str:
-    if not isinstance(ref, str) or not ref.strip():
-        raise _fail(_ERROR_CREDENTIALS_INVALID, f"credentials.{layer} 的值必须是非空字符串引用。")
-    text = ref.strip()
-    scheme, _, _rest = text.partition(":")
-    if scheme not in ("env", "file", "keychain") or not text[len(scheme) + 1:].strip():
-        # 没有已知前缀 ⇒ 这是要把明文塞进注册表。拒绝并给改写指引（设计稿 §4.2 A）。
-        raise _fail(
-            _ERROR_CREDENTIAL_REFUSED,
-            f"注册表不接受明文凭证（{layer}.{text[:8]!r}…）。请改用环境变量引用："
-            "先把密钥放进环境变量，再登记 \"env:变量名\"（如 \"env:GITHUB_TOKEN\"）。",
-        )
-    if scheme in ("file", "keychain"):
-        raise _fail(
-            _ERROR_CREDENTIAL_UNIMPLEMENTED,
-            f"凭证引用 {scheme}: 首版未实现（只支持 env:），也不会降级成明文使用。"
-            "请改用 env: 引用，或等 file:/keychain: 支持落地后再登记。",
-        )
-    return text
 
 
 # ---------------------------------------------------------------------------
@@ -176,20 +159,25 @@ async def resolve_name(name: str) -> GtMcpServer | None:
 
 
 def entry_summary(entry: GtMcpServer) -> dict:
-    """注册项的**脱敏**摘要（ls / rm / name_exists 附带说明共用同一份形态）。"""
+    """注册项的**脱敏**摘要（ls / rm / name_exists 附带说明共用同一份形态）。
+
+    `credentials_masked`（#277）：值已明文存储，查看面统一给掩码（保留少量前缀
+    便于识别、主体打码）；启用/禁用条目走同一份代码路径，打码形态天然一致。
+    """
     return {
         "name": entry.name,
         "kind": entry.kind,
         "target_masked": mask_target(entry.target),
         "note": entry.note,
         "enable": bool(entry.enable),
+        "credentials_masked": mask_credentials_for_display(entry.credentials or {}),
         "has_credentials": bool(entry.credentials),
         "updated_at": str(entry.updated_at) if entry.updated_at else None,
     }
 
 
-def credential_refs_of(entry: GtMcpServer) -> dict:
-    """从注册项取出凭证引用（**原样引用，不解析**——1331 硬条件 ⅰ）。"""
+def credentials_of(entry: GtMcpServer) -> dict:
+    """从注册项取出凭证（#277：**值原样**，注入时直接用字面值，无解析链）。"""
     credentials = entry.credentials or {}
     return {
         "headers": dict(credentials.get("headers") or {}),

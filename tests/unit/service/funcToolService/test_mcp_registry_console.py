@@ -11,9 +11,8 @@
    （`importorskip`）覆盖；
 3. **name 解析语义**（§3.6 / 1337 附加判据 3）：`resolved_from_registry`/`name` 恒出现、
    kind 冲突三分支、`mcp ls <name>` 与 `mcp call` 复用同一 `resolve_name`；
-4. **权限与凭证**（T6 / 1331）：BASIC 直调与 console 面都给 `admin_denied`+建议；
-   日志只含引用原文、grep 不到解析值（硬条件 ⅱ）；解析失败报
-   `credential_unresolved` 不传空值（B3/B4）。
+4. **权限与凭证**（T6 / 1331 → #277）：console 面与直调面普通成员即可写入（#277 取消
+   admin_denied）；日志/返回体/异常文案 grep 不到明文值（出口打码，`_mask_deep`）。
 """
 
 from __future__ import annotations
@@ -37,6 +36,7 @@ from service.funcToolService.consoleTool import console
 from service.funcToolService.tools import (
     delete_mcp_server,
     list_mcp_servers,
+    mcp_call,
     save_mcp_server,
 )
 from service.ormService import AioSqliteDatabase
@@ -44,6 +44,33 @@ from util import llmApiUtil
 
 _SECRET = "sk-super-secret-value-should-never-log"
 _VAR = "GITHUB_TOKEN"
+#: F6 靶值：含 `'` 与 `\` —— repr 转义后明文串不再字面出现，「只搜字面量」会假绿。
+_TRICKY = "sk-a'b\\cd-1234567890"
+
+
+def _repr_form(value: str) -> str:
+    """值在 repr 输出里的形态（去外层引号）：' → \\'、\\ → \\\\。"""
+    return repr(value)[1:-1]
+
+
+def _unescape(text: str) -> str:
+    """日志文本的去转义形态（判据第三形态）。
+
+    逐轮去转义至稳定（最多 4 轮）：「先 repr 再打码」型缺陷会把明文转义后还可能
+    被 `%r` **再转义一层**（MUT-11 实测：单轮去转义搜不到 ⇒ 假绿）。`\\\\` 先收敛、
+    再收 `\\'`，两规则反复套用直到文本不再变化。
+    """
+    for _ in range(4):
+        nxt = text.replace("\\\\", "\\").replace("\\'", "'")
+        if nxt == text:
+            break
+        text = nxt
+    return text
+
+
+def _secret_forms(value: str) -> tuple[str, str]:
+    """反向判据必搜的形态：原始值 + repr 转义形态（任一命中即失败）。"""
+    return (value, _repr_form(value))
 
 
 # ---------------------------------------------------------------------------
@@ -426,10 +453,10 @@ async def test_empty_target_passes_through(mcp_db, leader_ctx, loaded_tools, stu
 
 
 @pytest.mark.asyncio
-async def test_basic_agent_console_add_gets_admin_denied(
+async def test_basic_agent_console_add_succeeds(
     mcp_db, loaded_tools, stub_mcp2cli
 ):
-    """T6：BASIC Agent 经 console 调 mcp add ⇒ admin_denied + 可执行建议（非裸权限错误）。"""
+    """#277：写入不再要求管理员——普通成员（Write 权限）经 console 调 mcp add 直接成功。"""
     registry = _build_registry()
     registry.apply_tool_allow_specs(
         ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
@@ -444,29 +471,71 @@ async def test_basic_agent_console_add_gets_admin_denied(
     )
     result = await registry.execute_tool_call(call, context=ctx)
     body = result.result
-    assert body["success"] is False
-    assert body["error_code"] == "admin_denied"
-    assert "leader" in body["message"]
+    assert body["success"] is True, body
+    assert body["server"]["name"] == "ctx7"
 
 
 @pytest.mark.asyncio
-async def test_basic_agent_direct_call_gets_admin_denied(mcp_db, loaded_tools, stub_mcp2cli):
-    """1337 附加判据 1：直调面（绕过 console）同样收到 admin_denied，不许裸权限错误。"""
+async def test_basic_agent_direct_write_succeeds_without_admin(mcp_db, loaded_tools):
+    """#277 F3 替代判据：**直调面**（不经 console）save / delete 对普通成员成功。
+
+    原 `test_basic_agent_direct_call_gets_admin_denied`（1337 附加判据 1）随
+    ADMIN→WRITE 一起删除——它锁的是旧防线；#277 起直调写入同样放行（防线只剩
+    全局唯一 name，见 #223 变更稿「前提作废，不得引用 ADMIN 是防线」）。
+    """
     registry = _build_registry()
     registry.apply_tool_allow_specs(
         ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
     )
     ctx = toolRegistry.ToolCallContext(agent_id=2, team_id=1, chat_room=None)
-    for name in ("save_mcp_server", "delete_mcp_server"):
-        call = llmApiUtil.OpenAIToolCall(
-            id=f"tc_basic_{name}",
-            function={"name": name, "arguments": json.dumps({"name": "ctx7"})},
+    call = llmApiUtil.OpenAIToolCall(
+        id="tc_basic_direct_save",
+        function={
+            "name": "save_mcp_server",
+            "arguments": json.dumps({"name": "ctx7", "kind": "mcp", "target": "https://x"}),
+        },
+    )
+    result = await registry.execute_tool_call(call, context=ctx)
+    assert result.result["success"] is True, result.result
+
+    rm = llmApiUtil.OpenAIToolCall(
+        id="tc_basic_direct_rm",
+        function={"name": "delete_mcp_server", "arguments": json.dumps({"name": "ctx7"})},
+    )
+    removed = await registry.execute_tool_call(rm, context=ctx)
+    assert removed.result["success"] is True, removed.result
+
+
+@pytest.mark.asyncio
+async def test_basic_member_can_rm_and_enable(mcp_db, loaded_tools, stub_mcp2cli):
+    """#277 权限判据：普通成员 console 侧完成 rm / enable 并生效。"""
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
+    )
+    ctx = toolRegistry.ToolCallContext(agent_id=2, team_id=1, chat_room=None)
+
+    def _call(name: str, command: str) -> llmApiUtil.OpenAIToolCall:
+        return llmApiUtil.OpenAIToolCall(
+            id=f"tc_{name}",
+            function={"name": "console", "arguments": json.dumps({"command": command})},
         )
-        result = await registry.execute_tool_call(call, context=ctx)
-        body = result.result
-        assert body["success"] is False, (name, body)
-        assert body["error_code"] == "admin_denied", (name, body)
-        assert "工具无权限使用" not in body["message"]
+
+    # 先由同一普通成员 add（写权限同样放开）
+    added = await registry.execute_tool_call(
+        _call("add", "mcp add --name ctx7 --kind mcp --target https://x"), context=ctx
+    )
+    assert added.result["success"] is True, added.result
+
+    disabled = await registry.execute_tool_call(_call("dis", "mcp disable ctx7"), context=ctx)
+    assert disabled.result["success"] is True, disabled.result
+    enabled = await registry.execute_tool_call(_call("en", "mcp enable ctx7"), context=ctx)
+    assert enabled.result["success"] is True, enabled.result
+
+    removed = await registry.execute_tool_call(_call("rm", "mcp rm ctx7"), context=ctx)
+    assert removed.result["success"] is True, removed.result
+    after = await registry.execute_tool_call(_call("ls", "mcp ls"), context=ctx)
+    assert after.result["count"] == 0
 
 
 @pytest.mark.asyncio
@@ -489,13 +558,54 @@ async def test_basic_agent_can_list_registry(mcp_db, loaded_tools):
 
 
 @pytest.mark.asyncio
-async def test_credential_refs_logged_as_refs_and_resolved_only_for_dispatch(
-    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, secret_env, caplog
+async def test_exception_log_exit_masks_secret(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, monkeypatch, caplog
 ):
-    """硬条件 ⅱ：日志/返回体只含引用原文；解析后的值只出现在分派 argv 里。"""
+    """#277 F2+F6（38 二轮打回）：异常日志出口的打码必须在**最终输出形态**上。
+
+    上游把完整 argv 回显进异常文案是最常见泄漏形态：返回体走了 `_mask_deep`
+    是干净的，但这条 warning 在 `_run_argv_sync` **内部**、外层打码管不到。
+    F6 窄口径：先 repr 再打码时，值里的 `'`/`\\` 被转义，字面匹配落空 ⇒ 日志
+    留可还原明文。判据（38 定）：同一次调用里，异常日志行**存在**（正向取证），
+    且对日志文本的**原始、repr 转义、去转义三形态**全部 0 命中——只搜字面量会假绿。
+    本用例同时钉住两条日志出口的次序：argv info 行（先打码后 repr，掩码后无明文
+    可转义）与异常 warning 行（打码=最终形态）。
+    """
     await _register_server(
         target="https://mcp.example.com/mcp",
-        credentials={"headers": {"Authorization": f"env:{_VAR}"}},
+        credentials={"headers": {"Authorization": _SECRET, "X-Api-Key": _TRICKY}},
+    )
+
+    def _explode(argv: list[str]) -> None:
+        raise RuntimeError(f"upstream exploded, argv={argv}")
+
+    monkeypatch.setattr(stub_mcp2cli, "_main_impl", _explode)
+    with caplog.at_level(logging.INFO, logger="service.funcToolService.mcpTool"):
+        body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    assert body["success"] is False, body
+    assert body["error_code"] == "mcp2cli_error", body
+
+    log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+    assert "--auth-header" in log_text, log_text  # argv 结构可见
+    # 反向（F6 判据）：原始值 + repr 形态，在日志原文与去转义文本里都 0 命中
+    for value in (_SECRET, _TRICKY):
+        for form in _secret_forms(value):
+            assert form not in log_text, (value, form, log_text)
+            assert form not in _unescape(log_text), (value, form, _unescape(log_text))
+    # 返回体同样三形态 0 命中
+    for value in (_SECRET, _TRICKY):
+        for form in _secret_forms(value):
+            assert form not in json.dumps(body), (value, form, body)
+
+
+@pytest.mark.asyncio
+async def test_plain_value_reaches_dispatch_and_never_logs(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, secret_env, caplog
+):
+    """#277 日志判据：明文值送达分派 argv；日志与返回体里 0 命中（出口打码）。"""
+    await _register_server(
+        target="https://mcp.example.com/mcp",
+        credentials={"headers": {"Authorization": _SECRET}},
     )
     with caplog.at_level(logging.INFO, logger="service.funcToolService.mcpTool"):
         from service.funcToolService.tools import mcp_call
@@ -504,60 +614,43 @@ async def test_credential_refs_logged_as_refs_and_resolved_only_for_dispatch(
     assert body["success"] is True, body
 
     returned_argv = body["argv"]
-    assert f"env:{_VAR}" in json.dumps(returned_argv), returned_argv
-    assert _SECRET not in json.dumps(returned_argv), "返回体 argv 不得含解析值"
+    assert _SECRET not in json.dumps(returned_argv), "返回体 argv 不得含明文值"
+    # 整返回体（不止 argv 子键）0 命中：堵「先打码、再在出口补一段未打码文本」的
+    # 绕开型漏洞（MUT-8 靶子——只查 argv 子键时该变异不红）。
+    assert _SECRET not in json.dumps(body), "返回体整体不得含明文值（含新增字段）"
+    masked_value = returned_argv[returned_argv.index("--auth-header") + 1]
+    assert masked_value == "Authorization:***", masked_value
 
     log_text = "\n".join(rec.getMessage() for rec in caplog.records)
-    assert f"env:{_VAR}" in log_text
-    assert _SECRET not in log_text, "日志 grep 不到解析后的值（硬条件 ⅱ 判据）"
+    assert _SECRET not in log_text, "日志 grep 不到明文值（#277 硬判据）"
+    assert "--auth-header" in log_text, "日志仍应能看到 argv 结构（只是值被掩码）"
 
-    # 分派 argv（替身收到的）才是解析后的。
+    # 分派 argv（替身收到的）必须含真实明文值——凭证确实送达上游。
     dispatch_argv = stub_mcp2cli.runtime_argvs[-1]
     assert dispatch_argv[dispatch_argv.index("--auth-header") + 1] == f"Authorization:{_SECRET}"
 
 
 @pytest.mark.asyncio
-async def test_stdio_env_credentials_resolved_for_dispatch(
-    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, monkeypatch
+async def test_stdio_env_value_verbatim_to_dispatch(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
 ):
-    """env 层（mcp_stdio）：`--env "VAR=env:SRC"` 引用 → 分派时解析为字面值。"""
-    monkeypatch.setenv("API_KEY", "key-value-999")
+    """env 层（mcp_stdio）：#277 起值是明文，直接注入子进程环境变量，无解析链。"""
     await _register_server(
         kind="mcp_stdio",
         target="npx -y some-server",
-        credentials={"env": {"API_KEY": "env:API_KEY"}},
+        credentials={"env": {"API_KEY": _SECRET}},
     )
     from service.funcToolService.tools import mcp_call
 
     body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
     assert body["success"] is True, body
     returned = json.dumps(body["argv"])
-    assert "env:API_KEY" in returned
-    assert "key-value-999" not in returned
+    assert _SECRET not in returned, "返回体 argv 不得含明文值"
+    assert "--env" in returned
 
     dispatch = stub_mcp2cli.runtime_argvs[-1]
     value = dispatch[dispatch.index("--env") + 1]
-    assert value == "API_KEY=key-value-999"
-
-
-@pytest.mark.asyncio
-async def test_credential_unresolved_fails_closed_without_call(
-    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, monkeypatch
-):
-    """B3/B4：env 变量缺失 ⇒ credential_unresolved，不传空值、不发起调用。"""
-    monkeypatch.delenv(_VAR, raising=False)
-    await _register_server(
-        target="https://mcp.example.com/mcp",
-        credentials={"headers": {"Authorization": f"env:{_VAR}"}},
-    )
-    from service.funcToolService.tools import mcp_call
-
-    body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
-    assert body["success"] is False
-    assert body["error_code"] == "credential_unresolved"
-    assert "目标机器" in body["message"]
-    assert stub_mcp2cli.runtime_argvs == [], "解析失败不得发起调用"
-    assert _SECRET not in json.dumps(body)
+    assert value == f"API_KEY={_SECRET}", "分派 argv 必须收到真实明文值"
 
 
 @pytest.mark.asyncio
@@ -591,30 +684,28 @@ def test_build_argv_credential_segments_before_tool_name():
         tool="my-tool",
         args={"a": "1"},
         extra=None,
-        credential_refs={"headers": {"Authorization": "env:GITHUB_TOKEN"}},
+        credentials={"headers": {"Authorization": _SECRET}},
     )
     # 全局段（含凭证）必须排在工具名之前（上游 _split_at_subcommand 语义）。
     assert argv.index("--auth-header") < argv.index("my-tool")
     assert argv == [
         "--mcp", "https://x", "--json",
-        "--auth-header", "Authorization:env:GITHUB_TOKEN",
+        "--auth-header", f"Authorization:{_SECRET}",
         "my-tool", "--a", "1",
     ]
 
 
-def test_resolve_never_touches_non_credential_segments(monkeypatch):
-    """解析定位用「期望段整串相等」：target 里的 env: 字样不得被误伤。"""
-    monkeypatch.setenv(_VAR, _SECRET)
+def test_mask_deep_only_touches_secret_values():
+    """#277 打码只对**精确明文值**做子串替换：形似但不同的串不受误伤。"""
     argv = [
-        "--mcp", "https://x?ref=env:GITHUB_TOKEN", "--json",
-        "--auth-header", "Authorization:env:GITHUB_TOKEN",
+        "--mcp", f"https://x?ref={_SECRET[:4]}-other", "--json",
+        "--auth-header", f"Authorization:{_SECRET}",
         "--list",
     ]
-    resolved = mcpTool._with_resolved_credentials(
-        argv, {"headers": {"Authorization": "env:GITHUB_TOKEN"}}
-    )
-    assert resolved[1] == "https://x?ref=env:GITHUB_TOKEN"  # 原样
-    assert resolved[4] == "Authorization:" + _SECRET  # 只有我们写入的段被替换
+    masked = mcpTool._mask_deep(argv, [_SECRET])
+    assert masked[1] == f"https://x?ref={_SECRET[:4]}-other"  # 非整值命中，原样
+    assert masked[4] == "Authorization:***"                    # 明文值被替换
+    assert masked[3] == "--auth-header"                        # flag 本身不动
 
 
 # ---------------------------------------------------------------------------
@@ -696,3 +787,26 @@ async def test_disabled_entry_ls_body_says_enable_false(
     payload = result.result if hasattr(result, "result") else result
     assert payload.get("success") is True, payload
     await _assert_two_states_distinguishable(payload)
+
+
+@pytest.mark.asyncio
+async def test_ls_credentials_masked_two_states_identical(mcp_db, leader_ctx, loaded_tools):
+    """打码判据（#277 交付标准 3）：启/禁两态的凭证掩码形态一致，且不含完整值。
+
+    M 变异：`entry_summary` 删掉 `credentials_masked` 字段 ⇒ 本用例红。
+    """
+    from service.funcToolService.tools import set_mcp_server_enabled
+
+    creds = {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}}
+    await _register_server(kind="mcp", credentials=creds)
+
+    enabled_body = await list_mcp_servers(name_or_target=None, _context=leader_ctx)
+    await set_mcp_server_enabled(name="ctx7", enable=False, _context=leader_ctx)
+    disabled_body = await list_mcp_servers(name_or_target=None, _context=leader_ctx)
+
+    enabled = [s for s in enabled_body["servers"] if s["name"] == "ctx7"][0]
+    disabled = [s for s in disabled_body["servers"] if s["name"] == "ctx7"][0]
+    expected = {"headers": {"Authorization": "Bearer***"}}
+    assert enabled["credentials_masked"] == expected
+    assert disabled["credentials_masked"] == expected, "启/禁两态打码形态必须一致"
+    assert "sk-TESTONLY-1234567890" not in json.dumps(disabled_body)

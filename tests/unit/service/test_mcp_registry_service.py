@@ -155,48 +155,32 @@ async def test_empty_credentials_normalized_to_empty_dict(mcp_db):
         assert entry.credentials == {}, given
 
 
-async def test_env_ref_is_accepted_and_stored_verbatim(mcp_db):
-    """正例：env: 引用原样入库（一个 key 一个引用，B6）。"""
-    entry = await _save(
-        name="gh",
-        credentials={"headers": {"Authorization": "env:GITHUB_TOKEN"}},
-    )
-    assert entry.credentials == {"headers": {"Authorization": "env:GITHUB_TOKEN"}}
-
-
-@pytest.mark.parametrize(
-    "ref",
-    ["ghp_SUPER_SECRET", "Bearer abc"],
-)
-async def test_inline_plaintext_refused(mcp_db, ref):
-    """反例①：明文一律拒（mcp_inline_credential_refused），提示改用 env: 引用。"""
-    with pytest.raises(TogoException) as excinfo:
-        await _save(
-            name="leak",
-            credentials={"headers": {"Authorization": ref}},
+async def test_values_stored_verbatim_any_string(mcp_db):
+    """#277：值原样存——明文、任意字符串都不再被拒（旧「明文拒绝/file:/keychain: 未实现」校验已删）。"""
+    cases = [
+        "Bearer sk-TESTONLY-1234567890",
+        "env:GITHUB_TOKEN",       # 旧引用语法也只是普通字符串，原样存
+        "file:/etc/secrets/token",
+        "s3:bucket",
+        "plain-password",
+    ]
+    for index, value in enumerate(cases):
+        entry = await _save(
+            name=f"verbatim-{index}",
+            credentials={"headers": {"Authorization": value}},
         )
-    assert excinfo.value.error_code == "mcp_inline_credential_refused"
+        assert entry.credentials == {"headers": {"Authorization": value}}, value
 
 
-async def test_empty_ref_value_refused(mcp_db):
-    with pytest.raises(TogoException) as excinfo:
-        await _save(name="empty", credentials={"headers": {"Authorization": "  "}})
-    assert excinfo.value.error_code == "mcp_invalid_credentials"
+async def test_value_must_be_nonempty_string(mcp_db):
+    """结构校验保留：空串 / 非字符串仍拒（mcp_invalid_credentials）。"""
+    with pytest.raises(TogoException) as empty:
+        await _save(name="empty-str", credentials={"headers": {"Authorization": "  "}})
+    assert empty.value.error_code == "mcp_invalid_credentials"
 
-
-@pytest.mark.parametrize("ref", ["file:/etc/secrets/token", "keychain:mcp/gh"])
-async def test_unimplemented_refs_refused_not_downgraded(mcp_db, ref):
-    """反例②：file:/keychain: 报「未实现」，**不许退化成当明文用**。"""
-    with pytest.raises(TogoException) as excinfo:
-        await _save(name="unimpl", credentials={"headers": {"Authorization": ref}})
-    assert excinfo.value.error_code == "mcp_credential_ref_unimplemented"
-
-
-@pytest.mark.parametrize("ref", ["s3:bucket", "vault:kv/x"])
-async def test_unknown_ref_prefix_refused(mcp_db, ref):
-    with pytest.raises(TogoException) as excinfo:
-        await _save(name="unknown", credentials={"headers": {"Authorization": ref}})
-    assert excinfo.value.error_code == "mcp_inline_credential_refused"
+    with pytest.raises(TogoException) as non_str:
+        await _save(name="num-str", credentials={"headers": {"Authorization": 123}})
+    assert non_str.value.error_code == "mcp_invalid_credentials"
 
 
 async def test_credentials_structure_violations(mcp_db):
@@ -225,12 +209,12 @@ async def test_credential_kind_mismatch_refused(mcp_db):
         )
     assert env_http.value.error_code == "mcp_credential_kind_mismatch"
 
-    # 对称正向：env 凭证配 mcp_stdio 合法。
+    # 对称正向：env 层配 mcp_stdio 合法（值原样存）。
     entry = await _save(
         name="s5", kind="mcp_stdio", target="npx -y some-server",
-        credentials={"env": {"API_KEY": "env:API_KEY"}},
+        credentials={"env": {"API_KEY": "v-API-KEY-VALUE"}},
     )
-    assert entry.credentials == {"env": {"API_KEY": "env:API_KEY"}}
+    assert entry.credentials == {"env": {"API_KEY": "v-API-KEY-VALUE"}}
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +258,7 @@ async def test_overwrite_updates_existing_row(mcp_db):
         kind="openapi",
         target="https://spec.example.com/openapi.json",
         note="换目标",
-        credentials={"headers": {"Authorization": "env:T"}},
+        credentials={"headers": {"Authorization": "Bearer T-value"}},
         overwrite=True,
     )
     assert updated.id == (await gtMcpServerManager.get_by_name("ctx7")).id
@@ -283,7 +267,7 @@ async def test_overwrite_updates_existing_row(mcp_db):
     fresh = rows[0]
     assert fresh.kind == "openapi"
     assert fresh.target == "https://spec.example.com/openapi.json"
-    assert fresh.credentials == {"headers": {"Authorization": "env:T"}}
+    assert fresh.credentials == {"headers": {"Authorization": "Bearer T-value"}}
 
 
 async def test_overwrite_does_not_touch_enable(mcp_db):
@@ -362,34 +346,40 @@ def test_mask_target_masks_query_and_long_tokens():
     assert mask_target("https://x.com/short/path") == "https://x.com/short/path"
 
 
-def test_mask_credentials_keeps_refs_only():
+def test_mask_credentials_keeps_prefix_only():
+    """#277：值已明文，展示掩码=保留少量前缀 + ***；完整值任何形态都不得出现。"""
     masked = mask_credentials_for_display(
-        {"headers": {"Authorization": "env:GITHUB_TOKEN"}, "env": {}}
+        {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}, "env": {"API_KEY": "v-SECRET-999"}}
     )
-    assert masked == {"headers": {"Authorization": "env:GITHUB_TOKEN"}}
-    # 引用白名单之外的值只露前缀（file:***），不回显可定位值。
-    masked_file = mask_credentials_for_display({"headers": {"X": "file:/etc/t"}})
-    assert masked_file == {"headers": {"X": "file:***"}}
+    assert masked == {"headers": {"Authorization": "Bearer***"}, "env": {"API_KEY": "v-SECRET***"}}
+    # 完整值不得出现在掩码里
+    assert "sk-TESTONLY" not in json_dumps(masked)
+    assert "v-SECRET-999" not in json_dumps(masked)
+    # 短值整段打码
+    assert mask_credentials_for_display({"headers": {"A": "abc"}}) == {"headers": {"A": "***"}}
+    assert mask_credentials_for_display({}) == {}
 
 
-async def test_model_to_json_never_leaks(mcp_db):
+async def test_model_to_json_masks_values(mcp_db):
+    """to_json 展示面：完整明文值不出现在 JSON 里，凭证字段是掩码形态（#277）。"""
     await _save(
         target="https://api.example.com/v1?api_key=should_never_leak",
-        credentials={"headers": {"Authorization": "env:GITHUB_TOKEN"}},
+        credentials={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
     )
     entry = await gtMcpServerManager.get_by_name("ctx7")
     data = entry.to_json()
     dumped = json_dumps(data, default=str)
     assert "should_never_leak" not in dumped
-    assert "env:GITHUB_TOKEN" in dumped  # 引用原文允许展示（§4.5-1）
+    assert "sk-TESTONLY-1234567890" not in dumped, "明文凭证值不得出现在 to_json 展示面"
+    assert data["credentials"] == {"headers": {"Authorization": "Bearer***"}}
     assert "target" not in data and data["target_masked"].endswith("?***")
 
 
-async def test_credential_refs_of_returns_verbatim_refs(mcp_db):
-    """1331 硬条件 ⅰ 的 service 侧：refs 原样取出，本层不解析、不持有值。"""
+async def test_credentials_of_returns_verbatim_values(mcp_db):
+    """#277：`credentials_of` 取出的是**原样值**（注入直接用字面值，无解析链）。"""
     await _save(
-        credentials={"headers": {"Authorization": "env:GITHUB_TOKEN"}},
+        credentials={"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}},
     )
     entry = await gtMcpServerManager.get_by_name("ctx7")
-    refs = svc.credential_refs_of(entry)
-    assert refs == {"headers": {"Authorization": "env:GITHUB_TOKEN"}, "env": {}}
+    creds = svc.credentials_of(entry)
+    assert creds == {"headers": {"Authorization": "Bearer sk-TESTONLY-1234567890"}, "env": {}}
