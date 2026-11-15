@@ -36,6 +36,7 @@ from service.funcToolService.consoleTool import console
 from service.funcToolService.tools import (
     delete_mcp_server,
     list_mcp_servers,
+    mcp_call,
     save_mcp_server,
 )
 from service.ormService import AioSqliteDatabase
@@ -448,6 +449,37 @@ async def test_basic_agent_console_add_succeeds(
 
 
 @pytest.mark.asyncio
+async def test_basic_agent_direct_write_succeeds_without_admin(mcp_db, loaded_tools):
+    """#277 F3 替代判据：**直调面**（不经 console）save / delete 对普通成员成功。
+
+    原 `test_basic_agent_direct_call_gets_admin_denied`（1337 附加判据 1）随
+    ADMIN→WRITE 一起删除——它锁的是旧防线；#277 起直调写入同样放行（防线只剩
+    全局唯一 name，见 #223 变更稿「前提作废，不得引用 ADMIN 是防线」）。
+    """
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
+    )
+    ctx = toolRegistry.ToolCallContext(agent_id=2, team_id=1, chat_room=None)
+    call = llmApiUtil.OpenAIToolCall(
+        id="tc_basic_direct_save",
+        function={
+            "name": "save_mcp_server",
+            "arguments": json.dumps({"name": "ctx7", "kind": "mcp", "target": "https://x"}),
+        },
+    )
+    result = await registry.execute_tool_call(call, context=ctx)
+    assert result.result["success"] is True, result.result
+
+    rm = llmApiUtil.OpenAIToolCall(
+        id="tc_basic_direct_rm",
+        function={"name": "delete_mcp_server", "arguments": json.dumps({"name": "ctx7"})},
+    )
+    removed = await registry.execute_tool_call(rm, context=ctx)
+    assert removed.result["success"] is True, removed.result
+
+
+@pytest.mark.asyncio
 async def test_basic_member_can_rm_and_enable(mcp_db, loaded_tools, stub_mcp2cli):
     """#277 权限判据：普通成员 console 侧完成 rm / enable 并生效。"""
     registry = _build_registry()
@@ -496,6 +528,39 @@ async def test_basic_agent_can_list_registry(mcp_db, loaded_tools):
     body = result.result
     assert body["success"] is True, body
     assert body["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_exception_log_exit_masks_secret(
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, monkeypatch, caplog
+):
+    """#277 F2（38 打回）：异常日志出口 `logger.warning("mcp2cli 调用异常: %r", exc)`。
+
+    上游把完整 argv 回显进异常文案是最常见泄漏形态：返回体走了 `_mask_deep`
+    是干净的，但这条 warning 在 `_run_argv_sync` **内部**、外层打码管不到。
+    判据：同一次调用里，异常日志行**存在**（正向取证，防假绿）且明文 0 命中。
+    """
+    await _register_server(
+        target="https://mcp.example.com/mcp",
+        credentials={"headers": {"Authorization": _SECRET}},
+    )
+
+    def _explode(argv: list[str]) -> None:
+        raise RuntimeError(f"upstream exploded, argv={argv}")
+
+    monkeypatch.setattr(stub_mcp2cli, "_main_impl", _explode)
+    with caplog.at_level(logging.INFO, logger="service.funcToolService.mcpTool"):
+        body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    assert body["success"] is False, body
+    assert body["error_code"] == "mcp2cli_error", body
+
+    log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+    # 正向：这条异常日志确实写了（否则 0 命中只是「没记」）
+    assert "mcp2cli 调用异常" in log_text, log_text
+    assert "--auth-header" in log_text, log_text  # argv 结构可见
+    # 反向：明文值在日志里 0 命中（F2 判据）
+    assert _SECRET not in log_text, log_text
+    assert f"Authorization:{_SECRET}" not in json.dumps(body), body
 
 
 @pytest.mark.asyncio

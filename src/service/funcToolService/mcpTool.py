@@ -423,8 +423,12 @@ class _ThreadIsolatedStream(io.TextIOBase):
         return self._buf.getvalue()
 
 
-def _run_argv_sync(argv: list[str]) -> dict[str, Any]:
+def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[str, Any]:
     """同步跑一次 mcp2cli 分派（在线程里执行）。返回结构化结果，不抛异常。
+
+    `secrets`（#277 打回修复 F2）：异常路径的 `logger.warning` 会把 `%r(exc)`
+    整段写进日志，异常文案常含上游回显的完整 argv（即明文凭证），所以打码
+    必须做在**这条日志出口本身**——不能指望外层 `_mask_deep`（它只管返回体）。
 
     **整段持 `_STDOUT_LOCK`**：`redirect_stdout` 换的是进程级 `sys.stdout`，两个线程
     同时进来就会互相截获输出。锁加在这里（而不是 `call_mcp` 里 `async with`）是因为
@@ -463,7 +467,9 @@ def _run_argv_sync(argv: list[str]) -> dict[str, Any]:
             "stderr": _truncate(stderr.getvalue())[0],
         }
     except Exception as exc:  # noqa: BLE001 —— 任何异常都转结构化失败，不往上冒
-        logger.warning("mcp2cli 调用异常: %r", exc)
+        # 出口打码（#277 F2）：`%r(exc)` 可能带上游回显的完整 argv（明文凭证），
+        # 日志出口必须自己打码（F2 判据：异常日志 0 命中明文）。
+        logger.warning("mcp2cli 调用异常: %r", _mask_deep(repr(exc), secrets or []))
         return {
             "success": False,
             "error_code": "mcp2cli_error",
@@ -560,7 +566,7 @@ async def call_mcp(
 
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(_run_argv_sync, argv), timeout=timeout
+            asyncio.to_thread(_run_argv_sync, argv, secrets), timeout=timeout
         )
     except asyncio.TimeoutError:
         # 注意：这里**只是不再等**，worker 线程仍在跑、仍持着 `_STDOUT_LOCK`
