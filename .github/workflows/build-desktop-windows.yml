@@ -292,25 +292,47 @@ jobs:
         $signedSystemBinary = "$env:SystemRoot\System32\notepad.exe"
         $script = "scripts/verify_authenticode.ps1"
 
+        # 注意：GitHub 的 pwsh 包装器在脚本末尾会用 $LASTEXITCODE 当本步骤退出码。
+        # 本步骤里有两次「故意让它失败」的调用（②④），所以每次调用后必须把
+        # $LASTEXITCODE 归零，否则步骤会带着 1 退出 —— run 43663044483 就是这么红的
+        # （4 个方向全对，步骤却红了）。判据结果改用显式变量与 exit 表达。
+        function Invoke-AuthCheck {
+          param([string[]]$CheckArgs)
+          pwsh -NoProfile -File $script @CheckArgs | Out-Host
+          $code = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          return $code
+        }
+        $failures = @()
+
         Write-Host "=== ① 未签名安装包 + -Expect NotSigned（应通过）==="
-        pwsh -NoProfile -File $script -Path $installer -Expect NotSigned
-        if ($LASTEXITCODE -ne 0) { Write-Host "::error::未签名产物未被判为 NotSigned"; exit 1 }
+        $c1 = Invoke-AuthCheck @('-Path', $installer, '-Expect', 'NotSigned')
+        if ($c1 -ne 0) { $failures += "①未签名产物未被判为 NotSigned（exit=$c1）" }
+        else { Write-Host "✅ ①通过：读出了 NotSigned" }
 
         Write-Host "=== ② 未签名安装包 + -Expect Valid（必须失败）==="
-        pwsh -NoProfile -File $script -Path $installer -Expect Valid
-        if ($LASTEXITCODE -eq 0) { Write-Host "::error::-Expect Valid 在未签名产物上竟然通过 ⇒ 判据恒真，无牙"; exit 1 }
-        Write-Host "✅ 如预期失败（exit $LASTEXITCODE）⇒ Valid 判据不是恒真"
+        $c2 = Invoke-AuthCheck @('-Path', $installer, '-Expect', 'Valid')
+        if ($c2 -eq 0) { $failures += "②-Expect Valid 在未签名产物上竟然通过 ⇒ 判据恒真，无牙" }
+        else { Write-Host "✅ ②如预期失败（exit=$c2）⇒ Valid 判据不是恒真" }
 
         Write-Host "=== ③ 系统已签名程序 + -Expect Valid -ExpectedSubject Microsoft（应通过）==="
-        pwsh -NoProfile -File $script -Path $signedSystemBinary -Expect Valid -ExpectedSubject Microsoft
-        if ($LASTEXITCODE -ne 0) { Write-Host "::error::已签名程序未被判为 Valid ⇒ Valid 判据在真签名上不成立"; exit 1 }
+        $c3 = Invoke-AuthCheck @('-Path', $signedSystemBinary, '-Expect', 'Valid', '-ExpectedSubject', 'Microsoft')
+        if ($c3 -ne 0) { $failures += "③已签名程序未被判为 Valid ⇒ Valid 判据在真签名上不成立（exit=$c3）" }
+        else { Write-Host "✅ ③通过：真签名被判 Valid 且主体匹配 Microsoft" }
 
         Write-Host "=== ④ 系统已签名程序 + 期望主体 SignPath Foundation（必须失败）==="
-        pwsh -NoProfile -File $script -Path $signedSystemBinary -Expect Valid -ExpectedSubject "SignPath Foundation"
-        if ($LASTEXITCODE -eq 0) { Write-Host "::error::主体断言在错误主体上竟然通过 ⇒ 主体判据恒真"; exit 1 }
-        Write-Host "✅ 如预期失败（exit $LASTEXITCODE）⇒ 主体断言有牙"
+        $c4 = Invoke-AuthCheck @('-Path', $signedSystemBinary, '-Expect', 'Valid', '-ExpectedSubject', 'SignPath Foundation')
+        if ($c4 -eq 0) { $failures += "④主体断言在错误主体上竟然通过 ⇒ 主体判据恒真" }
+        else { Write-Host "✅ ④如预期失败（exit=$c4）⇒ 主体断言有牙" }
 
+        if ($failures.Count -gt 0) {
+          foreach ($f in $failures) { Write-Host "::error::$f" }
+          "## ❌ Authenticode 判据自证失败`n`n" + ($failures -join "`n") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          exit 1
+        }
         Write-Host "=== Authenticode 判据自证全部通过（4/4）==="
+        "## ✅ Authenticode 判据自证 4/4：未签名⇒NotSigned / 同一文件 -Expect Valid 失败 / 真签名⇒Valid / 错主体⇒失败" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+        exit 0
 
   # ── 签名阶段（#250）──────────────────────────────────────────────────────────
   # 只在发布 tag 上跑：分支 push 不提交签名请求（SignPath 策略要求）。
@@ -369,9 +391,14 @@ jobs:
           if (-not $exe) { Write-Host "::error::SignPath 输出目录里没有 .exe"; exit 1 }
           pwsh -NoProfile -File scripts/verify_authenticode.ps1 `
             -Path $exe.FullName -Expect Valid -ExpectedSubject "$env:SIGNPATH_EXPECTED_SUBJECT"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::签名产物校验失败（Status 非 Valid 或主体不符）"; exit 1 }
-          (Get-FileHash -Algorithm SHA256 -Path $exe.FullName).Hash.ToLower() | Tee-Object -FilePath signed-digest.txt
-          "sha256=$((Get-FileHash -Algorithm SHA256 -Path $exe.FullName).Hash.ToLower())" | Add-Content signed-digest.txt
+          $code = $LASTEXITCODE
+          $global:LASTEXITCODE = 0   # 同上：别让残留的 LASTEXITCODE 决定本步骤退出码
+          if ($code -ne 0) { Write-Host "::error::签名产物校验失败（Status 非 Valid 或主体不符）"; exit 1 }
+          $sha = (Get-FileHash -Algorithm SHA256 -Path $exe.FullName).Hash.ToLower()
+          "file=$($exe.Name)" | Tee-Object -FilePath signed-digest.txt
+          "sha256=$sha" | Tee-Object -Append -FilePath signed-digest.txt
+          Write-Host "✅ 签名产物校验通过，sha256=$sha"
+          exit 0
 
       - name: Upload signed installer
         uses: actions/upload-artifact@v7
