@@ -82,6 +82,10 @@ export type RawAgentTask = Partial<AgentTask> & {
   last_note?: unknown;
   current_block_reason?: unknown;
   depends_on_details?: unknown;
+  current_stage?: unknown;
+  current_owner_id?: unknown;
+  current_owner_name?: unknown;
+  stages?: unknown;
 };
 
 export type RawAgentTaskEvent = {

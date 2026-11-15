@@ -118,3 +118,144 @@ describe('AgentTaskDetailModal 依赖任务列表', () => {
     expect(sectionText).toContain('#153, #154');
   });
 });
+
+describe('AgentTaskDetailModal 多节点流转图', () => {
+  beforeEach(() => {
+    getTaskDetailMock.mockReset();
+    getTaskEventsPageMock.mockReset();
+  });
+
+  it('用多节点连线图替代创建人/处理人/验收人字段，并展示多级节点与状态', async () => {
+    const wrapper = await mountModal(baseTask({
+      status: 'REVIEWING',
+      current_stage: 1,
+      stages: [
+        {
+          stage_index: 0,
+          node_type: 'EXECUTION',
+          name: '后端开发',
+          owner_id: 2,
+          owner_name: '网关开发',
+          stage_status: 'APPROVED',
+        },
+        {
+          stage_index: 1,
+          node_type: 'REVIEW',
+          name: '组长初审',
+          owner_id: 3,
+          owner_name: '网关测试',
+          stage_status: 'ACTIVE',
+        },
+        {
+          stage_index: 2,
+          node_type: 'REVIEW',
+          name: '总监终审',
+          owner_id: 4,
+          owner_name: '技术总监',
+          stage_status: 'WAITING',
+        },
+      ],
+    }));
+
+    // 原来的创建人/处理人/验收人已不在顶部元数据网格中
+    const dtLabels = wrapper.findAll('.task-detail-modal__grid dt').map((el) => el.text());
+    expect(dtLabels).toEqual(['任务 ID', '创建时间', '房间']);
+
+    // 流转图渲染 4 个节点（创建人 + 3 个 stage）与 3 条连线
+    const nodes = wrapper.findAll('.task-workflow-graph__node');
+    const edges = wrapper.findAll('.task-workflow-graph__edge');
+    expect(nodes).toHaveLength(4);
+    expect(edges).toHaveLength(3);
+
+    expect(nodes[0].find('.task-workflow-graph__stage').text()).toBe('创建');
+    expect(nodes[0].find('.task-workflow-graph__owner').text()).toBe('创建人');
+    expect(nodes[0].attributes('data-state')).toBe('approved');
+    expect(edges[0].classes()).toContain('is-done');
+
+    expect(nodes[1].find('.task-workflow-graph__stage').text()).toBe('后端开发');
+    expect(nodes[1].find('.task-workflow-graph__owner').text()).toBe('网关开发');
+    expect(nodes[1].attributes('data-state')).toBe('approved');
+    expect(edges[1].classes()).toContain('is-done');
+
+    expect(nodes[2].find('.task-workflow-graph__stage').text()).toBe('组长初审');
+    expect(nodes[2].find('.task-workflow-graph__owner').text()).toBe('网关测试');
+    expect(nodes[2].attributes('data-state')).toBe('active');
+    expect(edges[2].classes()).not.toContain('is-done');
+
+    expect(nodes[3].find('.task-workflow-graph__stage').text()).toBe('总监终审');
+    expect(nodes[3].find('.task-workflow-graph__owner').text()).toBe('技术总监');
+    expect(nodes[3].attributes('data-state')).toBe('waiting');
+  });
+
+  it('缺少 stages 时按 assignee_id / reviewer_id 回退生成节点链', async () => {
+    const wrapper = await mountModal(baseTask({
+      status: 'IN_PROGRESS',
+      assignee_id: 2,
+      reviewer_id: 3,
+    }));
+
+    const nodes = wrapper.findAll('.task-workflow-graph__node');
+    expect(nodes).toHaveLength(3);
+    expect(nodes[1].find('.task-workflow-graph__stage').text()).toBe('执行');
+    expect(nodes[1].attributes('data-state')).toBe('active');
+    expect(nodes[2].find('.task-workflow-graph__stage').text()).toBe('验收');
+    expect(nodes[2].attributes('data-state')).toBe('waiting');
+  });
+
+  it('任务处于 TODO / ON_HOLD / DONE 时正确映射当前节点状态', async () => {
+    const todoWrapper = await mountModal(baseTask({
+      status: 'TODO',
+      stages: [
+        {
+          stage_index: 0,
+          node_type: 'EXECUTION',
+          name: '',
+          owner_id: 2,
+          owner_name: '小马哥',
+          stage_status: 'ACTIVE',
+        },
+      ],
+    }));
+    expect(todoWrapper.findAll('.task-workflow-graph__node')[1].attributes('data-state')).toBe('todo');
+
+    const holdWrapper = await mountModal(baseTask({
+      status: 'ON_HOLD',
+      stages: [
+        {
+          stage_index: 0,
+          node_type: 'EXECUTION',
+          name: '',
+          owner_id: 2,
+          owner_name: '小马哥',
+          stage_status: 'ACTIVE',
+        },
+      ],
+    }));
+    expect(holdWrapper.findAll('.task-workflow-graph__node')[1].attributes('data-state')).toBe('hold');
+
+    const doneWrapper = await mountModal(baseTask({
+      status: 'DONE',
+      stages: [
+        {
+          stage_index: 0,
+          node_type: 'EXECUTION',
+          name: '',
+          owner_id: 2,
+          owner_name: '小马哥',
+          stage_status: 'APPROVED',
+        },
+        {
+          stage_index: 1,
+          node_type: 'REVIEW',
+          name: '',
+          owner_id: 3,
+          owner_name: '验收员',
+          stage_status: 'APPROVED',
+        },
+      ],
+    }));
+    const doneNodes = doneWrapper.findAll('.task-workflow-graph__node');
+    expect(doneNodes[1].attributes('data-state')).toBe('approved');
+    expect(doneNodes[2].attributes('data-state')).toBe('approved');
+  });
+});

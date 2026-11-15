@@ -10,7 +10,7 @@ import type {
   MessageInfo,
   RoomState,
 } from '../types';
-import { normalizeAgentTaskEvent, normalizeContextUsage } from '../api';
+import { normalizeAgentTaskEvent, normalizeContextUsage, normalizeTaskStages } from '../api';
 import type { RawAgentTaskEvent } from '../api';
 
 /**
@@ -232,7 +232,7 @@ function normalizeAgentTask(value: unknown): AgentTask | null {
   }
 
   const raw = value as RawRecord;
-  return {
+  const normalized: AgentTask = {
     id: Number(raw.id ?? 0),
     team_id: Number(raw.team_id ?? 0),
     title: String(raw.title ?? ''),
@@ -252,6 +252,23 @@ function normalizeAgentTask(value: unknown): AgentTask | null {
     created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : null,
   };
+  if (typeof raw.current_stage === 'number' && Number.isFinite(raw.current_stage)) {
+    normalized.current_stage = raw.current_stage;
+  }
+  if (typeof raw.current_owner_id === 'number' || raw.current_owner_id === null) {
+    normalized.current_owner_id =
+      typeof raw.current_owner_id === 'number' && Number.isFinite(raw.current_owner_id)
+        ? raw.current_owner_id
+        : null;
+  }
+  if (typeof raw.current_owner_name === 'string' || raw.current_owner_name === null) {
+    normalized.current_owner_name =
+      typeof raw.current_owner_name === 'string' ? raw.current_owner_name : null;
+  }
+  if (Array.isArray(raw.stages)) {
+    normalized.stages = normalizeTaskStages(raw.stages);
+  }
+  return normalized;
 }
 
 export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent | null {  if (!payload || typeof payload !== 'object') {

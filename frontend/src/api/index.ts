@@ -15,6 +15,7 @@ export {
 
 export {
   normalizeAgentTaskEvent,
+  normalizeTaskStages,
 } from './normalizers/task';
 
 export {

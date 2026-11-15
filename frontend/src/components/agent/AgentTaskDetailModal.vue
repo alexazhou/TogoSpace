@@ -14,6 +14,7 @@ import { connectionState } from '../../appUiState';
 import type { AgentTask, AgentTaskDependencySummary, AgentTaskStatus } from '../../types';
 import { formatBackendDateTime } from '../../utils';
 import AgentTaskEventTimeline from './AgentTaskEventTimeline.vue';
+import AgentTaskWorkflowGraph from './AgentTaskWorkflowGraph.vue';
 import MarkdownContent from '../ui/MarkdownContent.vue';
 
 const props = defineProps<{
@@ -265,22 +266,21 @@ function requestClose(): void {
             <dd>{{ createdAtLabel }}</dd>
           </div>
           <div>
-            <dt>{{ t('agent.taskCreatorLabel') }}</dt>
-            <dd>{{ creatorLabel }}</dd>
-          </div>
-          <div>
-            <dt>{{ t('agent.taskAssigneeLabel') }}</dt>
-            <dd>{{ assigneeLabel }}</dd>
-          </div>
-          <div>
-            <dt>{{ t('agent.taskReviewerLabel') }}</dt>
-            <dd>{{ reviewerLabel }}</dd>
-          </div>
-          <div>
             <dt>{{ t('agent.taskRoomLabel') }}</dt>
             <dd>{{ roomDetailLabel }}</dd>
           </div>
         </dl>
+
+        <div class="task-detail-modal__section">
+          <p class="task-detail-modal__section-title">{{ t('agent.taskWorkflowLabel') }}</p>
+          <AgentTaskWorkflowGraph
+            :task="view"
+            :creator-label="creatorLabel"
+            :assignee-label="assigneeLabel"
+            :reviewer-label="reviewerLabel"
+            :actor-label="actorLabel"
+          />
+        </div>
 
         <div v-if="view.current_block_reason" class="task-detail-modal__section task-detail-modal__section--warn">
           <p class="task-detail-modal__section-title">{{ t('agent.taskBlockReasonLabel') }}</p>
@@ -498,7 +498,7 @@ function requestClose(): void {
 .task-detail-modal__grid {
   margin: 14px 0 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px 14px;
 }
 

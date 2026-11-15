@@ -1,5 +1,14 @@
 import type { RawAgentTask, RawAgentTaskEvent } from '../types/raw';
-import type { AgentTask, AgentTaskDependencySummary, AgentTaskEvent, AgentTaskPriority, AgentTaskStatus } from '../../types';
+import type {
+  AgentTask,
+  AgentTaskDependencySummary,
+  AgentTaskEvent,
+  AgentTaskPriority,
+  AgentTaskStage,
+  AgentTaskStageNodeType,
+  AgentTaskStageStatus,
+  AgentTaskStatus,
+} from '../../types';
 
 function normalizeAgentTaskStatus(value?: unknown): AgentTaskStatus {
   const normalized = String(value ?? '').trim().toUpperCase();
@@ -85,6 +94,42 @@ function normalizeDependencySummaries(value: unknown): AgentTaskDependencySummar
   });
 }
 
+function normalizeStageNodeType(value: unknown): AgentTaskStageNodeType {
+  return String(value ?? '').trim().toUpperCase() === 'REVIEW' ? 'REVIEW' : 'EXECUTION';
+}
+
+function normalizeStageStatus(value: unknown): AgentTaskStageStatus {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'APPROVED' || normalized === 'ACTIVE' || normalized === 'WAITING') {
+    return normalized;
+  }
+  return 'WAITING';
+}
+
+export function normalizeTaskStages(value: unknown): AgentTaskStage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item, index) => {
+      const raw = (item ?? {}) as Record<string, unknown>;
+      const stageIndex = Number(raw.stage_index ?? index);
+      const ownerId = Number(raw.owner_id ?? 0);
+      const ownerName = typeof raw.owner_name === 'string' && raw.owner_name.trim()
+        ? raw.owner_name.trim()
+        : null;
+      return {
+        stage_index: Number.isFinite(stageIndex) ? stageIndex : index,
+        node_type: normalizeStageNodeType(raw.node_type),
+        name: typeof raw.name === 'string' ? raw.name.trim() : '',
+        owner_id: Number.isFinite(ownerId) ? ownerId : 0,
+        owner_name: ownerName,
+        stage_status: normalizeStageStatus(raw.stage_status),
+      };
+    })
+    .sort((left, right) => left.stage_index - right.stage_index);
+}
+
 export function normalizeAgentTask(task: RawAgentTask): AgentTask {
   const normalized: AgentTask = {
     id: Number(task.id ?? 0),
@@ -123,6 +168,22 @@ export function normalizeAgentTask(task: RawAgentTask): AgentTask {
   }
   if (Array.isArray(task.depends_on_details)) {
     normalized.depends_on_details = normalizeDependencySummaries(task.depends_on_details);
+  }
+  if (typeof task.current_stage === 'number' && Number.isFinite(task.current_stage)) {
+    normalized.current_stage = task.current_stage;
+  }
+  if (typeof task.current_owner_id === 'number' || task.current_owner_id === null) {
+    normalized.current_owner_id =
+      typeof task.current_owner_id === 'number' && Number.isFinite(task.current_owner_id)
+        ? task.current_owner_id
+        : null;
+  }
+  if (typeof task.current_owner_name === 'string' || task.current_owner_name === null) {
+    normalized.current_owner_name =
+      typeof task.current_owner_name === 'string' ? task.current_owner_name : null;
+  }
+  if (Array.isArray(task.stages)) {
+    normalized.stages = normalizeTaskStages(task.stages);
   }
 
   return normalized;

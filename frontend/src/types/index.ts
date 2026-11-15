@@ -198,6 +198,18 @@ export interface AgentTaskDependencySummary {
   status: AgentTaskStatus | 'UNKNOWN';
 }
 
+export type AgentTaskStageNodeType = 'EXECUTION' | 'REVIEW';
+export type AgentTaskStageStatus = 'WAITING' | 'ACTIVE' | 'APPROVED';
+
+export interface AgentTaskStage {
+  stage_index: number;
+  node_type: AgentTaskStageNodeType;
+  name: string;
+  owner_id: number;
+  owner_name: string | null;
+  stage_status: AgentTaskStageStatus;
+}
+
 export interface AgentTask {
   id: number;
   team_id: number;
@@ -220,6 +232,10 @@ export interface AgentTask {
   last_note?: string;
   current_block_reason?: string | null;
   depends_on_details?: AgentTaskDependencySummary[];
+  current_stage?: number;
+  current_owner_id?: number | null;
+  current_owner_name?: string | null;
+  stages?: AgentTaskStage[];
 }
 
 export interface RoomInfo {
