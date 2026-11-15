@@ -190,7 +190,7 @@ flowchart LR
 | **动态调整后续节点** | `append_stages=[...]` / `remove_stage_index=i` / `reassign_stage={stage_index, owner_id}` | `remove_stage_index` 仅允许删除未开始的 `EXECUTION` 节点（认领后禁止删除 `REVIEW` 节点） |
 | **追加评论** | 仅传 `note="..."` | 全员随时可用（含终态），不改变状态与游标 |
 
-> 现状（2026-11-16）：本节漏了**第五类用法** —— **验收人变更/撤销**（v2 参数 `reviewer_id=` / `clear_fields=["reviewer_id"]`，实现 `taskService._handle_reviewer_change`）。当前实现把 `update_task` 的意图分为**四类互斥**：状态流转 / `workflow_action` / 节点调整 / 验收人变更，同时给多类直接报 `ambiguous_task_update`（`src/service/funcToolService/tools.py:2122-2132`、`taskService.py:1455`）。单审核/无审核任务走 `reviewer_id` 会同步节点链；多级任务会被拒绝并引导用 `reassign_stage`（review_notes S-1 的口径，已落地）。
+> 现状（2026-11-16）：本节漏了**第五类用法** —— **验收人变更/撤销**（v2 参数 `reviewer_id=` / `clear_fields=["reviewer_id"]`，实现 `taskService._handle_reviewer_change`）。当前实现把 `update_task` 的意图分为**四类互斥**：状态流转 / `workflow_action` / 节点调整 / 验收人变更，同时给多类直接报 `ambiguous_task_update`（`src/service/funcToolService/tools.py:2122-2132`、`taskService.py:1604`）。单审核/无审核任务走 `reviewer_id` 会同步节点链；多级任务会被拒绝并引导用 `reassign_stage`（review_notes S-1 的口径，已落地）。
 
 ### 5.3 `get_task_detail` & `list_tasks`
 

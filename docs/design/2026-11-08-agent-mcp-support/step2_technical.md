@@ -13,7 +13,7 @@
 > | 本文设计 | 今天的实现（依据） |
 > |---|---|
 > | `mcpService` / `TeamMcpManager` 进程池，按 Team 起停 | **不存在**（`grep -rln "TeamMcpManager" --include=*.py src/` 空）。业务全在 `src/service/mcpRegistryService.py`（纯 CRUD + name 解析，不管进程） |
-> | 表 `gt_mcp_server`，迁移 `0021_add_gt_mcp_servers.sql`，17 列（含 `team_id`/`scope`/`transport`/`command`/`args`/`env`/`url`/`headers`/`tool_allowlist`/超时两列） | 表 **`mcp_servers`**，迁移 **`0023_add_mcp_servers.sql`**，10 列：`id,name,kind,protocol,target,note,config,enable,created_by,created_at,updated_at`（`0023_add_mcp_servers.sql:26-38`；`tool_allowlist`/超时列在 `src/` 全无） |
+> | 表 `gt_mcp_server`，迁移 `0021_add_gt_mcp_servers.sql`，17 列（含 `team_id`/`scope`/`transport`/`command`/`args`/`env`/`url`/`headers`/`tool_allowlist`/超时两列） | 表 **`mcp_servers`**，迁移 **`0023_add_mcp_servers.sql`**，11 列：`id,name,kind,protocol,target,note,config,enable,created_by,created_at,updated_at`（`0023_add_mcp_servers.sql:23-35`）；`tool_allowlist`/超时列在 `src/` 全无） |
 > | `UNIQUE(team_id, name)` + `(team_id, enabled)` 查询索引 | `ux_mcp_servers_name(name)` **全局唯一**；无查询索引（`mcpRegistryService.py:321` 全表读） |
 > | `restore_team` 先起 MCP、并发降级、SIGTERM→SIGKILL 孤儿治理（§4 全节） | **无对应实现**：`grep -n "mcp" src/service/teamService.py` 空；`mcp_stdio` 的子进程只在单次调用内由 mcp2cli 起落（`mcpTool.py:17-18`），无常驻进程即无孤儿问题 |
 > | `mcp__{server}__{tool}` 命名 + 动态注册进 `tool_registry`（§5.1/5.2） | Agent 侧**只有一个**工具 `mcp_call`；注册项在它内部解析（`tools.py:166-179`），无命名空间前缀 |
@@ -103,7 +103,7 @@ flowchart TD
 
 ### 3.1 数据库表：`gt_mcp_server`
 
-> 现状（2026-11-16）：表名、迁移编号、全部字段均已不同 —— 实际为 `mcp_servers` / `0023_add_mcp_servers.sql` / 10 列（`name,kind,protocol,target,note,config,enable,created_by`），唯一约束改为**全局唯一 name**。完整对照见文首现状块与 report.md T4/T5。
+> 现状（2026-11-16）：表名、迁移编号、全部字段均已不同 —— 实际为 `mcp_servers` / `0023_add_mcp_servers.sql` / 11 列（`name,kind,protocol,target,note,config,enable,created_by`），唯一约束改为**全局唯一 name**。完整对照见文首现状块与 report.md T4/T5。
 
 通过迁移脚本 `assets/migrate/0021_add_gt_mcp_servers.sql` 创建，对应模型类 `GtMcpServer`（继承自 `DbModelBase`，复用 `AutoTimestampMixin`）：
 
