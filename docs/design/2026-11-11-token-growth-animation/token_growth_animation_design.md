@@ -1,5 +1,11 @@
 # Token 数字增长放大动画设计
 
+> ⚠️ **本文只覆盖 LLM_INFER（split 形态），不覆盖 COMPACT（上下文压缩）。**
+> COMPACT 形态的增长放大由 **#206** 补入（见 §4.2.1「补注（#276）：#206 COMPACT 形态」），
+> 判据见 `AgentActivityItem.grow.test.ts` 的 **G-A6–G-A8**。
+> 本文对 split 形态仍然准确、仍可引用，**不是「已过期」** —— 它只是从未描述过第二种显示形态，
+> 而这条缺口实际导致过两次实现遗漏（#176 只补了补间、#206 才发现放大根本没接）。
+
 - 日期：2026-11-11
 - 状态：已实现
 - 影响范围：`frontend/src/components/agent/AgentActivityToken.vue`、`frontend/src/components/agent/AgentActivityItem.vue`、`frontend/src/composables/useGrowingScale.ts`
@@ -156,6 +162,18 @@ CSS：
 
 注意模板里箭头与数字之间不能有换行/缩进空白以外的额外空格——空格被刻意放进箭头字符串（`'↑ '` / `' ↓ '`），保证 DOM 文本与改造前的「↑ 8421 ↓ 20」逐字一致。现有测试 C1–C7 会检查文本内容，这也是拆分方案能落地的前提。
 
+### 4.2.1 补注（#276）：#206 COMPACT 形态
+
+上文 §4.2 与全文其余部分只描述了 **split（LLM_INFER）** 形态的接线。**COMPACT（上下文压缩）形态的放大是 #206 才补上的**，三段事实：
+
+1. **形态一**（`↑ {before} ↓ {count}`，压缩进行中）：`count` 是**独立数字节点**，接**第三个** `useGrowingScale` 实例 `tokenCompactScale`（同文件，符号 `tokenCompactScale`；时点 `0.5_dev@811e1623` 位于 `src/components/agent/AgentActivityToken.vue` 的 `const tokenCompactScale = useGrowingScale(...)` 一行）。它复用已有的 `tokenCompactCountTarget` —— 放大与补间必须盯**同一个量**。
+2. **形态一的 `before` 恒定不放大**：压缩前规模在整个压缩过程中不变，没有「在变」的量，与本文 §2 第 4 条「数值不变不触发」同源。
+3. **形态二**（`tokens {before} → {after}`，压缩结束）**不接放大**：两个都是定值，同理不接。
+
+模板结构与 split 分支同构（`--tokens-segment` > `--tokens-arrow` + `--tokens-number`），因此**没有为本形态新增任何样式规则**；`--tokens-number` 上的 `transform-origin: left center` 等既有约定继续适用。
+
+> 位置标注约定：**行号是时点值（会随改动漂移），符号名是稳定值**。本文凡指代码位置都给符号名 + 时点 sha，不只给行号。
+
 ### 4.3 i18n
 
 原先「↑ / ↓」写死在 `tokenInferenceUp` / `tokenInferenceDown` 的完整文案里。拆分后新增两个只含符号的 key：
@@ -204,12 +222,15 @@ Demo 是给设计/评审看的可视化参考，不参与构建，也不被前�
 | S9 | 卸载后不再响应目标变化 |
 | S10 | reduced-motion 下恒为 1 |
 
-`frontend/src/components/agent/__tests__/AgentActivityItem.grow.test.ts`（G-A1–G-A5）验证组件接线：
+`frontend/src/components/agent/__tests__/AgentActivityItem.grow.test.ts`（G-A1–G-A8）验证组件接线：
 
 - 输入、输出两段各自独立缩放，只有变化的一段放大；
 - 数值变小时不放大；
 - 箭头节点没有 inline transform，且动画过程中节点不被替换；
 - 两段同时增长时各自取到自己的峰值。
+
+- **COMPACT 形态**（#206 补入，见 §4.2.1 补注）：形态一 `count` 递增时只有数字放大、前缀 `↑ before ↓` 不带 transform（**G-A6**）；`count` 不变（仅无输出量 → 0）时不放大（**G-A7**）；形态二 `tokens A → B` 没有数字节点、无任何 transform（**G-A8**）。
+- 上述 A1–A5 只覆盖 split 形态；A6–A8 的加入时点为 `0.5_dev@811e1623`（该文件当前共 8 条）。
 
 回归：`AgentActivityItem.tween.test.ts` C1–C7 全部通过；其中 C7 的「在途帧数量」断言从 `toBe(1)` 改为 `toBeGreaterThan(0)`，因为补间与增长放大现在各自会排帧，数量归属不是该用例的判据。
 
@@ -246,6 +267,6 @@ Demo 是给设计/评审看的可视化参考，不参与构建，也不被前�
 | `frontend/src/locales/zh-CN.json` | 新增 `tokenInferenceUpArrow` / `tokenInferenceDownArrow` |
 | `frontend/src/locales/en.json` | 同上 |
 | `frontend/src/composables/__tests__/useGrowingScale.test.ts` | S1–S10 |
-| `frontend/src/components/agent/__tests__/AgentActivityItem.grow.test.ts` | G-A1–G-A5 |
+| `frontend/src/components/agent/__tests__/AgentActivityItem.grow.test.ts` | G-A1–G-A8 |
 | `frontend/src/components/agent/__tests__/AgentActivityItem.tween.test.ts` | 回归 C1–C7 |
 | `docs/design/2026-11-11-token-growth-animation/demo/token-growth-demo.html` | 独立可视化 Demo |
