@@ -178,6 +178,11 @@ class TestP1aRoomLocator:
         monkeypatch.setattr(tools.gtRoomManager, "get_room_by_id", AsyncMock(side_effect=_by_id))
         monkeypatch.setattr(tools.gtRoomManager, "get_room_by_team_and_name", AsyncMock(side_effect=_by_name))
         monkeypatch.setattr(roomService, "get_room", lambda room_id: None)
+        # total_messages 已改为查 DB 计数（内存窗口化后 len(messages) 只是窗口大小），
+        # 本类用例不建真库，故把计数查询替身为 0（不关心数值，只关心定位语义）。
+        monkeypatch.setattr(
+            tools.gtRoomMessageManager, "count_room_messages", AsyncMock(return_value=0),
+        )
         monkeypatch.setattr(
             tools.gtAgentManager, "get_team_all_agents",
             AsyncMock(return_value=[_agent(1, "alice"), _agent(2, "bob")]),

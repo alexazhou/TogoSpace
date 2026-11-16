@@ -147,12 +147,17 @@ class TestChatRoomMessages(ServiceTestCase):
             await room.add_message(99999, "hello")
 
     async def test_format_log(self):
-        """format_log 输出包含房间标题与消息发送者。"""
+        """format_log 输出包含房间标题与消息发送者，且标题显式标注「仅内存窗口」。
+
+        窗口化后 `format_log` 只遍历内存窗口（最多 WINDOW_SIZE 条），标题必须写明，
+        否则看日志的人会误以为这是完整历史。
+        """
         await self.create_room(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
         log = room.format_log()
-        assert f"=== test_room@{TEAM} 聊天记录 ===" in log
+        assert f"=== test_room@{TEAM} 聊天记录" in log
+        assert "仅内存最近" in log and "窗口上限" in log
         # SYSTEM agent 的 display_name 根据语言可能是"系统提醒"或"SYSTEM"
         assert ("系统提醒" in log or "SYSTEM" in log)
 
@@ -266,9 +271,9 @@ class TestImmediateMessages(ServiceTestCase):
         bob_id = await self._get_agent_id("bob")
 
         await room.add_message(alice_id, "即时消息", insert_immediately=True)
-        assert room.has_unread_immediate_messages(bob_id) is True
+        assert await room.has_unread_immediate_messages(bob_id) is True
         # 自己发的不算未读
-        assert room.has_unread_immediate_messages(alice_id) is False
+        assert await room.has_unread_immediate_messages(alice_id) is False
 
     async def test_has_unread_immediate_messages_false_for_regular_message(self):
         room = await self._prepare_room("imm_regular_room", ["alice", "bob"])
@@ -276,7 +281,7 @@ class TestImmediateMessages(ServiceTestCase):
         bob_id = await self._get_agent_id("bob")
 
         await room.add_message(alice_id, "普通消息")
-        assert room.has_unread_immediate_messages(bob_id) is False
+        assert await room.has_unread_immediate_messages(bob_id) is False
 
     async def test_has_unread_immediate_messages_false_after_read(self):
         room = await self._prepare_room("imm_read_room", ["alice", "bob"],
@@ -286,7 +291,7 @@ class TestImmediateMessages(ServiceTestCase):
 
         await room.add_message(alice_id, "即时消息", insert_immediately=True)
         await room.get_unread_messages(bob_id)
-        assert room.has_unread_immediate_messages(bob_id) is False
+        assert await room.has_unread_immediate_messages(bob_id) is False
 
     async def test_immediate_downgraded_in_group_room(self):
         """非私聊房间不支持立即注入，降级为普通消息（标志位不落库）。"""

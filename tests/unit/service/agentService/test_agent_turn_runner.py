@@ -192,7 +192,7 @@ async def test_wake_next_turn_only_for_idle_private_room_with_unread(turn_runner
     room.room_type = RoomType.PRIVATE
     room.state = RoomState.IDLE
     room.OPERATOR_MEMBER_ID = -1
-    room.has_unread_messages = MagicMock(return_value=True)
+    room.has_unread_messages = AsyncMock(return_value=True)
     room.handle_finish_request = AsyncMock(return_value=True)
 
     await turn_runner._wake_next_turn_if_unread(room)
@@ -213,7 +213,7 @@ async def test_wake_next_turn_passes_other_member_in_double_ai_private_room(turn
     room.state = RoomState.IDLE
     room.OPERATOR_MEMBER_ID = -1
     room.get_agent_ids = MagicMock(return_value=[1, 2])  # 自己(1) + 另一成员(2)
-    room.has_unread_messages = MagicMock(return_value=True)
+    room.has_unread_messages = AsyncMock(return_value=True)
     room.handle_finish_request = AsyncMock(return_value=True)
 
     await turn_runner._wake_next_turn_if_unread(room)
@@ -231,7 +231,7 @@ async def test_wake_next_turn_falls_back_to_operator_when_no_other_member(turn_r
     room.state = RoomState.IDLE
     room.OPERATOR_MEMBER_ID = -1
     room.get_agent_ids = MagicMock(return_value=[1])  # 只有自己
-    room.has_unread_messages = MagicMock(return_value=True)
+    room.has_unread_messages = AsyncMock(return_value=True)
     room.handle_finish_request = AsyncMock(return_value=True)
 
     await turn_runner._wake_next_turn_if_unread(room)
@@ -248,9 +248,9 @@ async def test_safe_boundary_scans_all_private_rooms(turn_runner):
     turn_runner._inject_immediate_messages = AsyncMock()
 
     ctrl_room = MagicMock(spec=ChatRoom)
-    ctrl_room.has_unread_immediate_messages = MagicMock(return_value=False)
+    ctrl_room.has_unread_immediate_messages = AsyncMock(return_value=False)
     private_room = MagicMock(spec=ChatRoom)
-    private_room.has_unread_immediate_messages = MagicMock(return_value=True)
+    private_room.has_unread_immediate_messages = AsyncMock(return_value=True)
 
     turn_runner.driver = MagicMock()
     turn_runner.driver.turn_setup = SimpleNamespace(max_retries=1, hint_prompt="")
@@ -277,7 +277,7 @@ async def test_wake_next_turn_skipped_when_any_condition_fails(turn_runner, room
     room.room_type = getattr(RoomType, room_type)
     room.state = state
     room.OPERATOR_MEMBER_ID = -1
-    room.has_unread_messages = MagicMock(return_value=has_unread)
+    room.has_unread_messages = AsyncMock(return_value=has_unread)
     room.handle_finish_request = AsyncMock()
 
     await turn_runner._wake_next_turn_if_unread(room)

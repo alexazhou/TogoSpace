@@ -28,6 +28,18 @@ AGENT_ID = 1
 def mock_db_manager():
     with patch("service.roomService.messageStore.gtRoomMessageManager") as mock:
         mock.append_room_message = AsyncMock(return_value=MagicMock(id=999))
+        # 窗口越界补读（get_room_messages_by_seq_range）/ escalate DB fallback
+        # （get_room_message_by_id）默认返回空，各用例按需覆盖。
+        mock.get_room_messages_by_seq_range = AsyncMock(return_value=[])
+        mock.get_room_message_by_id = AsyncMock(return_value=None)
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_agent_manager():
+    """补读路径的 display_name 批量回填（`gtAgentManager.get_agents_by_ids`）。"""
+    with patch("service.roomService.messageStore.gtAgentManager") as mock:
+        mock.get_agents_by_ids = AsyncMock(return_value=[])
         yield mock
 
 
@@ -136,48 +148,48 @@ class TestAppendAndAssignSeq:
 class TestGetUnread:
     """get_unread：取 seq >= 游标 的全部消息，并推进游标。"""
 
-    def test_returns_empty_when_no_messages(self, mock_room):
+    async def test_returns_empty_when_no_messages(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        assert store.get_unread(agent_id=AGENT_ID) == []
+        assert await store.get_unread(agent_id=AGENT_ID) == []
 
     async def test_returns_all_from_cursor_start(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(content="a"))
         await store.append_and_assign_seq(_msg(content="b"))
-        assert [m.seq for m in store.get_unread(agent_id=AGENT_ID)] == [0, 1]
+        assert [m.seq for m in await store.get_unread(agent_id=AGENT_ID)] == [0, 1]
 
     async def test_advances_cursor_so_second_call_is_empty(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg())
-        store.get_unread(agent_id=AGENT_ID)
-        assert store.get_unread(agent_id=AGENT_ID) == []
+        await store.get_unread(agent_id=AGENT_ID)
+        assert await store.get_unread(agent_id=AGENT_ID) == []
 
     async def test_returns_only_new_messages_after_cursor(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(content="old"))
-        store.get_unread(agent_id=AGENT_ID)
+        await store.get_unread(agent_id=AGENT_ID)
         await store.append_and_assign_seq(_msg(content="new"))
-        unread = store.get_unread(agent_id=AGENT_ID)
+        unread = await store.get_unread(agent_id=AGENT_ID)
         assert [m.content for m in unread] == ["new"]
 
     async def test_includes_own_messages(self, mock_room):
         """游标必须能越过自己的发言，否则会被自己的消息卡住。"""
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=AGENT_ID, content="mine"))
-        assert [m.content for m in store.get_unread(agent_id=AGENT_ID)] == ["mine"]
+        assert [m.content for m in await store.get_unread(agent_id=AGENT_ID)] == ["mine"]
 
     async def test_cursor_is_per_agent(self, mock_room):
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=3))
-        store.get_unread(agent_id=1)
-        assert len(store.get_unread(agent_id=2)) == 1
+        await store.get_unread(agent_id=1)
+        assert len(await store.get_unread(agent_id=2)) == 1
 
     async def test_read_index_reflects_next_seq(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg())
         await store.append_and_assign_seq(_msg())
-        store.get_unread(agent_id=AGENT_ID)
+        await store.get_unread(agent_id=AGENT_ID)
         assert store.get_read_index()[AGENT_ID] == 2
 
 
@@ -187,81 +199,81 @@ class TestGetUnread:
 class TestHasUnreadMessages:
     """has_unread_messages：只判断，不推进游标；必须排除自己发的消息。"""
 
-    def test_false_when_no_messages(self, mock_room):
+    async def test_false_when_no_messages(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        assert store.has_unread_messages(AGENT_ID) is False
+        assert await store.has_unread_messages(AGENT_ID) is False
 
     async def test_true_for_unread_other_message(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2))
-        assert store.has_unread_messages(AGENT_ID) is True
+        assert await store.has_unread_messages(AGENT_ID) is True
 
     async def test_false_after_read(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2))
-        store.get_unread(agent_id=AGENT_ID)
-        assert store.has_unread_messages(AGENT_ID) is False
+        await store.get_unread(agent_id=AGENT_ID)
+        assert await store.has_unread_messages(AGENT_ID) is False
 
     async def test_false_for_own_message_only(self, mock_room):
         """AI 自己刚发言时不能误判为「还有未读」，否则 Turn 结束会空转。"""
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=AGENT_ID))
-        assert store.has_unread_messages(AGENT_ID) is False
+        assert await store.has_unread_messages(AGENT_ID) is False
 
     async def test_true_when_own_message_followed_by_other(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=AGENT_ID))
         await store.append_and_assign_seq(_msg(sender_id=2))
-        assert store.has_unread_messages(AGENT_ID) is True
+        assert await store.has_unread_messages(AGENT_ID) is True
 
     async def test_does_not_advance_cursor(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2))
-        store.has_unread_messages(AGENT_ID)
-        store.has_unread_messages(AGENT_ID)
+        await store.has_unread_messages(AGENT_ID)
+        await store.has_unread_messages(AGENT_ID)
         assert store.get_read_index() == {}
-        assert len(store.get_unread(agent_id=AGENT_ID)) == 1
+        assert len(await store.get_unread(agent_id=AGENT_ID)) == 1
 
     async def test_per_agent(self, mock_room):
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2))
-        assert store.has_unread_messages(1) is True
-        assert store.has_unread_messages(2) is False
+        assert await store.has_unread_messages(1) is True
+        assert await store.has_unread_messages(2) is False
 
 
 class TestHasUnreadImmediateMessages:
     """has_unread_immediate_messages：语义是「有 immediate 消息还没被读」。"""
 
-    def test_false_when_no_messages(self, mock_room):
+    async def test_false_when_no_messages(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        assert store.has_unread_immediate_messages(AGENT_ID) is False
+        assert await store.has_unread_immediate_messages(AGENT_ID) is False
 
     async def test_false_for_regular_unread_messages(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=False))
-        assert store.has_unread_immediate_messages(AGENT_ID) is False
+        assert await store.has_unread_immediate_messages(AGENT_ID) is False
 
     async def test_true_for_unread_immediate_message(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=True))
-        assert store.has_unread_immediate_messages(AGENT_ID) is True
+        assert await store.has_unread_immediate_messages(AGENT_ID) is True
 
     async def test_false_after_read(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=True))
-        store.get_unread(agent_id=AGENT_ID)
-        assert store.has_unread_immediate_messages(AGENT_ID) is False
+        await store.get_unread(agent_id=AGENT_ID)
+        assert await store.has_unread_immediate_messages(AGENT_ID) is False
 
     async def test_false_for_own_immediate_message(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=AGENT_ID, insert_immediately=True))
-        assert store.has_unread_immediate_messages(AGENT_ID) is False
+        assert await store.has_unread_immediate_messages(AGENT_ID) is False
 
     async def test_does_not_advance_cursor(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=True))
-        assert store.has_unread_immediate_messages(AGENT_ID) is True
+        assert await store.has_unread_immediate_messages(AGENT_ID) is True
         assert store.get_read_index() == {}
 
 
@@ -276,7 +288,7 @@ class TestEscalateToImmediate:
         m = _msg(sender_id=OPERATOR_ID, content="hi", db_id=10)
         await store.append_and_assign_seq(m)
 
-        result = store.escalate_to_immediate(db_id=10)
+        result = await store.escalate_to_immediate(db_id=10)
 
         assert result is m
         assert result.insert_immediately is True
@@ -287,7 +299,7 @@ class TestEscalateToImmediate:
         store = RoomMessageStore(gt_room=mock_room)
         m = _msg(sender_id=OPERATOR_ID, db_id=10)
         await store.append_and_assign_seq(m)
-        store.escalate_to_immediate(db_id=10)
+        await store.escalate_to_immediate(db_id=10)
         assert len(store.messages) == 1
         assert [x.seq for x in store.messages] == [0]
 
@@ -299,7 +311,7 @@ class TestEscalateToImmediate:
         for m in (m0, m1, m2):
             await store.append_and_assign_seq(m)
 
-        store.escalate_to_immediate(db_id=10)
+        await store.escalate_to_immediate(db_id=10)
 
         assert [m.id for m in store.messages] == [5, 10, 15]
         assert [m.seq for m in store.messages] == [0, 1, 2]
@@ -309,20 +321,20 @@ class TestEscalateToImmediate:
         store = RoomMessageStore(gt_room=mock_room)
         for db_id, content in ((5, "before"), (10, "target"), (15, "after")):
             await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, content=content, db_id=db_id))
-        store.escalate_to_immediate(db_id=10)
-        assert [m.content for m in store.get_unread(agent_id=AGENT_ID)] == ["before", "target", "after"]
+        await store.escalate_to_immediate(db_id=10)
+        assert [m.content for m in await store.get_unread(agent_id=AGENT_ID)] == ["before", "target", "after"]
 
     async def test_raises_if_db_id_not_found(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         with pytest.raises(ValueError):
-            store.escalate_to_immediate(db_id=999)
+            await store.escalate_to_immediate(db_id=999)
 
     async def test_raises_for_system_sender(self, mock_room):
         """SYSTEM 消息没有「立即引导」语义。"""
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=SYSTEM_ID, db_id=10))
         with pytest.raises(ValueError):
-            store.escalate_to_immediate(db_id=10)
+            await store.escalate_to_immediate(db_id=10)
 
     async def test_raises_when_no_ai_recipient(self, mock_room):
         """AI 发给 Operator 的消息（房间内无 AI 接收方）不可升级。"""
@@ -330,7 +342,7 @@ class TestEscalateToImmediate:
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=AGENT_ID, db_id=10))
         with pytest.raises(ValueError):
-            store.escalate_to_immediate(db_id=10)
+            await store.escalate_to_immediate(db_id=10)
 
     async def test_agent_to_agent_unread_can_be_escalated(self, mock_room):
         """双 AI 单聊：A 发给 B 的未读普通消息可升级为加急。"""
@@ -338,7 +350,7 @@ class TestEscalateToImmediate:
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=1, content="plain", db_id=10))
 
-        result = store.escalate_to_immediate(db_id=10)
+        result = await store.escalate_to_immediate(db_id=10)
 
         assert result.insert_immediately is True
         assert result.seq == 0
@@ -348,39 +360,39 @@ class TestEscalateToImmediate:
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=1, db_id=10))
-        store.get_unread(agent_id=2)
+        await store.get_unread(agent_id=2)
 
         with pytest.raises(RuntimeError):
-            store.escalate_to_immediate(db_id=10)
+            await store.escalate_to_immediate(db_id=10)
 
     async def test_raises_if_already_read_by_an_agent(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, db_id=10))
-        store.get_unread(agent_id=AGENT_ID)
+        await store.get_unread(agent_id=AGENT_ID)
 
         with pytest.raises(RuntimeError):
-            store.escalate_to_immediate(db_id=10)
+            await store.escalate_to_immediate(db_id=10)
 
     async def test_raises_if_any_of_multiple_agents_read(self, mock_room):
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, db_id=10))
-        store.get_unread(agent_id=1)
+        await store.get_unread(agent_id=1)
 
         with pytest.raises(RuntimeError):
-            store.escalate_to_immediate(db_id=10)
+            await store.escalate_to_immediate(db_id=10)
 
     async def test_succeeds_when_no_agent_has_read(self, mock_room):
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, db_id=10))
-        assert store.escalate_to_immediate(db_id=10).insert_immediately is True
+        assert (await store.escalate_to_immediate(db_id=10)).insert_immediately is True
 
     async def test_is_idempotent(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, insert_immediately=True, db_id=10))
-        store.escalate_to_immediate(db_id=10)
-        result = store.escalate_to_immediate(db_id=10)
+        await store.escalate_to_immediate(db_id=10)
+        result = await store.escalate_to_immediate(db_id=10)
         assert result.insert_immediately is True
         assert result.seq == 0
         assert len(store.messages) == 1
@@ -445,12 +457,12 @@ class TestInject:
         store.inject(messages=[], agent_read_index={"abc": 1, "2": 5})
         assert store.get_read_index() == {2: 5}
 
-    def test_restored_read_index_affects_unread(self, mock_room):
+    async def test_restored_read_index_affects_unread(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         a, b = _msg(content="a"), _msg(content="b")
         a.seq, b.seq = 0, 1
         store.inject(messages=[a, b], agent_read_index={"1": 1})
-        assert [m.content for m in store.get_unread(agent_id=AGENT_ID)] == ["b"]
+        assert [m.content for m in await store.get_unread(agent_id=AGENT_ID)] == ["b"]
 
     def test_inject_does_not_write_db_or_publish(self, mock_room, mock_db_manager, mock_message_bus):
         store = RoomMessageStore(gt_room=mock_room)
@@ -479,6 +491,6 @@ class TestMarkAllRead:
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=3, insert_immediately=True))
         store.mark_all_read()
-        assert store.has_unread_messages(1) is False
-        assert store.has_unread_immediate_messages(1) is False
-        assert store.has_unread_messages(2) is False
+        assert await store.has_unread_messages(1) is False
+        assert await store.has_unread_immediate_messages(1) is False
+        assert await store.has_unread_messages(2) is False

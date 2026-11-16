@@ -91,12 +91,12 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
 
         with patch("service.messageBus.publish"):
             await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "普通排队消息")
-        assert ctrl_room.has_unread_messages(alice.id) is True
-        assert ctrl_room.has_unread_immediate_messages(alice.id) is False
+        assert await ctrl_room.has_unread_messages(alice.id) is True
+        assert await ctrl_room.has_unread_immediate_messages(alice.id) is False
 
         await self._run_loop_once(alice.id)
 
-        assert ctrl_room.has_unread_messages(alice.id) is True, (
+        assert await ctrl_room.has_unread_messages(alice.id) is True, (
             "普通消息不应在 turn 的安全边界被提前读取（产品文档 §2.1）"
         )
 
@@ -109,11 +109,11 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
             await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "先发的普通消息 M1")
             await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "后发的立即注入 M2",
                                         insert_immediately=True)
-        assert ctrl_room.has_unread_immediate_messages(alice.id) is True
+        assert await ctrl_room.has_unread_immediate_messages(alice.id) is True
 
         await self._run_loop_once(alice.id)
 
-        assert ctrl_room.has_unread_messages(alice.id) is False, (
+        assert await ctrl_room.has_unread_messages(alice.id) is False, (
             "immediate 触发后应连带收取全部未读（含前面的普通消息）"
         )
 
@@ -141,7 +141,7 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
 
         await self._run_loop_once(alice.id)
 
-        assert ctrl_room.has_unread_messages(alice.id) is False, (
+        assert await ctrl_room.has_unread_messages(alice.id) is False, (
             "immediate 之后的普通消息 M3 也应被连带走，不能漏到下一轮"
         )
         # 直接断言交给 Agent 的内容与顺序，而不是只看「有没有未读」这种间接信号
@@ -179,7 +179,7 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
             )
 
         # 消息写入即分配 seq、立即成为未读的 immediate 消息（不再有 pending 队列中间态）
-        assert ctrl_room.has_unread_immediate_messages(alice.id) is True
+        assert await ctrl_room.has_unread_immediate_messages(alice.id) is True
 
         scheduling_events = [
             e for e in status_events

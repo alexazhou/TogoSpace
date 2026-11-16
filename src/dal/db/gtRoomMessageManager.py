@@ -69,6 +69,59 @@ async def get_room_messages(
     return rows, False
 
 
+async def get_room_messages_by_seq_range(
+    room_id: int,
+    min_seq: int,
+    max_seq: int,
+) -> list[GtRoomMessage]:
+    """取 min_seq <= seq < max_seq 的消息（升序），用于内存窗口越界时的缺口补读。
+
+    左闭右开：补读区间恰为 `[读游标, 内存窗口下界)`，与内存窗口首条无缝拼接、
+    不重复也不留空洞。
+    """
+    return list(await (
+        GtRoomMessage
+        .select()
+        .where(
+            GtRoomMessage.room_id == room_id,  # type: ignore[attr-defined]
+            GtRoomMessage.seq >= min_seq,  # type: ignore[attr-defined]
+            GtRoomMessage.seq < max_seq,  # type: ignore[attr-defined]
+        )
+        .order_by(GtRoomMessage.seq.asc(), GtRoomMessage.id.asc())
+        .aio_execute()
+    ))
+
+
+async def get_room_message_by_id(message_id: int) -> GtRoomMessage | None:
+    """按主键查单条消息，用于 escalate 在内存窗口外的 DB fallback。
+
+    **只按 id 查、不带 room 条件** —— 调用方必须自行校验 `room_id`，
+    否则可用别的房间的消息 id 触发跨房间升级（越权）。
+    """
+    rows = await (
+        GtRoomMessage
+        .select()
+        .where(GtRoomMessage.id == message_id)  # type: ignore[attr-defined]
+        .limit(1)
+        .aio_execute()
+    )
+    return rows[0] if rows else None
+
+
+async def count_room_messages(room_id: int) -> int:
+    """统计房间消息**总数**。
+
+    内存窗口化后 `len(room.messages)` 只等于窗口大小，不再等于真实总数；
+    任何需要「真实总数」的地方（如房间详情统计）必须走本方法。
+    """
+    return await (
+        GtRoomMessage
+        .select()
+        .where(GtRoomMessage.room_id == room_id)  # type: ignore[attr-defined]
+        .aio_count()
+    )
+
+
 async def get_last_messages_by_room_ids(room_ids: list[int]) -> list[GtRoomMessage]:
     """批量获取多个房间的最后一条消息，保持 room_ids 原始顺序。"""
     if not room_ids:

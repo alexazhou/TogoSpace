@@ -25,6 +25,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service.roomService import ChatRoom
+from service.roomService.messageStore import RoomMessageStore
 from ...base import ServiceTestCase
 
 TEAM = "test_room_state_ready"
@@ -208,10 +209,15 @@ class TestRoomRuntimeStateReady(ServiceTestCase):
         assert created is False, "DB 已有控制房，不应新建"
         assert room.room_id == gt_room.id
         assert room.runtime_state_ready is True
-        assert [m.content for m in room.messages] == [
-            m.content for m in await _all_rows(gt_room.id)
-        ], "历史消息必须全部装载，顺序与库一致"
-        assert len(room.messages) == 3
+        # ⚠️ 窗口化后内存不再装全部历史：断言改为「与库中**最新一段**逐条一致」。
+        # （本用例只有 3 条 < WINDOW_SIZE，所以等价；语义写法要跟上设计，否则将来
+        # 消息一多，这条断言会变成「要求全量加载」的错误期望。）
+        db_contents = [m.content for m in await _all_rows(gt_room.id)]
+        window_msgs = room.messages
+        assert [m.content for m in window_msgs] == db_contents[-len(window_msgs):], (
+            "内存窗口内容必须与库中最新一段逐条一致（顺序一致）"
+        )
+        assert len(window_msgs) == min(3, RoomMessageStore.WINDOW_SIZE)
         assert room.export_agent_read_index() == read_index_before, "读游标必须原样恢复"
         assert await _zero_seq_system_count(gt_room.id) == 1, (
             "重开后不得补写任何 seq=0 系统消息"

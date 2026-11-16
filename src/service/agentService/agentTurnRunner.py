@@ -490,7 +490,7 @@ class AgentTurnRunner:
             room is not None
             and room.room_type == RoomType.PRIVATE
             and room.state == RoomState.IDLE
-            and room.has_unread_messages(self.gt_agent.id)
+            and await room.has_unread_messages(self.gt_agent.id)
         ):
             other_id = next(
                 (aid for aid in room.get_agent_ids() if aid != self.gt_agent.id),
@@ -521,7 +521,7 @@ class AgentTurnRunner:
             # 收取的是该房间的全部未读（'读哪些'）。两者刻意分开，见该方法 docstring。
             if self._history.is_safe_for_immediate_insert():
                 for priv_room in roomService.get_private_rooms_for_agent(self.gt_agent.team_id, self.gt_agent.id):
-                    if priv_room.has_unread_immediate_messages(self.gt_agent.id):
+                    if await priv_room.has_unread_immediate_messages(self.gt_agent.id):
                         await self._inject_immediate_messages(priv_room)
 
             result = await self._advance_step(room, tools, tool_choice=next_tool_choice)

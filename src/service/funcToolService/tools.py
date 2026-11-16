@@ -12,7 +12,7 @@ from constants import (
     RoomState, RoomType, SpecialAgent, TaskStatus,
 )
 from exception import TogoException
-from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamManager, gtAgentTaskManager
+from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamManager, gtAgentTaskManager, gtRoomMessageManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
@@ -778,7 +778,9 @@ async def get_room_info(
             if agent_id != int(SpecialAgent.SYSTEM.value)
         ]),
         "current_turn": _resolve_agent_name(runtime_room.get_current_turn_agent_id(), id_to_name) if runtime_room is not None and runtime_room.state == RoomState.SCHEDULING else None,
-        "total_messages": len(runtime_room.messages) if runtime_room is not None else 0,
+        # 内存窗口化后 len(runtime_room.messages) 只等于窗口大小（且房间未加载时为 0），
+        # 不再等于真实总数 —— 改查 DB 计数。
+        "total_messages": await gtRoomMessageManager.count_room_messages(room_config.id),
         "tags": list(room_config.tags or []),
     }
     return {"success": True, "room": room_dict}

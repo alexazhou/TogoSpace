@@ -111,7 +111,7 @@ class TestPrivateRoomInjectionDuringGroupTurn(ServiceTestCase):
             await room.add_message(bob.id, "M2-立即注入", insert_immediately=True)
             await room.add_message(bob.id, "M3-普通")
 
-        assert room.has_unread_immediate_messages(alice.id) is True
+        assert await room.has_unread_immediate_messages(alice.id) is True
 
         alice_agent = agentService.get_agent(alice.id)
         history = alice_agent.job_consumer._turn_runner._history
@@ -119,7 +119,7 @@ class TestPrivateRoomInjectionDuringGroupTurn(ServiceTestCase):
 
         await self._run_loop_once(alice.id)
 
-        assert room.has_unread_messages(alice.id) is False, (
+        assert await room.has_unread_messages(alice.id) is False, (
             "单聊房间的 immediate 触发后应连带收取全部未读，不能漏到下一轮"
         )
         injected = "\n".join(item.content or "" for item in history[before:])
@@ -133,12 +133,12 @@ class TestPrivateRoomInjectionDuringGroupTurn(ServiceTestCase):
 
         with patch("service.messageBus.publish"):
             await room.add_message(bob.id, "普通单聊消息")
-        assert room.has_unread_messages(alice.id) is True
-        assert room.has_unread_immediate_messages(alice.id) is False
+        assert await room.has_unread_messages(alice.id) is True
+        assert await room.has_unread_immediate_messages(alice.id) is False
 
         await self._run_loop_once(alice.id)
 
-        assert room.has_unread_messages(alice.id) is True, (
+        assert await room.has_unread_messages(alice.id) is True, (
             "普通单聊消息不应在 turn 的安全边界被提前读取"
         )
 
@@ -150,7 +150,7 @@ class TestPrivateRoomInjectionDuringGroupTurn(ServiceTestCase):
             await room.add_message(bob.id, "紧急纠偏", insert_immediately=True)
 
         await self._run_loop_once(alice.id)
-        assert room.has_unread_messages(alice.id) is False
+        assert await room.has_unread_messages(alice.id) is False
 
         alice_agent = agentService.get_agent(alice.id)
         turn_runner = alice_agent.job_consumer._turn_runner
@@ -171,7 +171,7 @@ class TestPrivateRoomInjectionDuringGroupTurn(ServiceTestCase):
         with patch("service.messageBus.publish", side_effect=capture_publish):
             await room.add_message(bob.id, "紧急叫停", insert_immediately=True)
 
-        assert room.has_unread_immediate_messages(alice.id) is True
+        assert await room.has_unread_immediate_messages(alice.id) is True
         scheduling_events = [
             e for e in status_events
             if e[0] == MessageBusTopic.ROOM_STATUS_CHANGED and e[1].get("need_scheduling") is True
