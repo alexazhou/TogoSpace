@@ -95,6 +95,12 @@ def echo_text(x: str) -> str:
     return "echo:" + x
 
 
+@mcp.tool()
+def echo_int(x: int) -> str:
+    """回显整数（用来验 schema 驱动的类型转换）"""
+    return "got:" + str(x)
+
+
 @mcp.resource("note://hello")
 def hello() -> str:
     return "hi from resource"
@@ -252,6 +258,19 @@ async def test_console_real_sdk_stdio_closed_loop(mcp_db, leader_ctx, loaded_too
     called = await _run("s_call", "mcp call echo.echo_text x=hi")
     assert called["success"] is True, called
     assert called["text"] == "echo:hi", called
+
+    # 参数契约（§2.1 第 2 条「参数名称/类型及错误行为按工具 schema」）三条反例：
+    # 必填缺失 / 类型转换失败 / 同一参数两处来源。都必须在**真 schema** 上验，
+    # 因为转换规则来自 list_tools 的 inputSchema，mock 掉就等于没验。
+    missing = await _run("s_missing", "mcp call echo.echo_text")
+    assert missing["error_code"] == "mcp_missing_argument", missing
+    assert "x" in missing["message"], missing["message"]
+
+    bad_type = await _run("s_badtype", "mcp call echo.echo_int x=abc")
+    assert bad_type["error_code"] == "mcp_invalid_args", bad_type
+
+    ambiguous = await _run("s_ambig", "mcp call echo.echo_text --args '{\"x\":\"a\"}' x=b")
+    assert ambiguous["error_code"] == "ambiguous_input_source", ambiguous
 
     resource = await _run("s_res", "mcp resource echo")
     assert resource["success"] is True, resource

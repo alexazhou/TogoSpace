@@ -196,6 +196,18 @@ class TestMcpEmptyTargetHint:
         result = _run("mcp ls a b")
         assert result["error_code"] == "invalid_argument_count", result
 
+    def test_session_rejects_name_or_server(self) -> None:
+        """`mcp session` 三条命令都不接受名称/server（产品 §3.1）。
+
+        多给一个位置参数 ⇒ `mcp_invalid_args`，并说明作用域恒为当前 Agent ——
+        「具名 session」是产品明确排除的语法，不能静默忽略这个参数。
+        """
+        for command in ("mcp session start foo", "mcp session status foo", "mcp session stop foo"):
+            result = _run(command)
+            assert result["success"] is False, result
+            assert result["error_code"] == "mcp_invalid_args", (command, result)
+            assert "当前 Agent" in result["message"], result["message"]
+
 
 # --------------------------------------------------------------------------- #
 # A5：复杂参数的用法行给 `--from payload` 推荐
