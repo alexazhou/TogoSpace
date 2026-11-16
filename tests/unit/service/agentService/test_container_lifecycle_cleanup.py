@@ -406,8 +406,9 @@ async def test_switch_team_agents_to_host_switches_all_loaded_agents(monkeypatch
     def _make_recording_driver(container_id: str) -> _FakeDriver:
         driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id=container_id)
 
-        async def _switch() -> bool:
-            order.append(f"switch:{container_id}")
+        async def _switch(keep_alive: bool = False) -> bool:
+            # 清理路径必须**不保活**：这里要真的把容器停掉，把会话留在挂起池就是泄漏
+            order.append(f"switch:{container_id}:keep_alive={keep_alive}")
             return True
 
         driver.exit_to_host.side_effect = _switch
@@ -418,7 +419,10 @@ async def test_switch_team_agents_to_host_switches_all_loaded_agents(monkeypatch
 
     await core.switch_team_agents_to_host(1)
 
-    assert order == ["switch:c0ffee123456", "switch:deadbeef0002"]
+    assert order == [
+        "switch:c0ffee123456:keep_alive=False",
+        "switch:deadbeef0002:keep_alive=False",
+    ]
 
 
 @pytest.mark.asyncio
@@ -432,8 +436,8 @@ async def test_switch_team_agents_to_host_defaults_to_loaded_agents(monkeypatch)
     def _make_recording_driver(container_id: str) -> _FakeDriver:
         driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id=container_id)
 
-        async def _switch() -> bool:
-            order.append("switch")
+        async def _switch(keep_alive: bool = False) -> bool:
+            order.append(f"switch:keep_alive={keep_alive}")
             return True
 
         driver.exit_to_host.side_effect = _switch
@@ -452,4 +456,4 @@ async def test_switch_team_agents_to_host_defaults_to_loaded_agents(monkeypatch)
 
     await core.switch_team_agents_to_host(3)
 
-    assert order == ["switch"]
+    assert order == ["switch:keep_alive=False"]

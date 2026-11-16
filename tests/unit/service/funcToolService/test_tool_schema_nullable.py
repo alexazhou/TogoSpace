@@ -785,7 +785,12 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 起会话 daemon（`sys.executable -c`），打包产物里没有 Python 解释器 ⇒ 起不来，传了直接
 #: 报 mcp_unsupported_extra」（Operator 2026-11-16 02:27 追加范围）。**工具数 44、
 #: 参数数 140 均不变**；其余 42 个工具的 description / required 逐字未动。
-BASELINE_TEXT_DIGEST = "e15daaec9f454e2f3c0d155b83745a27ece19736c4b8f88842071caf3d5644ba"
+#:
+#: #292 重算（`e15daaec…` → `bb47a715…`）：`exit_to_host` 新增
+#: `keep_alive: bool = False` 并重写 description（保活挂起/五格文案的来源说明），
+#: **工具数 44、参数数 140 → 141**（+1 可选参数）；其余 43 个工具的
+#: description / required 逐字未动。
+BASELINE_TEXT_DIGEST = "bb47a7154d8773eae91355f45e29fd6614ef76caa77b12ef1d4a194de59b5d9f"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -829,7 +834,7 @@ def test_descriptions_and_required_do_not_drift() -> None:
     # 38 → 39 / 108 → 114：`mcp_call`（#202）。40 → 44 / 125 → 139：MCP 注册表四工具
     # （#224 三工具 + #273 set_mcp_server_enabled，+`mcp_call` 说明改写）。
     assert tools == 44, tools
-    assert params == 140, params
+    assert params == 141, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

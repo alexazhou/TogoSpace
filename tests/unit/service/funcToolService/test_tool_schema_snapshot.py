@@ -139,7 +139,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     # `container_id` 是常规寻址方式，`record_id` 只用于还没有 Docker ID 的预记录。
     "create_container": ["image", "note"],
     "enter_container": ["container_id"],
-    "exit_to_host": [],
+    "exit_to_host": ["keep_alive"],
     "list_containers": [],
     "delete_container": ["container_id", "record_id"],
     # #203：`container note <id> <text>` 的两个位置参数按这个顺序映射

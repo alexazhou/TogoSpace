@@ -42,6 +42,18 @@ _RUN_CHAT_TURN_ERROR_ACTION_HINT = (
     "你必须通过调用 send_chat_msg / finish_action 工具，而不是在消息内容中输出 JSON。"
     "请重新行动，直接调用相应的工具。"
 )
+# `enter_container` 的 resolve 失败里，只有这两个错误码**证明容器已经不在**，
+# 才允许淘汰挂起记录。两者语义都是「查了，确实没有」：
+# - `container_lost`：库里有记录但 inspect 取不到对象（被外部删除）；
+# - `container_not_found`：docker 明确回 `no such container`。
+# 其余错误（典型 `container_enter_failed`：inspect 超时 / daemon 抖动 / 输出异常）
+# 只说明**这次查不清**，容器与挂起的会话可能都还健康 —— 见 enter_container 的注释。
+_SUSPEND_EVICT_ERROR_CODES = frozenset(
+    {
+        containerService.ERROR_CONTAINER_LOST,
+        containerService.ERROR_CONTAINER_NOT_FOUND,
+    }
+)
 
 
 def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[str]:
@@ -85,6 +97,19 @@ class TspAgentDriver(AgentDriver):
         # 重连容器而不是悄悄回落宿主。
         self._current_container: Optional[ContainerTarget] = None
 
+        # 已挂起的容器会话池：container_id（12 位短 ID）→ 仍存活的 TSPClient。
+        #
+        # `exit_to_host(keep_alive=True)` 把当前容器的 client **移交**到这里，而不是
+        # 断开它：容器内 gtsp 阻塞在读 stdin，只要 Python 侧不关管道就不会收到 EOF，
+        # 于是自建容器保持 running、外部容器的会话与其进程组都不被清理。下次
+        # `enter_container` 同一容器时直接把这个 client 切回活跃态，省掉 docker
+        # 拉起与 initialize 握手。
+        #
+        # 池里的 client **不属于当前活跃环境**：`_current_container` 仍是唯一状态源
+        # （None = 宿主），所以池表达的是「暂停待复用」，不是多容器并发执行。
+        # 读写一律在 `_connect_lock` 内（`shutdown` 的清理例外）。
+        self._suspended_clients: dict[str, TSPClient] = {}
+
         # 构建连接参数（用于首次连接和后续按需重连）
         options = config.options
         work_dir = str(options.get("workdir") or host.agent_workdir)
@@ -127,7 +152,8 @@ class TspAgentDriver(AgentDriver):
 
         流程：
         1. `resolve_enter_target` 解析目标并取实时状态（含 12 位 ID 校验、存在性、
-           架构；只做一次 `docker inspect`）；
+           架构；只做一次 `docker inspect`）；失败时只有「容器确实不在」才淘汰该容器
+           的挂起记录，瞬时 docker 故障保留挂起会话（见下方注释）；
         2. 同容器幂等：已在目标容器且连接存活 → 直接成功；
         3. 状态判定（`validate_enter_state`）：自建只收 created/exited，外部只收 running；
         4. 外部容器先注入 gtsp（自建在 create 时已注入）；
@@ -137,9 +163,29 @@ class TspAgentDriver(AgentDriver):
         Raises:
             TogoException: 任一步失败
         """
-        target, state = await containerService.resolve_enter_target(
-            self.host.gt_agent.id, container_id
-        )
+        try:
+            target, state = await containerService.resolve_enter_target(
+                self.host.gt_agent.id, container_id
+            )
+        except TogoException as exc:
+            # 解析失败分两类，处置相反：
+            #
+            # 1. 容器确实不在了（`container_lost` / `container_not_found`）：这次进入
+            #    必然失败，挂起池里那份记录也随之作废，必须在这里淘汰。否则它永远
+            #    等不到「下次健康检测」——健康检测在 resolve 之后，走不到；结果就是
+            #    死 client 与它的管道 fd 一直留着（step1 §3.3 步骤 2 要求「自动清理
+            #    失效的挂起记录」）。
+            # 2. 只是这次查不清（`container_enter_failed`：inspect 超时 / daemon 抖动
+            #    / 输出异常）：容器还在、挂起会话也健康，**不许**淘汰。关掉那个 client
+            #    会让容器内 gtsp 收到 EOF 退出，自建容器 PID 1 一死就停机、保活的后台
+            #    进程全没 —— 而用户以为仍在保活，正是本功能要治的病被一次瞬时抖动
+            #    触发。保留池，下次 resolve 成功仍可复用。非 TogoException 的意外异常
+            #    同理：不知道容器状态时不动池。
+            #
+            # 两种都原样抛出，错误码不变。
+            if exc.error_code in _SUSPEND_EVICT_ERROR_CODES:
+                await self._evict_suspended(container_id)
+            raise
 
         if (
             self.current_container is not None
@@ -148,6 +194,12 @@ class TspAgentDriver(AgentDriver):
         ):
             # 幂等：已在目标容器且连接存活。不重连（重连会打断正在进行的 turn）。
             # 连接已断时不能返回成功，要走下面的正常流程重新拉起。
+            return target, state
+
+        # 挂起池命中：直接复用保活中的会话，跳过状态校验、注入、拉起与握手。
+        # 顺序上必须在 `validate_enter_state` 之前——保活期间自建容器本来就处于
+        # running，按正常校验会被判成「异常残留」拦下。
+        if await self._resume_suspended(target, container_id):
             return target, state
 
         if state is ContainerState.UNKNOWN:
@@ -187,19 +239,124 @@ class TspAgentDriver(AgentDriver):
         )
         return target, state
 
-    async def exit_to_host(self) -> bool:
+    async def _evict_suspended(self, container_id: str) -> None:
+        """摘掉某容器的挂起记录并关闭它（best-effort，不抛异常）。
+
+        用于「该容器这条线已经不可用」的路径：容器被外部删除/查不到、或改为非保活
+        退出。调用方随后按各自的错误码上报，这里只负责不让死 client 与管道 fd 滞留。
+        """
+        async with self._connect_lock:
+            client = self._suspended_clients.pop(container_id, None)
+        await self._close_client_quietly(client)
+
+    async def _resume_suspended(
+        self, target: ContainerTarget, container_id: str
+    ) -> bool:
+        """尝试用挂起池中的存活会话直接切回容器；命中返回 `True`。
+
+        命中时**不**调用 `validate_enter_state` / `prepare_container_gtsp` /
+        `docker start|exec` / `initialize`——保活的会话已经握手完成，重新拉起既慢
+        又会打断容器内仍在运行的后台进程。
+
+        挂起期间容器被外部停止或删除时，池里的 client 进程已退出：这里清掉死对象
+        并返回 `False`，由调用方回退到正常进入流程（状态异常时按既有错误码报错）。
+        """
+        dead: Optional[TSPClient] = None
+        previous_client: Optional[TSPClient] = None
+        take_over = False
+
+        async with self._connect_lock:
+            suspended = self._suspended_clients.pop(container_id, None)
+            if suspended is not None:
+                if self._is_client_alive(suspended):
+                    previous_client = self._client
+                    self._client = suspended
+                    self._tsp_tools = {}
+                    take_over = True
+                else:
+                    dead = suspended
+
+        if not take_over:
+            if dead is not None:
+                await self._close_client_quietly(dead)
+                logger.info(
+                    "挂起会话已失效，回退正常进入流程: agent_id=%s, container=%s",
+                    self.host.gt_agent.id, container_id,
+                )
+            return False
+
+        assert self._client is not None
+        # 关闭切换前的活跃连接：可能是宿主 client，也可能是跨容器直接切换时的
+        # 另一个容器 client。必须在锁外关（disconnect 会 await）。
+        if previous_client is not None and previous_client is not self._client:
+            await self._close_client_quietly(previous_client)
+
+        self._load_tsp_tools(self._client.tools)
+        self._register_host_tools()
+
+        previous_env = self.exec_env
+        previous_container_id = self.current_container_id
+        self._current_container = target
+        logger.info(
+            "复用挂起会话进入容器: agent_id=%s, container=%s, managed=%s, tools=%s",
+            self.host.gt_agent.id, target.container_id, target.is_managed,
+            len(self._tsp_tools),
+        )
+        if self.exec_env != previous_env or self.current_container_id != previous_container_id:
+            self._publish_container_state()
+        return True
+
+    async def exit_to_host(self, keep_alive: bool = False) -> bool:
         """切回宿主环境（§5.2），成功时返回 `True`。
 
-        顺序：`disconnect()`（关容器连接 → 自建容器自然停回 exited）→
-        `connect(HOST)`。connect 失败时环境保持 CONTAINER，由调用方重试——
-        不能假装成功，否则后续工具会打在错误环境上。
+        `keep_alive=False`（默认）沿用原行为：断开容器连接 → 容器内 gtsp 退出，
+        自建容器随之停回 exited。
+
+        `keep_alive=True` 改为「保活挂起」：**不**断开该连接，而是把 client 移交到
+        `_suspended_clients[container_id]`，容器与其中的后台进程继续存活，下次
+        `enter_container` 同一容器时直接复用（见 `_resume_suspended`）。
+
+        两种模式共同点：**只有 `connect(HOST)` 成功才改环境状态**，失败时环境保持
+        CONTAINER，由调用方重试——不能假装成功，否则后续工具会打在错误环境上。
         """
         if self.current_container is None:
             # 已经在宿主：幂等成功，不重连（重连会打断 turn）
             return True
 
-        # 先断开容器连接：关 stdin 后容器内 gtsp 退出，自建容器随之停回 exited
-        await self.disconnect()
+        container_id = self.current_container_id
+        assert container_id is not None, "current_container 非空时必须有 container_id"
+
+        # 待关闭的旧连接统一收集，锁外关闭：disconnect() 要 await，不能持锁做 IO。
+        to_close: list[Optional[TSPClient]] = []
+
+        if not keep_alive:
+            # 顺手清掉同容器的历史挂起对象：此前保活过、后来又用非保活方式退出时，
+            # 池里那个 client 已经没人会复用了，留着只会泄漏一个子进程。
+            await self._evict_suspended(container_id)
+            await self.disconnect()
+        else:
+            async with self._connect_lock:
+                client = self._client
+                if client is not None:
+                    if self._is_client_alive(client):
+                        stale = self._suspended_clients.get(container_id)
+                        if stale is not None and stale is not client:
+                            to_close.append(stale)
+                        self._suspended_clients[container_id] = client
+                    else:
+                        # 进程已死：不进池——复用时会立刻判死，等于占个位子。
+                        to_close.append(client)
+                    self._client = None
+                    self._tsp_tools = {}
+                # 注意：**不修改** `_current_container`。环境状态只由 connect() 成功
+                # 时更新（见 __init__ 注释），这里改了会在 connect(HOST) 失败时
+                # 谎报「已在宿主」。
+            for client in to_close:
+                await self._close_client_quietly(client)
+            logger.info(
+                "已挂起容器会话: agent_id=%s, container=%s, suspended_count=%s",
+                self.host.gt_agent.id, container_id, len(self._suspended_clients),
+            )
 
         ok = await self.connect(ExecEnv.HOST)
         if not ok:
@@ -209,7 +366,10 @@ class TspAgentDriver(AgentDriver):
                 containerService.ERROR_CONTAINER_ENTER_FAILED,
             )
 
-        logger.info("已退回到宿主环境: agent_id=%s", self.host.gt_agent.id)
+        logger.info(
+            "已退回到宿主环境: agent_id=%s, keep_alive=%s",
+            self.host.gt_agent.id, keep_alive,
+        )
         return True
 
     def _build_container_command(self, container: ContainerTarget) -> list[str]:
@@ -241,20 +401,25 @@ class TspAgentDriver(AgentDriver):
         """当前 stdio 连接是否仍存活（供 Agent 判定「已在目标容器」是否幂等）。"""
         return self._is_client_connected()
 
+    @staticmethod
+    def _is_client_alive(client: Optional[TSPClient]) -> bool:
+        """该 client 的 gtsp 子进程是否仍存活（挂起池健康检测与当前连接同一口径）。"""
+        if client is None:
+            return False
+        process = client.process
+        if process is None:
+            return False
+        # returncode 为 None 表示进程仍在运行，非 None 表示已退出
+        return process.returncode is None
+
     def _is_client_connected(self) -> bool:
-        """检查 TSP client 进程是否仍然存活。
+        """检查当前 TSP client 进程是否仍然存活。
 
         gtsp 进程可能因异常退出或被终止而留下僵尸 client 对象，
         此时 _client 非空但 process.returncode 已有值。后续 tool() 调用会
         因写入已关闭的 stdin 而超时或抛异常，需提前检测避免无效等待。
         """
-        if self._client is None:
-            return False
-        process = self._client.process
-        if process is None:
-            return False
-        # returncode 为 None 表示进程仍在运行，非 None 表示已退出
-        return process.returncode is None
+        return self._is_client_alive(self._client)
 
     async def _connect_target(
         self,
@@ -454,6 +619,25 @@ class TspAgentDriver(AgentDriver):
         logger.info(f"TSP driver initialized: agent={self.host.gt_agent.id} command={self._connect_params['command']} tools={len(self._tsp_tools)}")
 
     async def shutdown(self) -> None:
+        # 挂起池必须一并清掉：它们是不属于当前环境的独立子进程，漏掉就是孤儿进程
+        # 泄漏（自建容器还会一直保持 running）。逐个独立捕获异常，单个失败不影响
+        # 其余 client 与 super().shutdown()。
+        suspended = list(self._suspended_clients.values())
+        self._suspended_clients.clear()
+        for client in suspended:
+            try:
+                await client.disconnect()
+            except Exception as e:
+                logger.warning(
+                    "关闭挂起 TSP client 异常: agent_id=%s, error=%s",
+                    self.host.gt_agent.id, e,
+                )
+        if suspended:
+            logger.info(
+                "已清理挂起会话: agent_id=%s, count=%s",
+                self.host.gt_agent.id, len(suspended),
+            )
+
         if self._client is None:
             await super().shutdown()
             return

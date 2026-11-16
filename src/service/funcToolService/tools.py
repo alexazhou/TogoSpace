@@ -13,6 +13,7 @@ from constants import (
 )
 from exception import TogoException
 from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamManager, gtAgentTaskManager, gtRoomMessageManager
+from model.coreModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
@@ -2440,14 +2441,9 @@ async def create_container(
     note: Optional[str] = None,
     _context: ToolCallContext = None,
 ) -> dict[str, Any]:
-    """创建一个属于你的沙箱容器，用于在隔离环境中执行命令。
-
-    创建后容器处于「已创建」状态，仍未投入使用；需要再调用 enter_container 才会把
-    执行环境切换进去。容器内挂载两处目录：你的个人工作目录（可读写，对应
-    /workspace/self）与团队共享目录（只读，对应 /workspace/team_shared）。删除容器
-    不会删除这两处目录里的文件。
-
-    每个 Agent 最多同时保留 3 个自己创建的容器（含已停止的），达到上限时请先删除。
+    """创建一个属于你的沙箱容器，用于在隔离环境中执行命令；创建后容器处于「已创建」状态，需要再调用 enter_container 才会把执行环境切换进去。
+    容器内挂载两处目录：你的个人工作目录（可读写，对应 /workspace/self）与团队共享目录（只读，对应 /workspace/team_shared）；删除容器不会删除这两处目录里的文件。每个 Agent 最多同时保留 3 个自己创建的容器（含已停止的），达到上限时请先删除。
+    本工具创建的容器是隔离沙箱、不做端口映射，宿主机访问不到容器里的服务；要跑带端口映射的常驻 Web 服务，请在宿主机用 `docker run -d -p 127.0.0.1:<端口>:<端口> ...` 起一个容器，再用 enter_container 进入它执行，服务需要绑定 0.0.0.0 并显式指定端口。
 
     Args:
         image: 容器镜像名称，例如 "ubuntu:24.04"、"python:3.11"。必须是本地已存在的
@@ -2491,13 +2487,8 @@ async def create_container(
 
 async def enter_container(container_id: str, _context: ToolCallContext = None) -> dict[str, Any]:
     """把执行环境切换到指定的容器，之后所有命令都在容器内执行。
-
-    容器可以是你自己用 create_container 创建的（会自动启动并进入），也可以是宿主机上
-    已经在运行的其他容器（会借用进来执行，不影响它的原有进程）。如果容器当前不是运行中
-    状态且不是你创建的，需要先自行启动它。
-
-    退出容器请调用 exit_to_host；退出后你自己创建的容器会自动停止（已创建状态），
-    它里面的文件会保留。
+    容器可以是你自己用 create_container 创建的（会自动启动并进入），也可以是宿主机上已经在运行的其他容器（会借用进来执行，不影响它的原有进程）；如果容器当前不是运行中状态且不是你创建的，需要先自行启动它。
+    退出容器请调用 exit_to_host：默认退出后你自己创建的容器会自动停止（文件保留）。如果只是临时回宿主机、稍后还要回同一容器继续，改用 exit_to_host(keep_alive=True) 把容器与会话保活挂起，之后再调用本工具进入同一个容器即可直接恢复——容器里的后台进程和状态都还在，不需要重新启动。
 
     Args:
         container_id: 目标容器的 12 位容器 ID（十六进制）。不接受容器名称或镜像名。
@@ -2533,24 +2524,76 @@ async def enter_container(container_id: str, _context: ToolCallContext = None) -
         return {"success": False, "message": f"进入容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_ENTER_FAILED}
 
 
-async def exit_to_host(_context: ToolCallContext = None) -> dict[str, Any]:
-    """退出当前容器，回到宿主机环境继续执行。
+_EXIT_TO_HOST_HOST_ONLY_MESSAGE = "当前已处于宿主机环境，宿主工作目录生效。"
 
-    退出后容器里的路径（如 /workspace/self）不再可用，宿主机的工作目录恢复生效。
-    你自己创建的容器会自动停止，里面的文件不会丢失。
+
+def _exit_to_host_message(prev_container: Optional[ContainerTarget], keep_alive: bool) -> str:
+    """按「退出前的容器类型 × keep_alive」生成退出提示（产品文档 §3.2 的五格矩阵）。
+
+    为什么必须动态生成：原先无论容器归属都写「你自己创建的容器已自动停止」，对外部
+    容器是假话——退出后它仍在运行，Agent 会据此执行多余的 docker 重启。
+
+    Args:
+        prev_container: 退出**之前**的容器目标；`None` 表示本来就在宿主。
+        keep_alive: 本次是否保活挂起。
+    """
+    if prev_container is None:
+        return _EXIT_TO_HOST_HOST_ONLY_MESSAGE
+
+    if keep_alive:
+        head = (
+            "已退回到宿主机环境，宿主机工作目录恢复生效。"
+            "容器内的路径（如 /workspace/self）暂不可用；"
+        )
+        if prev_container.is_managed:
+            return head + (
+                "容器已保持运行并挂起当前会话，后台进程继续存活；"
+                "再次调用 enter_container 可直接恢复。"
+            )
+        return head + (
+            "已挂起该外部容器的会话，容器与会话内后台进程继续存活；"
+            "再次调用 enter_container 可直接恢复。"
+        )
+
+    head = (
+        "已退回到宿主机环境，宿主机工作目录恢复生效。"
+        "容器内的路径（如 /workspace/self）已不可用；"
+    )
+    if prev_container.is_managed:
+        return head + "你自己创建的容器已自动停止，文件仍保留在容器与挂载目录中。"
+    return head + (
+        "该容器不是由你创建的，退出后它仍会继续运行"
+        "（本次会话内的后台进程已随会话结束被清理）。"
+    )
+
+
+async def exit_to_host(
+    keep_alive: bool = False,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """退出当前容器，回到宿主机环境继续执行；退出后容器里的路径（如 /workspace/self）不再可用，宿主机的工作目录恢复生效。
+    默认退出会结束容器里的执行会话：你自己创建的容器随之自动停止（文件仍保留在容器与挂载目录中）；宿主机上本来就在运行的容器不会停，但它里面用后台方式（run_in_background）启动、未脱离会话的进程会随会话结束被清理。
+    传 keep_alive=True 改为「保活挂起」：容器与其中的后台进程继续存活，稍后再次调用 enter_container 进入同一个容器即可直接恢复，不必等容器重新启动，容器内此前的进程与状态也会延续。适合「先回宿主机查文件或同步结果，稍后回容器继续」。
+
+    Args:
+        keep_alive: 是否保活挂起。默认 False（结束会话、自建容器停止）；传 True
+            时容器保持运行、会话挂起待复用。
     """
     try:
         agent = _container_agent(_context)
-        await agent.exit_to_host()
+        # 退出前先记下容器归属：`exit_to_host` 成功后环境已切回宿主，届时取不到。
+        # 用 isinstance 判定而不是 is not None：单元测试里 agent 是 MagicMock，
+        # 取 `driver.current_container` 会得到一个 mock 对象，不是真实容器目标。
+        prev_container = getattr(getattr(agent, "driver", None), "current_container", None)
+        if not isinstance(prev_container, ContainerTarget):
+            prev_container = None
+        await agent.exit_to_host(keep_alive=keep_alive)
         return {
             "success": True,
             "exec_env": ExecEnv.HOST.value,
             "workdir": agent.agent_workdir,
-            "message": (
-                "已退回到宿主机环境，宿主机工作目录恢复生效。"
-                "容器内的路径（如 /workspace/self）已不可用；"
-                "你自己创建的容器已自动停止，文件仍保留在容器与挂载目录中。"
-            ),
+            "keep_alive": keep_alive,
+            "message": _exit_to_host_message(prev_container, keep_alive),
         }
     except TogoException as exc:
         return _tool_error_result(exc)

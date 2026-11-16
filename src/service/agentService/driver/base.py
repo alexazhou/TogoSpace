@@ -80,8 +80,12 @@ class AgentDriver:
             ERROR_DRIVER_NOT_SUPPORT_CONTAINER,
         )
 
-    async def exit_to_host(self) -> bool:
-        """切回宿主环境；不支持容器的驱动本来就在宿主，返回成功。"""
+    async def exit_to_host(self, keep_alive: bool = False) -> bool:
+        """切回宿主环境；不支持容器的驱动本来就在宿主，返回成功。
+
+        `keep_alive` 只对能维持容器会话的驱动有意义（TSP 驱动用它挂起保活）；
+        这里本来就没有容器会话可挂起，形参只用于对齐基类签名。
+        """
         return True
 
     async def startup(self) -> None:

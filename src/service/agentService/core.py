@@ -76,15 +76,20 @@ async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTa
     return await agent.enter_container(container_id)
 
 
-async def exit_to_host(agent_id: int) -> bool:
-    """把 Agent 的执行环境切回宿主（§5.2）；编排由 Driver 负责。"""
+async def exit_to_host(agent_id: int, keep_alive: bool = False) -> bool:
+    """把 Agent 的执行环境切回宿主（§5.2）；编排由 Driver 负责。
+
+    `keep_alive=True` 是保活挂起：容器与会话继续存活，下次 `enter_container`
+    直接复用。清理路径（`switch_agent_to_host`）必须保持默认 `False`——那里要的是
+    真正停掉容器，而不是把会话留在池里。
+    """
     agent = _agents.get(agent_id)
     if agent is None:
         raise TogoException(
             "当前 Agent 未加载，无法切换执行环境",
             containerService.ERROR_CONTAINER_INVALID_PARAMS,
         )
-    return await agent.exit_to_host()
+    return await agent.exit_to_host(keep_alive=keep_alive)
 
 
 # ---------------------------------------------------------------------------
