@@ -110,8 +110,8 @@ class TestClearTeamDataSchedulingRestart(ServiceTestCase):
         assert room.state == RoomState.SCHEDULING, f"激活后应为 SCHEDULING，实际: {room.state}"
 
         # alice 和 bob 的 read_index 均从 0 开始，应能看到初始系统消息
-        assert room.has_unread_messages(alice_id), "alice 应能看到初始系统消息"
-        assert room.has_unread_messages(bob_id), "bob 应能看到初始系统消息"
+        assert await room.has_unread_messages(alice_id), "alice 应能看到初始系统消息"
+        assert await room.has_unread_messages(bob_id), "bob 应能看到初始系统消息"
 
     async def test_stale_read_index_causes_agents_to_miss_initial_message(self):
         """回归测试：若不重置 read_index，agent 读取位置错误，初始消息会被跳过。
@@ -144,6 +144,6 @@ class TestClearTeamDataSchedulingRestart(ServiceTestCase):
         await room.activate_scheduling()
 
         # 由于 alice 的 read_index=5，而初始消息 seq=0，has_unread 返回 False（bug）
-        assert not room.has_unread_messages(alice_id), (
+        assert not await room.has_unread_messages(alice_id), (
             "验证 bug 行为：stale read_index 应导致 alice 看不到初始消息"
         )
