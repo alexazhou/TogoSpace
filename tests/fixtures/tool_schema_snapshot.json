@@ -1364,7 +1364,7 @@
     "required": []
   },
   "update_task": {
-    "description": "更新协作任务：交棒/打回、调整工作流节点、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。",
+    "description": "更新协作任务：交棒/打回、调整工作流节点、追加评论、修改验收人，或修改依赖（任何团队成员都可以追加评论）。",
     "parameters": {
       "append_stages": {
         "description": "后置加签：在当前节点链末尾追加节点，格式同 create_task 的 stages。认领后只能由当前持棒人追加（REVIEW 节点允许加签，这是唯一「增加把关」的合法途径）。",
@@ -1393,6 +1393,18 @@
               "reviewer_id"
             ],
             "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "depends_on": {
+        "description": "修改任务依赖（**三态，务必区分**）：①**省略本参数 = 不改依赖**；②**显式传 [] = 清空依赖**；③传 [1, 2] = 整体替换为新依赖列表（不是增量追加）。只有**任务创建人**能改。拒绝条件（错误码全部 `task_depends_on_*` 前缀）：目标任务不存在/不属于本团队（task_depends_on_invalid_target）、成环（task_depends_on_cycle，自依赖与直接环、间接环合并成同一码，具体是哪种写在 message 里：`self` 或 `#a -> #b -> #a`）、任务已 DONE/CANCELLED（task_depends_on_terminal）、非创建人（task_depends_on_not_creator）、形态非法（task_depends_on_invalid_input：只接受任务 ID 数组，`\"12\"` / `[true]` 这类会被拒，不会被猜成 1、2 号任务）。状态联动：依赖全部完成或已清空且任务为 PENDING ⇒ 自动转 TODO；给 TODO 任务加未完成依赖 ⇒ 回到 PENDING；已 IN_PROGRESS/REVIEWING 的任务**状态不变**（时间线会记录「当前存在未完成依赖」）。时间线写一条「依赖变更：旧 → 新（原由）」事件。不能与状态流转/节点调整/验收人变更同一次调用。",
+        "schema": {
+          "items": {
+            "type": "integer"
           },
           "type": [
             "array",

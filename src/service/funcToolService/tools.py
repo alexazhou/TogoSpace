@@ -2186,12 +2186,14 @@ async def update_task(
     append_stages: Optional[list[dict | int]] = None,
     remove_stage_index: Optional[int] = None,
     reassign_stage: Optional[dict] = None,
+    depends_on: Optional[list[int]] = None,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """更新协作任务：交棒/打回、调整工作流节点、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。
+    """更新协作任务：交棒/打回、调整工作流节点、追加评论、修改验收人，或修改依赖（任何团队成员都可以追加评论）。
 
     **一次调用只能做一件事**：状态流转（new_status）、workflow_action、节点调整
-    （append_stages / remove_stage_index / reassign_stage）、验收人变更，四类同时给会被拒绝。
+    （append_stages / remove_stage_index / reassign_stage）、验收人变更、依赖变更，
+    五类同时给会被拒绝。
 
     Args:
         task_id: 任务 ID
@@ -2204,6 +2206,7 @@ async def update_task(
         remove_stage_index: 删除未开始的节点序号。**REVIEW 节点任何情况都不可删除**（防绕过审批红线）；认领后才能删未开始的 EXECUTION 节点，只有当前持棒人可删；不能删当前或已通过的节点。节点 0（执行人）不可删除，换人请用 reassign_stage。
         reassign_stage: 节点换人：{"stage_index": 1, "owner_id": 9}。用于「当前/后续未完成节点交接换人」，新负责人必须是本团队在职成员。
         clear_fields: 要清除（置空）的字段名列表，白名单当前仅 "reviewer_id"。clear_fields=["reviewer_id"] 表示撤销验收人（置空）：只有任务创建人可以操作，任务处于 REVIEWING 时不允许（会导致无人能通过验收），不能与状态流转或 reviewer_id 同时给。传空数组 [] 视为「未提供」，不会撤销任何字段（注意这与 list_tasks 的 status=[] 语义相反：status=[] 是「过滤条件写了个空的」，意图不明故报错；clear_fields=[] 是「没要清任何字段」，意图明确故等价省略）。白名单之外的字段名会被拒绝并返回 error_code="invalid_clear_field"。
+        depends_on: 修改任务依赖（**三态，务必区分**）：①**省略本参数 = 不改依赖**；②**显式传 [] = 清空依赖**；③传 [1, 2] = 整体替换为新依赖列表（不是增量追加）。只有**任务创建人**能改。拒绝条件（错误码全部 `task_depends_on_*` 前缀）：目标任务不存在/不属于本团队（task_depends_on_invalid_target）、成环（task_depends_on_cycle，自依赖与直接环、间接环合并成同一码，具体是哪种写在 message 里：`self` 或 `#a -> #b -> #a`）、任务已 DONE/CANCELLED（task_depends_on_terminal）、非创建人（task_depends_on_not_creator）、形态非法（task_depends_on_invalid_input：只接受任务 ID 数组，`"12"` / `[true]` 这类会被拒，不会被猜成 1、2 号任务）。状态联动：依赖全部完成或已清空且任务为 PENDING ⇒ 自动转 TODO；给 TODO 任务加未完成依赖 ⇒ 回到 PENDING；已 IN_PROGRESS/REVIEWING 的任务**状态不变**（时间线会记录「当前存在未完成依赖」）。时间线写一条「依赖变更：旧 → 新（原由）」事件。不能与状态流转/节点调整/验收人变更同一次调用。
     """
     import service.taskService as taskService
 
@@ -2224,6 +2227,7 @@ async def update_task(
         append_stages=append_stages,
         remove_stage_index=remove_stage_index,
         reassign_stage=reassign_stage,
+        depends_on=depends_on,
     )
 
 

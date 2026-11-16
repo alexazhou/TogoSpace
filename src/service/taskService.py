@@ -610,6 +610,241 @@ async def _update_reviewer_with_event(
     return task
 
 
+async def _find_dependency_cycle(
+    task_id: int,
+    candidate_deps: Sequence[int],
+) -> Optional[list[int]]:
+    """判断「把 `task_id` 的依赖替换为 `candidate_deps`」后是否成环；成环则返回环路径。
+
+    方向：`task → candidate_deps`。因此从 candidate_deps 出发沿各自 `depends_on`
+    继续走，若能回到 `task_id` 即为环。其余任务一律用**库中现值**，所以本函数判的是
+    「替换之后」的图，而不是当前图（当前图合法不代表替换后合法）。
+
+    只读查询：整个过程在写库前完成，配合调用方的「校验全通过才写」保证原子性。
+    """
+    if task_id in candidate_deps:
+        return [task_id, task_id]
+
+    visited: set[int] = set()
+    frontier: list[tuple[int, list[int]]] = [
+        (dep_id, [task_id, dep_id]) for dep_id in candidate_deps
+    ]
+    while frontier:
+        current_id, path = frontier.pop(0)
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+        rows = await gtAgentTaskManager.get_tasks_by_ids([current_id])
+        if not rows:
+            continue
+        for next_id in (rows[0].depends_on or []):
+            if next_id == task_id:
+                return path + [task_id]
+            if next_id not in visited:
+                frontier.append((next_id, path + [next_id]))
+    return None
+
+
+async def _handle_depends_on_change(
+    team_id: int,
+    task: GtAgentTask,
+    *,
+    caller_id: int,
+    depends_on: Sequence[int],
+    note: str,
+) -> dict:
+    """`update_task` 的「仅依赖变更」路径。
+
+    **三态语义**（由调用方按 `depends_on is not None` 判定是否进入本函数）：
+    - 省略 = 不改（不会走到这里）；
+    - `[]` = **清空依赖**；
+    - `[1, 2]` = **整体替换**（不是增量追加）。
+
+    权限：**只有任务创建人**能改依赖。执行人不能给自己解绑依赖（否则
+    「依赖未满足不能开工」这条闸门可以被执行方自行拆除）；验收人同理。
+
+    校验全部在**写库之前**完成（形态收口 → 存在性/同团队 → 环，自依赖视为「长度 1 的环」），
+    任一失败即返回错误，保证「拒绝后依赖列表一字未变」（不留半改）。
+
+    错误码（小马哥 2026-11-17 00:51 命名口径，全部 `task_depends_on_*` 前缀）：
+    `task_depends_on_not_creator` / `task_depends_on_invalid_input` /
+    `task_depends_on_invalid_target` / `task_depends_on_cycle`（自依赖与直接环、间接环合并）/
+    `task_depends_on_terminal`。
+
+    状态联动：
+    - 依赖已全部 DONE（或已清空）且任务为 `PENDING` ⇒ `TODO`（与创建时推导一致）；
+    - 存在未完成依赖且任务为 `TODO` ⇒ 回退 `PENDING`（TODO 尚未认领，回退无在途代价；
+      **这是超出需求字面的一处加固**：若不回退，TODO 任务仍可被 claim 绕过依赖闸门）；
+    - 任务已 `IN_PROGRESS` / `REVIEWING` ⇒ **状态不变**（回退会中断在途工作），
+      但事件里如实记录「当前存在未完成依赖」。
+    """
+    old_status = task.status
+    reason = (note or '').strip()
+
+    if old_status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+        # 正常路径已被 `_update_task_impl` 的终态门拦住；这里是防御性分支（直接调用本函数时）
+        return {
+            "success": False,
+            "message": f"任务已处于终态（{old_status.value}），不可修改依赖",
+            "error_code": "task_depends_on_terminal",
+        }
+
+    if caller_id != task.creator_id:
+        return {
+            "success": False,
+            "message": (
+                f"只有任务创建人才能修改依赖（创建人 agent_id={task.creator_id}）；"
+                "执行人/验收人如需调整依赖，请联系创建人"
+            ),
+            "error_code": "task_depends_on_not_creator",
+        }
+
+    # ---- 类型收口（必须在归一循环之前）----
+    # 只靠下面的 `int(raw)` 循环收不住三种「形态错但能静默改对/改错」的输入：
+    # ① `str`/`bytes` 可迭代 ⇒ `"12"` 被拆成依赖 #1、#2（**静默改错**，最危险）；
+    # ② `dict` 可迭代 ⇒ 拿到 keys（`{3: True}` ⇒ 依赖 #3，属「猜对意图」的静默生效）；
+    # ③ `bool` 是 `int` 子类 ⇒ `True` 会变成依赖 #1。
+    # 口径：只接受 `list`/`tuple`（元素另行数值化），其余一律 `task_depends_on_invalid_input`。
+    if not isinstance(depends_on, (list, tuple)):
+        return {
+            "success": False,
+            "message": (
+                "depends_on 必须是任务 ID 数组：省略=不改，[]=清空，[1, 2]=整体替换；"
+                f"收到的是 {type(depends_on).__name__}"
+            ),
+            "error_code": "task_depends_on_invalid_input",
+        }
+    if any(isinstance(raw, bool) for raw in depends_on):
+        return {
+            "success": False,
+            "message": "depends_on 的元素必须是整数任务 ID（布尔值会被误当成 0/1 号任务）",
+            "error_code": "task_depends_on_invalid_input",
+        }
+
+    # ---- 归一：数值化 + 去重保序（顺序即调用方给的顺序，便于审计）----
+    normalized: list[int] = []
+    for raw in depends_on:
+        try:
+            dep_id = int(raw)
+        except (TypeError, ValueError):
+            return {
+                "success": False,
+                "message": f"无效的依赖任务 ID：{raw!r}（必须是整数任务 ID）",
+                "error_code": "task_depends_on_invalid_input",
+            }
+        if dep_id not in normalized:
+            normalized.append(dep_id)
+
+    # ---- 存在性 + 同团队（get_tasks_by_ids 不按 team 过滤，必须自己校验）----
+    if normalized:
+        dep_tasks = await gtAgentTaskManager.get_tasks_by_ids(normalized)
+        by_id = {t.id: t for t in dep_tasks}
+        missing = [d for d in normalized if d not in by_id]
+        if missing:
+            return {
+                "success": False,
+                "message": f"依赖任务不存在（可能已删除）：{missing}",
+                "error_code": "task_depends_on_invalid_target",
+            }
+        foreign = [d for d in normalized if by_id[d].team_id != team_id]
+        if foreign:
+            return {
+                "success": False,
+                "message": f"依赖任务必须属于同一团队：{foreign}",
+                "error_code": "task_depends_on_invalid_target",
+            }
+
+    # ---- 环检测（写库前，只读）----
+    cycle = await _find_dependency_cycle(task.id, normalized)
+    if cycle is not None:
+        # 自依赖与直接环/间接环**合并成同一个码**（小马哥 2026-11-17 00:51 命名口径），
+        # 具体是哪种由 message 说清：自依赖写 `self`，其余写 `#a -> #b -> #a` 路径。
+        if cycle == [task.id, task.id]:
+            reason_text = f"self（任务不能依赖自己：#{task.id}）"
+        else:
+            reason_text = " -> ".join(f"#{x}" for x in cycle)
+        return {
+            "success": False,
+            "message": f"依赖成环，已拒绝：{reason_text}",
+            "error_code": "task_depends_on_cycle",
+        }
+
+    old_deps = list(task.depends_on or [])
+    if old_deps == normalized:
+        return {
+            "success": True,
+            "action": "depends_on_unchanged",
+            "old_depends_on": old_deps,
+            "new_depends_on": normalized,
+            "status": old_status.value,
+            "message": "依赖未变化（与当前一致），未写入事件",
+        }
+
+    # ---- 状态联动：先算目标状态，再一次性写 ----
+    unfinished: list[int] = []
+    if normalized:
+        dep_tasks = await gtAgentTaskManager.get_tasks_by_ids(normalized)
+        unfinished = [t.id for t in dep_tasks if t.status != TaskStatus.DONE]
+
+    new_status_target: Optional[TaskStatus] = None
+    if not unfinished and old_status == TaskStatus.PENDING:
+        new_status_target = TaskStatus.TODO       # 依赖已就绪 / 已清空 ⇒ 可开工
+    elif unfinished and old_status == TaskStatus.TODO:
+        new_status_target = TaskStatus.PENDING    # 加固：TODO 未认领，回退依赖未满足
+
+    old_label = "无" if not old_deps else "、".join(f"#{d}" for d in old_deps)
+    new_label = "无" if not normalized else "、".join(f"#{d}" for d in normalized)
+    content = f"依赖变更：{old_label} → {new_label}"
+    if reason:
+        content += f"（原由：{reason}）"
+    if unfinished and old_status in (TaskStatus.IN_PROGRESS, TaskStatus.REVIEWING):
+        content += f"（当前存在未完成依赖：{unfinished}，状态保持 {old_status.value}）"
+
+    save_fields: list = [GtAgentTask.depends_on]
+    async with atomic():
+        task.depends_on = normalized  # 同步内存态，保证返回体与落库一致
+        if new_status_target is not None:
+            task.status = new_status_target
+            save_fields.append(GtAgentTask.status)
+        await gtAgentTaskManager.save_task(task, only=save_fields)
+        event = await gtAgentTaskEventManager.append_event(
+            task.id,
+            caller_id,
+            from_status=None,
+            to_status=None,
+            content=content,
+        )
+    # 推送放在事务块外：回滚时不会出现「推了但没落库」
+    _publish_event_appended(team_id, task, event)
+    logger.info(
+        f"任务依赖变更：task_id={task.id}, {old_deps} → {normalized}, "
+        f"status {old_status.value} → {task.status.value}, caller={caller_id}"
+    )
+
+    from playhouse.shortcuts import model_to_dict
+    message = f"依赖已更新：{old_label} → {new_label}"
+    if new_status_target is not None:
+        message += f"；状态联动 {old_status.value} → {task.status.value}"
+        if new_status_target == TaskStatus.TODO:
+            message += "（依赖已全部完成/已清空）"
+        else:
+            message += f"（存在未完成依赖 {unfinished}，任务回到待依赖状态）"
+    elif unfinished:
+        message += f"；存在未完成依赖 {unfinished}，状态保持 {old_status.value} 不变"
+
+    return {
+        "success": True,
+        "action": "depends_on_updated",
+        "old_depends_on": old_deps,
+        "new_depends_on": normalized,
+        "old_status": old_status.value,
+        "status": task.status.value,
+        "unfinished_depends_on": unfinished,
+        "task": model_to_dict(task, recurse=False),
+        "message": message,
+    }
+
+
 async def _handle_reviewer_change(
     team_id: int,
     task: GtAgentTask,
@@ -1447,13 +1682,19 @@ async def update_task(
     append_stages: Optional[list] = None,
     remove_stage_index: Optional[int] = None,
     reassign_stage: Optional[dict] = None,
+    depends_on: Optional[Sequence[int]] = None,
 ) -> dict:
-    """更新协作任务：流转状态 / 交棒打回 / 调整节点链 / 追加评论 / 修改验收人。
+    """更新协作任务：流转状态 / 交棒打回 / 调整节点链 / 追加评论 / 修改验收人 / 修改依赖。
 
     **意图互斥**：`new_status`（状态流转，非自环）、`workflow_action`、
-    `append_stages` / `remove_stage_index` / `reassign_stage`、以及验收人变更，
-    这四类意图**只能出现一类**，同时给多个返回 `error_code="ambiguous_task_update"`
+    `append_stages` / `remove_stage_index` / `reassign_stage`、验收人变更、
+    依赖变更，这几类意图**只能出现一类**，同时给多个返回 `error_code="ambiguous_task_update"`
     （避免「一次调用里既交棒又换人」这种无法审计的原子动作）。
+
+    `depends_on` 的三态（**调用方必须区分**）：
+    - 省略（`None`）= 不改依赖；
+    - `[]` = **清空依赖**（显式意图，不是「未提供」）；
+    - `[1, 2]` = 整体替换为新依赖列表（不是增量追加）。
 
     v3 新参数（step1 §5.2）：
     - `workflow_action="advance"`：交棒给下一节点（末节点则整单 DONE）；
@@ -1480,6 +1721,7 @@ async def update_task(
             append_stages=append_stages,
             remove_stage_index=remove_stage_index,
             reassign_stage=reassign_stage,
+            depends_on=depends_on,
         )
 
 
@@ -1497,6 +1739,7 @@ async def _update_task_impl(
     append_stages: Optional[list] = None,
     remove_stage_index: Optional[int] = None,
     reassign_stage: Optional[dict] = None,
+    depends_on: Optional[Sequence[int]] = None,
 ) -> dict:
     """`update_task` 的实现体（已持有任务锁）。"""
     # 先校验状态字符串（非法状态不应触达 DB）
@@ -1583,11 +1826,15 @@ async def _update_task_impl(
         }
     has_node_op = any(x is not None for x in (append_stages, remove_stage_index, reassign_stage))
     transition_intent = target is not None and target != old_status
+    # 依赖变更：`depends_on is not None` 才算意图 —— **不能**写 `if depends_on`，
+    # 那样「显式传 [] 清空依赖」会被当成「未提供」而静默不生效。
+    has_depends_change = depends_on is not None
     intents = {
         "状态流转 new_status": transition_intent,
         "workflow_action": flow_action is not None,
         "节点链调整": has_node_op,
         "验收人变更": wants_reviewer_change,
+        "依赖变更 depends_on": has_depends_change,
     }
     given = [name for name, present in intents.items() if present]
     # 例外：**只有**「状态流转 + 验收人变更」这一对时，沿用 v2 的专用错误码与文案
@@ -1604,8 +1851,20 @@ async def _update_task_impl(
             "error_code": "ambiguous_task_update",
         }
 
-    # 终态只允许评论（step2 §4.2 第一道门）
-    if old_status in (TaskStatus.DONE, TaskStatus.CANCELLED) and (flow_action is not None or has_node_op):
+    # 终态只允许评论（step2 §4.2 第一道门）。
+    # 依赖变更也在这里拦：已交付任务的依赖关系不允许事后篡改（会改变「当时为什么能开始」的
+    # 事实），与交棒/打回/节点调整同等对待，错误码沿用 `task_already_terminal` 保持一致口径。
+    if old_status in (TaskStatus.DONE, TaskStatus.CANCELLED) and (
+        flow_action is not None or has_node_op or has_depends_change
+    ):
+        # 依赖变更给独立错误码（`task_depends_on_terminal`），既有 `task_already_terminal`
+        # 一字不改 —— 后者是线上调用方已在解析的码，不允许重命名/挪语义。
+        if has_depends_change:
+            return {
+                "success": False,
+                "message": f"任务已处于终态（{old_status.value}），不可修改依赖（仅可追加评论）",
+                "error_code": "task_depends_on_terminal",
+            }
         return {
             "success": False,
             "message": f"任务已处于终态（{old_status.value}），不可再交棒/打回/调整节点（仅可追加评论）",
@@ -1646,6 +1905,16 @@ async def _update_task_impl(
             target=target,
             reviewer_id=reviewer_id,
             clearing=clearing,
+            note=note,
+        )
+
+    # ---- 依赖变更分支（同样必须先于评论分支）----
+    if has_depends_change:
+        return await _handle_depends_on_change(
+            team_id,
+            task,
+            caller_id=caller_id,
+            depends_on=depends_on,  # type: ignore[arg-type]
             note=note,
         )
 
