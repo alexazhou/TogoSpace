@@ -127,9 +127,11 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     # `task_id` 必填在前；`reviewer_id`（改人）与 `clear_fields`（撤销）在末尾
     # （老参数的位置与顺序一律不动，避免影响既有调用方的填充习惯）。
     # #227（task v3）：追加 5 个工作流参数（老参数位置与顺序不动）。
+    # #298：依赖变更 `depends_on` 追加在末尾（老参数位置与顺序一律不动）。
     "update_task": [
         "task_id", "new_status", "note", "reviewer_id", "clear_fields",
         "workflow_action", "target_stage", "append_stages", "remove_stage_index", "reassign_stage",
+        "depends_on",
     ],
     "wake_up_agent": ["agent_name"],
     "web_search": ["query"],

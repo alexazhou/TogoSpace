@@ -700,7 +700,8 @@ async def test_element_null_rejected_for_all_array_params() -> None:
                 array_params.append((name, param_name))
 
     # v3 新增两个数组参数：create_task.stages（多级节点链）、update_task.append_stages（后置加签）
-    assert len(array_params) == 15, array_params
+    # #298 再 +1：update_task.depends_on（依赖整体替换）⇒ 15 → 16
+    assert len(array_params) == 16, array_params
 
     blocked = 0
     for name, param_name in array_params:
@@ -716,7 +717,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
         assert _LEGACY_MESSAGE_MARK not in result["message"], (name, param_name, result)
         blocked += 1
 
-    assert blocked == 15
+    assert blocked == 16
 
 
 @pytest.mark.asyncio
@@ -966,11 +967,13 @@ async def test_null_injection_exhaustive_table() -> None:
     # kind/protocol 拆分：`save_mcp_server.protocol` 为新增 Optional + None 默认
     # ⇒ p1_optional 86→87、总数 139→140。
     # #292：`exit_to_host.keep_alive: bool = False` —— bool 注解不含 None，计入
-    # 「有默认值但注解不含 None」⇒ p1_required 53→54、总数 140→141。
-    assert p1_required + p1_optional == 141, (p1_required, p1_optional)
+    # 「有默认值但注解不含 None」⇒ p1_required 53→54、总数 +1。
+    # #298：`update_task.depends_on: Optional[list[int]] = None` 是新增可选参数
+    # ⇒ p1_optional 87→88、P2 数组元素 15→16、总数再 +1。
+    assert p1_required + p1_optional == 142, (p1_required, p1_optional)
     assert p1_required == 54, p1_required
-    assert p1_optional == 87, p1_optional
-    assert p2 == 15, f"P2={p2}"
+    assert p1_optional == 88, p1_optional
+    assert p2 == 16, f"P2={p2}"
     # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
     # #224→#273：`save_mcp_server.config`、`list_mcp_servers.args/extra` 亦是裸 object
     # ⇒ 7 → 10（v3 的 reassign_stage 已把 6→7）。
@@ -984,7 +987,8 @@ async def test_null_injection_exhaustive_table() -> None:
     # （kind/protocol 拆分：`save_mcp_server.protocol` +1 ⇒ 198→199）
     # （#292：`exit_to_host.keep_alive` +1 ⇒ 199→200 = 44 + 54 + 87 + 15 + 0）
     # （#202 实测：166 = 39 + 46 + 68 + 13 + 0；#196 前 148；#189 时 146）
-    assert total == 200, total
+    # 202 = 44 + 54（#292 keep_alive）+ 88（#298 depends_on）+ 16（#298 数组元素）+ 0
+    assert total == 202, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

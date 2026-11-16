@@ -19,6 +19,8 @@ def test_update_task_signature_uses_new_status_and_note():
         # v3 单棒接力（step1 §5.2）：交棒/打回 + 节点链调整，全部可选
         "workflow_action", "target_stage", "append_stages", "remove_stage_index",
         "reassign_stage",
+        # #298：依赖变更（省略=不改 / []=清空 / [..]=整体替换），追加在末尾
+        "depends_on",
         "_context",
     ]
     assert "result" not in params

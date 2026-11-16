@@ -206,6 +206,8 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("save_room", "room_id"),
     ("update_task", "append_stages"),
     ("update_task", "clear_fields"),
+    # #298：`depends_on: Optional[list[int]] = None`（省略=不改；`[]`=清空）
+    ("update_task", "depends_on"),
     ("update_task", "new_status"),
     ("update_task", "reassign_stage"),
     ("update_task", "remove_stage_index"),
@@ -538,7 +540,7 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 26
-    assert len(OPTIONAL_WITH_DEFAULT) == 87
+    assert len(OPTIONAL_WITH_DEFAULT) == 88  # #298：update_task.depends_on +1
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -790,7 +792,14 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: `keep_alive: bool = False` 并重写 description（保活挂起/五格文案的来源说明），
 #: **工具数 44、参数数 140 → 141**（+1 可选参数）；其余 43 个工具的
 #: description / required 逐字未动。
-BASELINE_TEXT_DIGEST = "bb47a7154d8773eae91355f45e29fd6614ef76caa77b12ef1d4a194de59b5d9f"
+#: #298 重算（`bb47a715…` → `41db25edab3087e61fd4830ab00b8af7d4b724ae7df721c5b3793d52f11e369e`）：`update_task` 新增依赖变更能力——
+#: ①工具说明扩写（`new_status`/`workflow_action`/节点调整/验收人变更/**依赖变更**五类意图
+#: 互斥，`depends_on` 三态：省略=不改 / `[]`=清空 / `[..]`=整体替换）；②新增参数
+#: `depends_on: Optional[list[int]] = None`（**工具数 44 不变、参数数 141 → 142**、
+#: 全部 required 不变）。其余 42 个工具的 description / required 逐字未动——复核方式：
+#: 在 rebase 基点树（`e737c0c5`）上跑 `scripts/tool_schema_snapshot.py` 与本树 diff，
+#: 只应出现 `[update_task]` 一项；基点树现算 digest 仍为 `bb47a715…`（旧常量逐字相同）。
+BASELINE_TEXT_DIGEST = "41db25edab3087e61fd4830ab00b8af7d4b724ae7df721c5b3793d52f11e369e"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -834,7 +843,7 @@ def test_descriptions_and_required_do_not_drift() -> None:
     # 38 → 39 / 108 → 114：`mcp_call`（#202）。40 → 44 / 125 → 139：MCP 注册表四工具
     # （#224 三工具 + #273 set_mcp_server_enabled，+`mcp_call` 说明改写）。
     assert tools == 44, tools
-    assert params == 141, params
+    assert params == 142, params  # #292 keep_alive +1、#298 depends_on +1
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "
