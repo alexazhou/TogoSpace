@@ -524,15 +524,40 @@ async def test_console_mcp_ls_forwards_to_mcp_call(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_console_mcp_call_forwards_action_and_options(tmp_path: Path):
+    """既有 OpenAPI 直传的转发形态（A 类不变量，Q1=A）。
+
+    #291 起入口写法多了一项**显式 `--kind openapi|graphql`**（产品 §5：直传路径必须
+    说清来源；旧「省略 --kind 靠工具默认 openapi」的写法随 T0 移除）。转发目标工具
+    与参数语义不变：`action` 由命令语义补成 `call`，`target`/`tool` 原样透传。
+    """
     spec_path = _write_spec(tmp_path, "http://127.0.0.1:9")
 
     with pytest.raises(ForwardToolCall) as excinfo:
-        await console(f"mcp call {spec_path} --tool get-thing")
+        await console(f"mcp call --kind openapi {spec_path} --tool get-thing")
 
     forward = excinfo.value
     assert forward.tool_name == "mcp_call"
-    # `action` 由命令表的 `input_defaults` 补上：命令语义就是 call，调用方不必再写。
-    assert forward.tool_args == {"action": "call", "tool": "get-thing", "target": spec_path}
+    assert forward.tool_args == {
+        "action": "call",
+        "tool": "get-thing",
+        "target": spec_path,
+        "kind": "openapi",
+    }
+
+
+@pytest.mark.asyncio
+async def test_console_mcp_call_without_kind_on_path_is_removed(tmp_path: Path):
+    """反向判据：`mcp call <spec> --tool x`（省略 --kind）不再被当成 OpenAPI 直传。
+
+    旧写法靠工具默认 `kind=openapi` 生效；新语法里 `<server>.<tool>` 是 MCP 原生定位，
+    路径形态的 target 一律指路到 `--kind openapi|graphql`（`mcp_legacy_syntax_removed`），
+    **不**静默按默认 kind 跑掉一次调用。
+    """
+    spec_path = _write_spec(tmp_path, "http://127.0.0.1:9")
+    body = await console(f"mcp call {spec_path} --tool get-thing")
+    assert body["success"] is False, body
+    assert body["error_code"] == "mcp_legacy_syntax_removed", body
+    assert "--kind openapi" in body["message"], body["message"]
 
 
 @pytest.mark.asyncio
@@ -574,7 +599,7 @@ async def test_console_second_hop_executes_mcp_call(served_dir):
         function={
             "name": "console",
             "arguments": json.dumps({
-                "command": f"mcp call {spec_path} --tool get-item-by-id --args '{{\"item_id\": \"7\"}}'"
+                "command": f"mcp call --kind openapi {spec_path} --tool get-item-by-id --args '{{\"item_id\": \"7\"}}'"
             }),
         },
     )

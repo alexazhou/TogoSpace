@@ -13,6 +13,7 @@ from service import serviceUtil
 from util import llmApiUtil
 from service.roomService import ToolCallContext
 from .consoleCommands import COMMAND_SPECS, ENV_KEEP_LEGACY_TOOLS, LEGACY_CONVERGED_TOOLS
+from .mcpConsole import FORWARD_TOOL_NAMES as MCP_CONSOLE_FORWARD_TOOL_NAMES
 from .toolArgsValidation import validate_tool_args
 from toolResult import error_result, invalid_json_args
 from .consoleTool import console, console_triggers_self_interrupt
@@ -113,10 +114,15 @@ def resolve_effective_visibility(name: str, declared: ToolVisibility) -> ToolVis
     return declared
 
 
-#: console 命令表声明的全部转发目标（静态集合，用于推导基准可见性）。
+#: console 声明的全部转发目标（静态集合，用于推导基准可见性）。
+#:
+#: 两个来源缺一不可：① `COMMAND_SPECS` 里每条 spec 的 `legacy_tool`（通用命令表）；
+#: ② `mcpConsole.FORWARD_TOOL_NAMES`（`mcp` 子树的窄解析器——它不经过 spec 机制）。
+#: #291 T0 删掉 6 条 mcp spec 后，只按 ① 推导会让这 5 个工具掉成 `TOOL_ONLY`，
+#: 于是子树转发它们的第 2 跳被判「工具不支持通过 console 调用」（实测红线）。
 _CONSOLE_FORWARD_TARGETS: frozenset[str] = frozenset(
     spec.legacy_tool for spec in COMMAND_SPECS if spec.legacy_tool
-)
+) | MCP_CONSOLE_FORWARD_TOOL_NAMES
 
 
 def _declared_visibility(name: str) -> ToolVisibility:

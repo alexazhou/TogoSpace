@@ -790,7 +790,10 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: `keep_alive: bool = False` 并重写 description（保活挂起/五格文案的来源说明），
 #: **工具数 44、参数数 140 → 141**（+1 可选参数）；其余 43 个工具的
 #: description / required 逐字未动。
-BASELINE_TEXT_DIGEST = "bb47a7154d8773eae91355f45e29fd6614ef76caa77b12ef1d4a194de59b5d9f"
+#: #291 再算（`bb47a715…` → 本值）：四个 MCP 注册表工具的 docstring 里，调用语法从
+#: 已删除的 `mcp add/rm/ls` 改成 `mcp config add/remove/list` 与
+#: `mcp call <server-name>.<工具名>`（只改文案，工具数与参数数不变：44 / 141）。
+BASELINE_TEXT_DIGEST = "6b5f912afcdf42e082183b020425cdcaf759654fe1dccbbcaa58d9d9fd3445ba"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -833,6 +836,10 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
     # 38 → 39 / 108 → 114：`mcp_call`（#202）。40 → 44 / 125 → 139：MCP 注册表四工具
     # （#224 三工具 + #273 set_mcp_server_enabled，+`mcp_call` 说明改写）。
+    # #291：44 / 141 不变，**只改文案**（digest 变）—— 四个注册表工具的 docstring 里
+    # 写的调用语法从已删除的 `mcp add/rm/ls` 换成 `mcp config add/remove/list`
+    # 与 `mcp call <server-name>.<工具名>`。不动文案的代价是模型看到指向不存在命令的
+    # 说明，所以这是「模型接口说明确实该变」的有意变更。
     assert tools == 44, tools
     assert params == 141, params
     assert digest == BASELINE_TEXT_DIGEST, (

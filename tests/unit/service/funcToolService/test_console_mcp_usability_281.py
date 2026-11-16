@@ -38,65 +38,77 @@ from service.funcToolService.consoleParsing import ConsoleError
 
 
 def _parse_error(command_spec: str, tokens: list[str]) -> ConsoleError:
+    """通用命令表的解析层（**只对非 mcp 命令有效**：#291 起 mcp 子树不走 spec）。"""
     spec = cc.COMMAND_INDEX[command_spec]
     with pytest.raises(ConsoleError) as caught:
         cp._parse_options(spec, tokens)
     return caught.value
 
 
-def test_p1_unknown_option_gives_copyable_example_not_option_list():
-    """P1：`mcp call ... --library-name React` ⇒ unknown_option + 一行正确调用。
+async def _mcp_error(command: str) -> dict:
+    """mcp 子树的失败返回体（子树自己接住 ConsoleError，不抛）。"""
+    body = await console(command)
+    assert body.get("success") is False, body
+    return body
 
-    三档判据：① 清单消失；② MCP 专属说明在；③ 示例行 == 常量 `MCP_CALL_EXAMPLE`
-    （不是拼出来的）。
+
+@pytest.mark.asyncio
+async def test_p1_unknown_option_gives_copyable_example_not_option_list():
+    """P1：未知选项 ⇒ `unknown_option` + 一行正确调用，**不列「可用选项」清单**。
+
+    #291：判据对象从 spec 解析层换到 mcp 子树（`mcpConsole._reject_unknown_options`），
+    三档不动：① 清单消失；② 有原因说明；③ 示例行 == 唯一常量 `mcpConsole.EX_CALL`。
     """
-    exc = _parse_error("mcp call", ["context7", "resolve-library-id", "--library-name", "React"])
-    assert exc.code == "unknown_option"
-    assert "可用选项" not in exc.message, f"清单未移除：{exc.message!r}"
-    assert cc.MCP_OPTION_TIP in exc.message, f"缺 MCP 专属说明：{exc.message!r}"
-    assert cc.MCP_CALL_EXAMPLE in exc.message, f"示例行不是常量：{exc.message!r}"
-    assert exc.extra.get("example") == cc.MCP_CALL_EXAMPLE
-    # 措辞与文档 §P1 期望一致：先「未知选项」、再说明、再「正确调用：」
-    assert exc.message.startswith("未知选项：--library-name。")
-    assert "正确调用：" in exc.message
+    from service.funcToolService import mcpConsole as mcp_console
+
+    body = await _mcp_error("mcp call ctx7.resolve-library-id --library-name React")
+    assert body["error_code"] == "unknown_option", body
+    message = body["message"]
+    assert "可用选项" not in message, f"清单未移除：{message!r}"
+    assert "未知选项：--library-name" in message, message
+    assert "正确调用：" in message, message
+    assert body["example"] == mcp_console.EX_CALL, body
 
 
-def test_p2_target_as_option_reuses_p1_same_segment():
-    """P2：`mcp call --target x` ⇒ **unknown_option**（不是 missing_target），复用 P1 段。
+@pytest.mark.asyncio
+async def test_p2_target_option_is_legacy_form_and_conflict_still_ambiguous():
+    """P2 的改后形态：`--target` 不再是「不被接受的选项」，而是**既有直传形态的选项写法**。
 
-    「复用」的可执行判据：把选项名归一后，两条 message **逐字节相同**，且 `example`
-    同一常量 —— 不是「文案看起来像」，而是同一实现产出的同一段。
+    原判据：`mcp call --target x` ⇒ `unknown_option`（复用 P1 段）。
+    现判据（前提变了，改判据不改结论方向）：
+    ① 只给 `--target`（无位置参数）⇒ 合法，转发 `mcp_call`（既有直传路径，A 类保留）；
+    ② 位置参数与 `--target` 同时给 ⇒ `ambiguous_input_source`（§3.6-5 的既有契约，码不变）。
     """
-    p2 = _parse_error("mcp call", ["--target", "context7", "--tool", "x"])
-    assert p2.code == "unknown_option", "P2 必须复用 P1 的错误码（性质=不被接受的选项）"
-    p1 = _parse_error("mcp call", ["--library-name", "React"])
-    assert p2.message.replace("--target", "--library-name") == p1.message
-    assert p2.extra.get("example") == p1.extra.get("example") == cc.MCP_CALL_EXAMPLE
-    assert cc.MCP_OPTION_TIP in p2.message
+    from exception import ForwardToolCall
+
+    with pytest.raises(ForwardToolCall) as caught:
+        await console("mcp call --target https://x/mcp --tool t")
+    forward = caught.value
+    assert forward.tool_name == "mcp_call"
+    assert forward.tool_args["target"] == "https://x/mcp"
+
+    body = await _mcp_error("mcp call ctx7 --target https://x/mcp")
+    assert body["error_code"] == "ambiguous_input_source", body
 
 
-def test_p2_missing_target_and_ambiguous_keep_old_codes():
-    """P2 的边界：没写 target ⇒ `missing_target`；位置参数 + `--target` ⇒ `ambiguous_input_source`。"""
-    bare = cc.COMMAND_INDEX["mcp call"]
-    # 完全没写 target：解析层不报错（arity 由路由层判），这里只确认没被 P2 特例吃掉
-    positional, options, _src = cp._parse_options(bare, ["--tool", "x"])
-    assert positional == [] and options == {"tool": "x"}
-
-    # 位置参数与 --target 同时给：既有 §3.6-5 契约不变（在路由层报 ambiguous）
-    positional, options, _src = cp._parse_options(bare, ["ctx7", "--target", "https://x"])
-    assert positional == ["ctx7"]
-    assert bare.normalize_option("target") in {bare.normalize_option(k) for k in options}
+@pytest.mark.asyncio
+async def test_p2_missing_target_keeps_explicit_code():
+    """P2 的边界：完全没写 target ⇒ 明确报缺（`mcp_missing_target`），且给可抄示例。"""
+    body = await _mcp_error("mcp call --tool x")
+    assert body["error_code"] == "mcp_missing_target", body
+    assert body["example"], body
 
 
-def test_p1_example_declared_once_and_shared():
-    """常量单一实现取证：示例文案**只有一处定义**，P1/P2 走同一构造点。
+@pytest.mark.asyncio
+async def test_p1_example_declared_once_and_shared():
+    """常量单一实现取证：示例文案**只有一处定义**，错误体与 help 共用它。
 
     量具（两条，互相独立）：
-    1. `MCP_CALL_EXAMPLE` 的**定义行**在 `src/service/funcToolService/*.py` 里恰好 1 条
-       （`MCP_CALL_EXAMPLE: str = ...`）；docstring 举例、别的命令自己的示例文案不算定义；
-    2. `consoleParsing._unknown_option_error` 是本文件里**唯一**构造未知选项错误的地方：
-       源码中它的出现次数 = 1 次定义 + 2 次调用（P1 未知选项 / P2 位置参数写成选项）。
-    第二份示例常量、或 P2 另写一份文案，这两条都会红 —— 正是 P1「两处文案各自漂移」要防的。
+    1. `EX_CALL` 的**定义行**（`EX_CALL = …` 或 `EX_CALL: str = …`）在
+       `src/service/funcToolService/*.py` 里恰好 1 条
+       （#291 起位于 `mcpConsole.py`；原来的 `MCP_CALL_EXAMPLE` 随 mcp spec 一起删除）；
+    2. `consoleParsing._unknown_option_error` 仍是通用路径里**唯一**构造未知选项错误的地方
+       （1 定义 + 2 调用）—— mcp 子树有自己的构造点，但不能把通用路径也拆成两份。
     """
     import re
 
@@ -105,32 +117,63 @@ def test_p1_example_declared_once_and_shared():
         f"{path.name}:{idx}"
         for path in sorted(root.glob("*.py"))
         for idx, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-        if re.match(r"^MCP_CALL_EXAMPLE\s*:", line)
+        if re.match(r"^EX_CALL\s*(?::|=)", line)
     ]
     # 只断言「哪一个文件、几条定义」，**不绑行号**：行号会随无关改动漂移
-    # （#281 F1 修 `MCP_KIND_HINT` 就把它从 479 推到 484），绑行号会让判据在
-    # 与「示例单一实现」无关的改动上变红，属噪声。
-    assert [entry.split(":")[0] for entry in definitions] == ["consoleCommands.py"], (
-        f"示例常量应只在 consoleCommands.py 定义一次，实得：{definitions}"
+    assert [entry.split(":")[0] for entry in definitions] == ["mcpConsole.py"], (
+        f"示例常量应只在 mcpConsole.py 定义一次，实得：{definitions}"
     )
 
     parsing_src = (
         Path(__file__).resolve().parents[4] / "src/service/funcToolService/consoleParsing.py"
     ).read_text(encoding="utf-8")
     assert parsing_src.count("_unknown_option_error") == 3, (
-        "未知选项错误应只有一处构造点（1 定义 + 2 调用：P1 未知选项 / P2 位置参数写成选项）"
+        "通用路径的未知选项错误应只有一处构造点（1 定义 + 2 调用）"
     )
 
 
-def test_display_options_excludes_positional_params():
-    """P1 第 2 条：位置参数不进「选项面」展示清单（`mcp call` 的 target、`mcp rm` 的 name）。"""
-    call = cc.COMMAND_INDEX["mcp call"]
-    assert "target" in call.positional_param_names
-    assert "target" not in call.display_options, "位置参数不该出现在选项展示清单里"
-    assert {"tool", "args", "kind", "extra"} <= set(call.display_options)
-    rm = cc.COMMAND_INDEX["mcp rm"]
-    assert "name" in rm.positional_param_names
-    assert "name" not in rm.display_options
+@pytest.mark.asyncio
+async def test_positional_target_never_shows_up_as_option():
+    """P1 第 2 条：位置参数不进「选项面」。
+
+    原判据读 spec 的 `display_options`；#291 起 mcp 子树没有「可用选项」清单（P1 的
+    目标就是取消清单），所以改钉**解析结果**：`<server>.<tool>` 归位置参数，
+    `--args/--tool/--kind/--extra` 归选项，且错误体里不出现 `--<位置参数名>` 形态的清单行。
+    """
+    from service.funcToolService import mcpConsole as mcp_console
+
+    positional, options, named = mcp_console.parse_tokens(
+        ["call", "ctx7.get_issue", "--args", '{"id":"7"}', "--tool", "t"]
+    )
+    assert positional == ["call", "ctx7.get_issue"]
+    assert options == {"args": '{"id":"7"}', "tool": "t"}
+    assert named == {}
+
+    body = await _mcp_error("mcp call ctx7.get_issue --bogus 1")
+    assert "可用选项" not in body["message"], body["message"]
+
+
+@pytest.mark.asyncio
+async def test_f1_kind_default_is_gone_and_direct_pass_requires_explicit_kind():
+    """F1 的改后形态：`--kind` 的**默认值标注**随 `MCP_KIND_HINT` 一起移除。
+
+    原问题（f16f0bf9 实测）：kind 默认 openapi，却把「（默认）」标在 `--kind mcp` 行，
+    同一个工具两套默认。改后（#291）不再有默认值语义：直传路径**必须显式写 --kind**，
+    MCP 路径按 `<server>.<tool>` 定位、根本不接受 --kind。
+    判据：① 空敲 `mcp call` 报缺目标且示例不含 --kind；② help 明写「必须显式写 --kind」；
+    ③ 任何给模型看的 mcp 文案里都不再出现「（默认）」的 kind 标注（防止旧歧义搬回来）。
+    """
+    from service.funcToolService import mcpConsole as mcp_console
+
+    body = await _mcp_error("mcp call")
+    assert body["error_code"] == "mcp_missing_target", body
+    assert "--kind" not in body["example"], body["example"]
+
+    call_help = mcp_console.MCP_HELP_DETAIL["call"]
+    assert "必须显式写 --kind" in call_help, call_help
+
+    for text in (mcp_console.MCP_HELP_SUMMARY, call_help, mcp_console.MCP_HELP_DETAIL["ls"]):
+        assert "（默认）" not in text, text
 
 
 # --------------------------------------------------------------------------- #
@@ -232,11 +275,13 @@ async def test_p5_hint_absent_when_list_failed(mcp_db, leader_ctx, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_p4_url_openapi_failure_suggests_kind_mcp(mcp_db, leader_ctx, monkeypatch):
-    """P4：默认 openapi + http(s) URL + 失败 ⇒ message 追加 `--kind mcp` 两步示例。
+async def test_p4_url_openapi_failure_suggests_mcp_native_path(mcp_db, leader_ctx, monkeypatch):
+    """P4：默认 openapi + http(s) URL + 失败 ⇒ message 追加「这是 MCP server 该怎么走」。
 
-    判据三档：① 提示出现；② `error_code` **原样**（`mcp2cli_error`，不新增码）；
+    判据三档（与改前同）：① 提示出现；② `error_code` **原样**（`mcp2cli_error`，不新增码）；
     ③ 原 message 仍在（只追加，不覆盖）。
+    #291 变更只在示例内容：旧示例 `mcp call <URL> --kind mcp --tool …` 随 T0 移除，
+    改指 MCP 原生两条路（临时看：`mcp list <URL> --brief`；登记后：config add → call <name>.<tool>）。
     """
     from service.funcToolService import tools
 
@@ -248,8 +293,10 @@ async def test_p4_url_openapi_failure_suggests_kind_mcp(mcp_db, leader_ctx, monk
     assert body["success"] is False
     assert body["error_code"] == "mcp2cli_error", "P4 不许新增/改写错误码"
     assert body["message"].startswith("原始错误：405")
-    assert "若目标是 MCP server，请加 --kind mcp：" in body["message"]
-    assert "mcp call <URL> --kind mcp --tool <工具名>" in body["message"]
+    assert "若目标是 MCP server" in body["message"]
+    assert "mcp list <URL> --brief" in body["message"]
+    assert "mcp config add <server-name> <URL>" in body["message"]
+    assert "mcp call <server-name>.<工具名>" in body["message"]
 
 
 @pytest.mark.asyncio
@@ -265,37 +312,6 @@ async def test_p4_no_suggestion_when_kind_explicit_or_not_url(mcp_db, leader_ctx
     assert "若目标是 MCP server" not in explicit["message"]
     local = await tools.mcp_call(target="./openapi.json", tool="x")
     assert "若目标是 MCP server" not in local["message"]
-
-
-# --------------------------------------------------------------------------- #
-# F1（38 R1 打回项）：kind 默认值只能标在 openapi 行
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.asyncio
-async def test_f1_kind_default_marked_on_openapi_line(mcp_db):
-    """F1：`mcp call` 空敲的 usage 里，「（默认）」必须在 `--kind openapi` 行，不在 mcp 行。
-
-    事实依据（`f16f0bf9` 实测，真 mcp2cli）：**`mcp ls` 与 `mcp call` 的 kind 都默认
-    `openapi`** —— 两条 argv 均以 `--spec` 开头，直接传 MCP server 的 URL 会报 405。
-    原 `MCP_KIND_HINT` 把「（默认）」标在 `--kind mcp` 行，与同一工具的 help 事实句、
-    `HELP_DETAIL['mcp call']` 的「openapi=…（默认）」自相矛盾（同一个工具两套默认）。
-
-    四档判据：① 错误码仍是 `missing_target`（不因文案改动换码）；② usage 与常量同源
-    （整段相等，不是另抄一份）；③ 「（默认）」全段只出现一次且落在 openapi 行；
-    ④ mcp 行不再带「（默认）」。
-    """
-    result = await console("mcp call")
-    assert result["error_code"] == "missing_target", result
-    assert result["usage"] == list(cc.MCP_KIND_HINT), "usage 必须与 MCP_KIND_HINT 同源"
-
-    lines = result["usage"]
-    with_default = [line for line in lines if "（默认）" in line]
-    assert len(with_default) == 1, f"「（默认）」应只标一处，实得 {with_default!r}"
-    assert "--kind openapi" in with_default[0], f"「（默认）」标错了行：{with_default[0]!r}"
-
-    mcp_line = next(line for line in lines if line.startswith("  --kind mcp"))
-    assert "（默认）" not in mcp_line, f"mcp 行仍标默认：{mcp_line!r}"
 
 
 # --------------------------------------------------------------------------- #
@@ -354,16 +370,22 @@ def test_session_extra_false_or_none_is_ignored():
 
 
 def test_session_unsupported_documented_in_help_and_tool_docstrings():
-    """「标明」硬要求：help（mcp call / mcp ls）与工具 docstring 都要写明四个开关名 + 原因。
+    """「标明」硬要求：直传路径的 help 与工具 docstring 都要写明四个开关名 + 原因。
 
-    四处覆盖：`consoleTool.HELP_DETAIL['mcp call']` / `['mcp ls']` /
+    四处覆盖（#291 起 help 由 `mcpConsole.MCP_HELP_DETAIL` 提供，原 `consoleTool.HELP_DETAIL`
+    的 mcp 条目随 overlay 删除）：`MCP_HELP_DETAIL['call']` / `['ls']` /
     `tools.mcp_call.__doc__` / `tools.list_mcp_servers.__doc__`。
+
+    同时钉住「不矛盾」：原生 `mcp session` 是**支持**的，直传路径的 mcp2cli 开关才不支持
+    —— 两个事实必须同时出现在各自的位置，否则使用者会把「session 有替代路径」读成
+    「session 不可用」。
     """
-    from service.funcToolService import consoleTool, tools
+    from service.funcToolService import mcpConsole as mcp_console
+    from service.funcToolService import tools
 
     texts = {
-        "HELP_DETAIL mcp call": consoleTool.HELP_DETAIL["mcp call"],
-        "HELP_DETAIL mcp ls": consoleTool.HELP_DETAIL["mcp ls"],
+        "help call": mcp_console.MCP_HELP_DETAIL["call"],
+        "help ls": mcp_console.MCP_HELP_DETAIL["ls"],
         "mcp_call docstring": tools.mcp_call.__doc__ or "",
         "list_mcp_servers docstring": tools.list_mcp_servers.__doc__ or "",
     }
@@ -371,5 +393,11 @@ def test_session_unsupported_documented_in_help_and_tool_docstrings():
         for flag in ("--session", "--session-start", "--session-stop", "--session-list"):
             assert flag in text, f"{label} 未标明不支持 {flag}"
     # 原因必须写出来（否则使用者只看到「不支持」会反复试）
-    assert "Python 解释器" in texts["HELP_DETAIL mcp call"]
+    assert "Python 解释器" in texts["help call"]
     assert "Python 解释器" in texts["mcp_call docstring"]
+
+    # 替代路径：原生 session 在 help 里明写支持（与「直传开关不支持」并存、不矛盾），
+    # 直传侧拒绝 session 开关的那句原因也要指到它。
+    session_help = mcp_console.MCP_HELP_DETAIL["session"]
+    assert "mcp session start" in session_help and "本项目扩展" in session_help, session_help
+    assert "mcp session start" in mcpTool._SESSION_EXTRA_REASON, mcpTool._SESSION_EXTRA_REASON

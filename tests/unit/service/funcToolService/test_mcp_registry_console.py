@@ -167,38 +167,47 @@ async def _register_server(
 
 
 # ---------------------------------------------------------------------------
-# 1. 命令表形态（不碰库）
+# 1. 命令形态（不碰库）：旧 `mcp add/rm/ls` 语法 ⇒ 新 `mcp config add/remove/list`
+#
+# #291 T0 删掉 6 条 mcp spec、由 `mcpConsole` 窄解析器接管后，本组判据**一条不删**，
+# 逐条换成等价新入口，并写清「原触发 → 现触发」：
+#     `mcp add …`            → `mcp config add <name> <target> […选项]`
+#     `mcp rm <name>`        → `mcp config remove <name>`
+#     `mcp ls`（无参）        → `mcp config list` / `mcp list`
+# 共同不变式：**仍然是 `ForwardToolCall` 到同一批工具**（第 2 跳鉴权与执行只有一份实现），
+# 子树不自己写库、也不绕开 `allow_specs` / `console_visible` 门控。
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_mcp_add_inline_json_forwards_to_save():
-    payload = {"name": "ctx7", "kind": "mcp", "target": "https://mcp.context7.com/mcp"}
+async def test_mcp_config_add_forwards_to_save_tool():
+    """原 `mcp add --name ctx7 --kind mcp --target https://…` 转发 `save_mcp_server`；
+
+    现 `mcp config add ctx7 https://…` 转发**同一个工具**（kind 默认 mcp，与注册表工具
+    默认一致；HTTP target 不预置 protocol，交给工具按 URL 探测）。
+    """
     with pytest.raises(ForwardToolCall) as excinfo:
-        await console(f"mcp add '{json.dumps(payload)}'")
+        await console("mcp config add ctx7 https://mcp.context7.com/mcp")
     forward = excinfo.value
     assert forward.tool_name == "save_mcp_server"
-    assert forward.tool_args == payload
-
-
-@pytest.mark.asyncio
-async def test_mcp_add_option_form_forwards_same_shape():
-    with pytest.raises(ForwardToolCall) as excinfo:
-        await console("mcp add --name ctx7 --kind mcp --target https://mcp.context7.com/mcp")
-    forward = excinfo.value
     assert forward.tool_args == {
         "name": "ctx7",
         "kind": "mcp",
         "target": "https://mcp.context7.com/mcp",
+        "note": "",
     }
 
 
 @pytest.mark.asyncio
-async def test_mcp_add_from_payload_channel_equivalent():
-    payload = {"name": "ctx7", "target": "https://x", "note": "n"}
+async def test_mcp_config_add_passes_options_and_infers_stdio():
+    """选项面：`--note` / `--config` 透传；非 http(s) target 推断 protocol=stdio。"""
     with pytest.raises(ForwardToolCall) as excinfo:
-        await console("mcp add --from payload", payload=payload)
-    assert excinfo.value.tool_args == payload
+        await console(
+            "mcp config add local './bin/server --port 9' --note 本地 --config '{\"env\":{\"K\":\"V\"}}'"
+        )
+    assert excinfo.value.tool_args["protocol"] == "stdio"
+    assert excinfo.value.tool_args["note"] == "本地"
+    assert excinfo.value.tool_args["config"] == {"env": {"K": "V"}}
 
 
 async def _console_error(command: str, payload: dict | None = None) -> dict:
@@ -209,44 +218,76 @@ async def _console_error(command: str, payload: dict | None = None) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_mcp_add_rejects_two_positional_args():
-    """accepts_input 分支写死的 upper=1 才是真正的拦截（max_args=0 只是同构写法）。"""
-    body = await _console_error("mcp add ctx7 https://x")
-    assert body["error_code"] == "invalid_argument_count"
+async def test_mcp_add_json_blob_and_payload_channel_are_gone():
+    """原 `mcp add '{json}'`（accepts_input 的 JSON 输入）与 `--from payload` 通道随 spec 移除。
+
+    判据不打「删掉了」这种不可证伪的话，改钉两条**不静默**：
+    ① `mcp add …` 已不是合法子命令（`mcp_unknown_subcommand`，且文案点名 config）；
+    ② 只给 payload 的 `mcp config add` 明确报缺位置参数（payload 通道在子树内不存在，
+       **不**静默拿 payload 建 server）。
+    """
+    body = await _console_error("mcp add '{\"name\": \"ctx7\"}'")
+    assert body["error_code"] == "mcp_unknown_subcommand", body
+    assert "config" in body["message"], body["message"]
+
+    body = await _console_error("mcp config add", payload={"name": "ctx7", "target": "https://x"})
+    assert body["error_code"] == "mcp_missing_target", body
 
 
 @pytest.mark.asyncio
-async def test_mcp_add_nothing_reports_missing_input_source():
-    body = await _console_error("mcp add")
-    assert body["error_code"] == "missing_input_source"
+async def test_mcp_config_add_rejects_extra_positional_args():
+    """原 `mcp add ctx7 https://x` 由通用层 arity 拦住（`invalid_argument_count`）。
+
+    新子树是「两个位置参数」，缺这条会把 `a b c` 里的 c 悄悄吃掉 —— 所以显式拦。
+    """
+    body = await _console_error("mcp config add ctx7 https://x extra")
+    assert body["error_code"] == "invalid_argument_count", body
+    assert "extra" in body["message"], body["message"]
 
 
 @pytest.mark.asyncio
-async def test_mcp_add_duplicate_kind_reports_duplicate_option():
-    """联名 #218：标量选项重复出现报 duplicate_option，不静默取最后一个。"""
+async def test_mcp_config_add_duplicate_kind_reports_duplicate_option():
+    """联名 #218：标量选项重复出现报 duplicate_option，不静默取最后一个。
+
+    原触发 `mcp add --kind mcp --kind openapi` → 现触发
+    `mcp config add ctx7 https://x --kind mcp --kind openapi`；**码不变**。
+    """
     body = await _console_error(
-        "mcp add --name ctx7 --kind mcp --kind openapi --target https://x"
+        "mcp config add ctx7 https://x --kind mcp --kind openapi"
     )
-    assert body["error_code"] == "duplicate_option"
+    assert body["error_code"] == "duplicate_option", body
 
 
 @pytest.mark.asyncio
-async def test_mcp_rm_forwards_name_and_arity():
+async def test_mcp_config_remove_forwards_name_and_arity():
+    """原 `mcp rm ctx7` 转发 `delete_mcp_server`；现 `mcp config remove ctx7` 同一转发目标。"""
     with pytest.raises(ForwardToolCall) as hit:
-        await console("mcp rm ctx7")
+        await console("mcp config remove ctx7")
     assert hit.value.tool_name == "delete_mcp_server"
     assert hit.value.tool_args == {"name": "ctx7"}
 
-    body = await _console_error("mcp rm a b")
-    assert body["error_code"] == "invalid_argument_count"
+    body = await _console_error("mcp config remove a b")
+    assert body["error_code"] == "invalid_argument_count", body
 
-    body = await _console_error("mcp rm")
-    assert body["error_code"] == "invalid_argument_count"
+    body = await _console_error("mcp config remove")
+    assert body["error_code"] == "mcp_missing_target", body
+
+
+@pytest.mark.asyncio
+async def test_mcp_config_list_forwards_to_list_tool():
+    """`mcp config list` 转发 `list_mcp_servers` 无参分支（列表与脱敏只有一份实现）。"""
+    with pytest.raises(ForwardToolCall) as hit:
+        await console("mcp config list")
+    assert hit.value.tool_name == "list_mcp_servers"
+    assert hit.value.tool_args == {}
+
+    body = await _console_error("mcp config list extra")
+    assert body["error_code"] == "invalid_argument_count", body
 
 
 @pytest.mark.asyncio
 async def test_mcp_ls_no_arg_and_one_arg_both_reach_the_tool():
-    """§3.3：0 段与 1 段位置参数都要到达工具——这是换 DIRECT 的唯一原因。"""
+    """§3.3 + Q1=A：`mcp ls` 的 0 段与 1 段位置参数都要到达**同一个**工具（A 类不变）。"""
     with pytest.raises(ForwardToolCall) as empty:
         await console("mcp ls")
     assert empty.value.tool_name == "list_mcp_servers"
@@ -254,37 +295,64 @@ async def test_mcp_ls_no_arg_and_one_arg_both_reach_the_tool():
 
     with pytest.raises(ForwardToolCall) as one:
         await console("mcp ls ./openapi.json")
+    assert one.value.tool_name == "list_mcp_servers"
     assert one.value.tool_args == {"name_or_target": "./openapi.json"}
 
 
 @pytest.mark.asyncio
-async def test_mcp_call_positional_and_target_conflict():
-    """§3.6-5：位置参数与 --target 同时给 ⇒ ambiguous_input_source，不新增「name优先」。"""
+async def test_mcp_target_option_and_positional_conflict_keeps_code():
+    """§3.6-5 不变量：位置参数与 `--target` 同时给 ⇒ `ambiguous_input_source`。
+
+    原触发走通用解析器（同一参数两处来源）；现由子树解析器显式判，**码不变**。
+    """
     body = await _console_error("mcp call ctx7 --target https://x")
-    assert body["error_code"] == "ambiguous_input_source"
+    assert body["error_code"] == "ambiguous_input_source", body
+
+    body = await _console_error("mcp ls ctx7 --target https://x")
+    assert body["error_code"] == "ambiguous_input_source", body
 
 
 @pytest.mark.asyncio
-async def test_help_overlay_mentions_registry_semantics():
-    """T5 硬性动作：help 必须写「登记到 team 级注册表，非创建业务实体」。"""
-    from service.funcToolService import consoleTool
+async def test_help_mentions_registry_semantics(config_help_text):
+    """T5 硬性动作（原：`_HELP_OVERLAY["mcp add"]`）：help 必须写「登记到 team 级注册表，
+    非创建业务实体」；kind 默认 mcp 也要明写（原：`_HELP_OVERLAY["mcp ls"]` 的「无参」说明，
+    现落在 `mcp list` / `mcp config list` 两处）。
 
-    overlay = "\n".join(consoleTool._HELP_OVERLAY.get("mcp add", ()))
-    assert "非创建业务实体" in overlay
-    assert "kind 默认 mcp" in overlay
-    ls_overlay = "\n".join(consoleTool._HELP_OVERLAY.get("mcp ls", ()))
-    assert "无参" in ls_overlay
+    改后 help 由 `mcpConsole` 唯一提供（`mcp --help` / `help mcp config`），overlay 已随
+    spec 删除 —— 判据对象换、判据本身不换。
+    """
+    assert "非创建业务实体" in config_help_text, config_help_text
+    assert "kind 默认 mcp" in config_help_text, config_help_text
+
+    summary = await console("mcp --help")
+    text = str(summary.get("text") or "")
+    assert "mcp config list" in text, text
+    assert "mcp ls" in text, text
+
+
+@pytest.fixture
+def config_help_text():
+    from service.funcToolService import mcpConsole as mcp_console
+
+    return str(mcp_console.MCP_HELP_DETAIL["config"])
 
 
 # ---------------------------------------------------------------------------
-# 2. 真入口闭环（真库 + stub 外部包）
+# 2. 真入口闭环（真库 + 第 2 跳真执行）
+#
+# 原闭环 `add → ls → call → rm` 里的 `call` 步走的是 mcp2cli（stub `_main_impl`）。
+# #291 起 MCP 侧调用换原生 SDK，stub 已不适用 ⇒ call 步移到
+# `tests/integration/test_funcToolService/test_mcp_registry_real_loop.py`（真 stdio server），
+# 这里保留**注册表层**的完整闭环：写 → 列 → 取 → 删 → 再列。
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_closed_loop_add_ls_call_rm(mcp_db, leader_ctx, loaded_tools, stub_mcp2cli):
-    """真入口闭环：add（真写库）→ ls（真读库）→ call（第 2 跳真执行 + name 解析）
-    → rm（真删库）。每步都是真链路；唯一替身是外部包的分派函数。"""
+async def test_closed_loop_config_add_list_get_remove(mcp_db, leader_ctx, loaded_tools):
+    """真入口闭环：config add（真写库）→ list（真读库）→ get → remove（真删库）→ 再 list。
+
+    每一步都经 `registry.execute_tool_call` 第 2 跳真执行，唯一替身是「无」。
+    """
     registry = _build_registry()
     registry.apply_tool_allow_specs(
         ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute", "Category:Admin"]
@@ -296,45 +364,39 @@ async def test_closed_loop_add_ls_call_rm(mcp_db, leader_ctx, loaded_tools, stub
             function={"name": "console", "arguments": json.dumps({"command": command})},
         )
 
-    # add（真写库）
     added = await registry.execute_tool_call(
-        _call("add", "mcp add --name ctx7 --kind mcp --target https://mcp.context7.com/mcp"),
-        context=leader_ctx,
+        _call("add", "mcp config add ctx7 https://mcp.context7.com/mcp --note 测试"), context=leader_ctx
     )
     body = added.result
     assert body.get("success") is True, body
     assert body["server"]["name"] == "ctx7"
+    assert body["server"]["kind"] == "mcp"
+    assert body["server"]["target_masked"] == "https://mcp.context7.com/mcp"
+    assert "mcp call ctx7.<tool-name>" in body["message"], body["message"]
 
-    # ls 无参（真读库，脱敏）
-    listed = await registry.execute_tool_call(_call("ls", "mcp ls"), context=leader_ctx)
+    listed = await registry.execute_tool_call(_call("list", "mcp config list"), context=leader_ctx)
     body = listed.result
-    assert body["success"] is True
+    assert body.get("success") is True, body
     assert body["count"] == 1
     assert body["servers"][0]["name"] == "ctx7"
-    assert body["servers"][0]["target_masked"] == "https://mcp.context7.com/mcp"
-    assert "result" not in body  # 无参分支不套 mcp_call 的返回结构（设计稿 §3.3）
 
-    # call（name 解析 + 第 2 跳真执行）
-    called = await registry.execute_tool_call(
-        _call("call", "mcp call ctx7 --tool list_issues"), context=leader_ctx
+    got = await registry.execute_tool_call(_call("get", "mcp config get ctx7"), context=leader_ctx)
+    assert got.result["server"]["name"] == "ctx7"
+
+    # 禁用 ≠ 删除：config list 仍列出（沿 #273）
+    disabled = await registry.execute_tool_call(
+        _call("dis", "mcp config disable ctx7"), context=leader_ctx
     )
-    body = called.result
-    assert body.get("success") is True, body
-    assert body["resolved_from_registry"] is True
-    assert body["name"] == "ctx7"
-    assert stub_mcp2cli.runtime_argvs, "call 必须真的分派一次"
-    argv = stub_mcp2cli.runtime_argvs[-1]
-    # kind=mcp 缺省 protocol=streamable_http ⇒ 显式 --transport streamable（引擎词汇）
-    assert argv[0:5] == ["--mcp", "https://mcp.context7.com/mcp", "--transport", "streamable", "--json"], argv
-    assert "list_issues" in argv
+    assert disabled.result["success"] is True, disabled.result
+    listed = await registry.execute_tool_call(_call("list2", "mcp config list"), context=leader_ctx)
+    assert listed.result["count"] == 1
 
-    # rm（真删库）
-    removed = await registry.execute_tool_call(_call("rm", "mcp rm ctx7"), context=leader_ctx)
-    body = removed.result
-    assert body["success"] is True
-    assert body["deleted"]["name"] == "ctx7"
+    removed = await registry.execute_tool_call(
+        _call("rm", "mcp config remove ctx7"), context=leader_ctx
+    )
+    assert removed.result["success"] is True, removed.result
 
-    after = await registry.execute_tool_call(_call("ls2", "mcp ls"), context=leader_ctx)
+    after = await registry.execute_tool_call(_call("list3", "mcp config list"), context=leader_ctx)
     assert after.result["count"] == 0
 
 
@@ -457,9 +519,12 @@ async def test_empty_target_passes_through(mcp_db, leader_ctx, loaded_tools, stu
 
 @pytest.mark.asyncio
 async def test_basic_agent_console_add_succeeds(
-    mcp_db, loaded_tools, stub_mcp2cli
+    mcp_db, loaded_tools
 ):
-    """#277：写入不再要求管理员——普通成员（Write 权限）经 console 调 mcp add 直接成功。"""
+    """#277：写入不再要求管理员——普通成员（Write 权限）经 console 调 `mcp config add` 直接成功。
+
+    原触发 `mcp add --name ctx7 --target https://x` → 现触发 `mcp config add ctx7 https://x`。
+    """
     registry = _build_registry()
     registry.apply_tool_allow_specs(
         ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
@@ -469,13 +534,51 @@ async def test_basic_agent_console_add_succeeds(
         id="tc_basic_add",
         function={
             "name": "console",
-            "arguments": json.dumps({"command": "mcp add --name ctx7 --target https://x"}),
+            "arguments": json.dumps({"command": "mcp config add ctx7 https://x"}),
         },
     )
     result = await registry.execute_tool_call(call, context=ctx)
     body = result.result
     assert body["success"] is True, body
     assert body["server"]["name"] == "ctx7"
+
+
+@pytest.mark.asyncio
+async def test_without_write_category_mcp_writes_are_denied(mcp_db, loaded_tools):
+    """反向判据（#291 新增，防「子树直调工具函数」把门控绕掉）：
+
+    只给 `Basic + Read + Execute`（没有 Write）的 Agent：
+    - `mcp config add` / `mcp config remove` / `mcp enable` **必须**被第 2 跳拒（`admin_denied`，
+      与直调 `save_mcp_server` 同一条判定），注册表不能被写；
+    - `mcp config list` 仍成功（list 归 BASIC）。
+
+    这条判据失效的唯一方式就是把转发改成直调 —— 那正是要防的实现漂移。
+    """
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(["Category:Basic", "Category:Read", "Category:Execute"])
+    ctx = toolRegistry.ToolCallContext(agent_id=3, team_id=1, chat_room=None)
+
+    def _call(name: str, command: str) -> llmApiUtil.OpenAIToolCall:
+        return llmApiUtil.OpenAIToolCall(
+            id=f"tc_{name}",
+            function={"name": "console", "arguments": json.dumps({"command": command})},
+        )
+
+    for command, tool_name in (
+        ("mcp config add ctx7 https://x", "save_mcp_server"),
+        ("mcp config remove ctx7", "delete_mcp_server"),
+        ("mcp enable ctx7", "set_mcp_server_enabled"),
+        ("mcp config disable ctx7", "set_mcp_server_enabled"),
+    ):
+        denied = await registry.execute_tool_call(_call("w", command), context=ctx)
+        body = denied.result
+        assert body["success"] is False, (command, body)
+        # 拒绝文案就是第 2 跳那条通用判定（与直调同一个码、同一句），不另造一份
+        assert body["message"] == f"工具无权限使用: {tool_name}", (command, body)
+
+    listed = await registry.execute_tool_call(_call("l", "mcp config list"), context=ctx)
+    assert listed.result["success"] is True, listed.result
+    assert listed.result["count"] == 0, "写被拒后注册表必须仍是空的"
 
 
 @pytest.mark.asyncio
@@ -510,8 +613,12 @@ async def test_basic_agent_direct_write_succeeds_without_admin(mcp_db, loaded_to
 
 
 @pytest.mark.asyncio
-async def test_basic_member_can_rm_and_enable(mcp_db, loaded_tools, stub_mcp2cli):
-    """#277 权限判据：普通成员 console 侧完成 rm / enable 并生效。"""
+async def test_basic_member_can_rm_and_enable(mcp_db, loaded_tools):
+    """#277 权限判据：普通成员 console 侧完成 add / disable / enable / remove 并生效。
+
+    原触发 `mcp add …` / `mcp disable|enable …` / `mcp rm …` →
+    现触发 `mcp config add …` / `mcp enable|disable …`（原地保留）/ `mcp config remove …`。
+    """
     registry = _build_registry()
     registry.apply_tool_allow_specs(
         ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
@@ -526,7 +633,7 @@ async def test_basic_member_can_rm_and_enable(mcp_db, loaded_tools, stub_mcp2cli
 
     # 先由同一普通成员 add（写权限同样放开）
     added = await registry.execute_tool_call(
-        _call("add", "mcp add --name ctx7 --kind mcp --target https://x"), context=ctx
+        _call("add", "mcp config add ctx7 https://x"), context=ctx
     )
     assert added.result["success"] is True, added.result
 
@@ -535,9 +642,9 @@ async def test_basic_member_can_rm_and_enable(mcp_db, loaded_tools, stub_mcp2cli
     enabled = await registry.execute_tool_call(_call("en", "mcp enable ctx7"), context=ctx)
     assert enabled.result["success"] is True, enabled.result
 
-    removed = await registry.execute_tool_call(_call("rm", "mcp rm ctx7"), context=ctx)
+    removed = await registry.execute_tool_call(_call("rm", "mcp config remove ctx7"), context=ctx)
     assert removed.result["success"] is True, removed.result
-    after = await registry.execute_tool_call(_call("ls", "mcp ls"), context=ctx)
+    after = await registry.execute_tool_call(_call("ls", "mcp config list"), context=ctx)
     assert after.result["count"] == 0
 
 

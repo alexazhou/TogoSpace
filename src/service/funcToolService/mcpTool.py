@@ -395,7 +395,8 @@ _SESSION_EXTRA_REASON = (
     "console 不支持 session 开关（--session / --session-start / --session-stop / --session-list）："
     "它们依赖 mcp2cli 起会话 daemon（subprocess 调 `sys.executable -c`），"
     "而打包产物里没有 Python 解释器 ⇒ 会话起不来。"
-    "直接用 `mcp call` / `mcp ls` 每次直连即可（列表与会话复用无关，功能不受影响）。"
+    "要跨调用保留连接请用 `mcp session start`（原生 SDK 路径，不经 mcp2cli）；"
+    "本直传路径每次直连即可（列表与会话复用无关，功能不受影响）。"
 )
 
 

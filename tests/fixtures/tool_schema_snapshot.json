@@ -221,7 +221,7 @@
     "required": []
   },
   "delete_mcp_server": {
-    "description": "从全局 MCP 注册表删除一个 name（`mcp rm` 的底层工具）。",
+    "description": "从全局 MCP 注册表删除一个 name（`mcp config remove` 的底层工具）。",
     "parameters": {
       "name": {
         "description": "要删除的 name（必须与登记时的 name 完全一致）。",
@@ -458,7 +458,7 @@
     "required": []
   },
   "list_mcp_servers": {
-    "description": "无参列出**全局** MCP 注册表；有参时对 name/完整 target 列工具清单（`mcp ls` 的底层工具）。",
+    "description": "无参列出**全局** MCP 注册表；有参时对 name/完整 target 列工具清单（`mcp list` / `mcp config list` 的底层工具）。",
     "parameters": {
       "args": {
         "description": "（有参分支）预留透传，见 `mcp_call`。",
@@ -698,7 +698,7 @@
         }
       },
       "target": {
-        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint； 也可以是注册表 name（`mcp add` 登记的名字，如 `ctx7`）。",
+        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint； 也可以是注册表 name（`mcp config add` 登记的名字，如 `ctx7`）。",
         "schema": {
           "type": "string"
         }
@@ -1086,7 +1086,7 @@
     "required": []
   },
   "save_mcp_server": {
-    "description": "把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp add` 的底层工具）。",
+    "description": "把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp config add` 的底层工具）。",
     "parameters": {
       "config": {
         "description": "凭证值，形如 `{\"headers\": {\"Authorization\": \"Bearer sk-...\"}}` （headers 配 HTTP 传输：mcp+sse / mcp+streamable_http / openapi / graphql） 或 `{\"env\": {\"API_KEY\": \"v123...\"}}`（env 配 mcp+stdio，注入子进程环境变量）。 值原样存**（#277）；查看面只见掩码。",

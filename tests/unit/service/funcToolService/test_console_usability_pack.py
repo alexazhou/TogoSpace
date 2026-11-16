@@ -155,38 +155,41 @@ class TestTaskLsAutoScope:
 
 
 class TestMcpEmptyTargetHint:
-    """A4：缺 target 时报 `missing_target` 并给出 kind 说明与示例。
+    """A4：「缺 target」要报固定错误码 + **一行可复制的正确调用**。
 
-    #273 语义变更：`mcp ls` 无参改为**合法**（列全局注册表），不再有「缺 target」
-    场景 ⇒ 本类只对 `mcp call` 断言；`mcp ls` 无参的合法路径由
-    `test_mcp_registry_console.py` 的闭环用例覆盖。
+    #291 变更（原判据对象是 spec 的 `empty_target_hint = MCP_KIND_HINT`）：
+    - 码：`missing_target` → `mcp_missing_target`（子树有了自己的错误码前缀，B 类）；
+    - 文案：不再列「三种 kind / 三种 protocol」的枚举（那是 spec 时代的派生说明），
+      改成新语法的定位格式 + 一条固定占位符示例（产品 §4.1 第 3 条）；
+    - 判据本身不删：缺 target **必须**给可照抄的出路，且示例来自**唯一常量**。
     """
 
-    @pytest.mark.parametrize("command", ["mcp call"])
-    def test_empty_target_lists_kinds_and_examples(self, command: str) -> None:
+    @pytest.mark.parametrize("command", ["mcp call", "mcp config add", "mcp config remove"])
+    def test_empty_target_gives_copyable_example(self, command: str) -> None:
+        from service.funcToolService import mcpConsole as mcp_console
+
         result = _run(command)
 
         assert result["success"] is False
-        assert result["error_code"] == "missing_target", result
-        usage = "\n".join(result["usage"])
-        # 三种 kind 都得点到名，protocol 三种传输也得点到名（两字段拆分）
-        for kind in ("mcp", "openapi", "graphql"):
-            assert f"--kind {kind}" in usage, f"usage 里缺 {kind}：{usage}"
-        for protocol in ("stdio", "sse", "streamable_http"):
-            assert protocol in usage, f"usage 里缺 {protocol}：{usage}"
-        # 至少两个可抄的示例（一个是文件、一个是 URL/命令）
-        assert "示例" in usage and "mcp ls ./openapi.json" in usage, usage
-        assert "http" in usage.lower(), usage
+        assert result["error_code"] == "mcp_missing_target", result
+        # 示例是一行可复制的占位符形态，且来自唯一常量（不在这里拼第二份）
+        assert result.get("example"), result
+        assert "正确调用" in result["message"], result["message"]
+        if command == "mcp call":
+            assert result["example"] == mcp_console.EX_CALL, result
+            assert "<server-name>.<tool-name>" in result["message"], result["message"]
 
-    def test_hint_block_is_shared_not_copied(self) -> None:
-        """缺 target 提示只属于 `mcp call`，且与 MCP_KIND_HINT 同源（不另抄一份）。
+    def test_example_constant_is_single_source(self) -> None:
+        """原「hint 与 MCP_KIND_HINT 同源」的意图保留：错误体 / help 摘要共用同一常量。
 
-        #273：`mcp ls` 无参 = 列全局注册表（合法路径），empty_target_hint 必须为空。
+        判据：错误体里的 example 与 `mcpConsole.EX_CALL` **逐字节相同**，且该常量
+        出现在 `MCP_HELP_SUMMARY` 里 —— 两处文案漂移会让任一条变红。
         """
-        ls = cc.COMMAND_INDEX["mcp ls"]
-        call = cc.COMMAND_INDEX["mcp call"]
-        assert call.empty_target_hint == cc.MCP_KIND_HINT
-        assert not ls.empty_target_hint, "`mcp ls` 无参=列注册表（#273），不得再挂缺 target 提示"
+        from service.funcToolService import mcpConsole as mcp_console
+
+        body = _run("mcp call")
+        assert body["example"] == mcp_console.EX_CALL
+        assert mcp_console.EX_CALL in mcp_console.MCP_HELP_SUMMARY
 
     def test_other_arity_errors_keep_old_code(self) -> None:
         """对照组：**给多了**参数仍报 `invalid_argument_count`（A4 只改「缺」这一支）。"""
@@ -225,15 +228,20 @@ class TestUsageLineRecommendsPayload:
 
 
 class TestMcpBasePathNote:
-    """B3：丢 base path 这件事没有任何运行时报错，只能在 help 里前置说明。"""
+    """B3：丢 base path 这件事没有任何运行时报错，只能在 help 里前置说明。
 
-    @pytest.mark.parametrize("command", ["help mcp ls", "help mcp call"])
+    #291：说明的落点从 `_HELP_OVERLAY["mcp ls"/"mcp call"]` 换到 `mcpConsole` 的
+    `MCP_HELP_DETAIL`（overlay 随 spec 删除），判据的三要素不变：
+    提到 `servers`、提到 `base path`、给一条可执行的出路（补 servers / 用完整 target）。
+    """
+
+    @pytest.mark.parametrize("command", ["help mcp ls", "help mcp call", "help mcp list"])
     def test_help_mentions_missing_servers_limitation(self, command: str) -> None:
         help_text = _run(command)["help"]
         assert "servers" in help_text, help_text
         assert "base path" in help_text, help_text
         # 得给一条可执行的出路，不能只说「有坑」
-        assert "完整" in help_text or "补 servers" in help_text, help_text
+        assert "补 servers" in help_text or "完整 target" in help_text, help_text
 
 
 # --------------------------------------------------------------------------- #
