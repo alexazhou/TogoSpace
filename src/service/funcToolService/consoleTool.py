@@ -49,6 +49,7 @@ from toolResult import error_result
 
 from . import consoleCommands as cc
 from . import consoleParsing as cp
+from . import mcpConsole as mcp_console
 from . import consoleSchema as cs
 from .consoleParsing import ConsoleError, ParsedCommand
 
@@ -91,15 +92,11 @@ def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str
     for resource, resource_specs in grouped.items():
         actions = "|".join(spec.action for spec in resource_specs if spec.action)
         lines.append(f"{resource:<{width}}{actions}".rstrip())
-    # #281 P4：`mcp` 的 kind 默认值是「直接传 URL 就踩坑」的根源（踩了只看到
-    # 「405 / 解析失败」，不知道要加 `--kind mcp`）。放在摘要首屏，比埋在参数说明深处有效。
-    # ⚠️ 事实口径（#281 实测 2026-11-16 02:2x，真 mcp2cli）：`mcp ls` 与 `mcp call`
-    # **都**默认 `openapi`（`list_mcp_servers` 签名 kind="openapi"，有参分支原样透传给
-    # `mcp_call`）；两条命令直接传 MCP URL 都报 `mcp2cli_error`（405）。文档
-    # `mcp_console_usability.md` P4 写的「`mcp ls` 默认 `mcp`」与代码不符，文案以实测为准。
+    # #291：`mcp` 子树已迁到 `mcpConsole.py`（三层子命令 + `list` / `ls` 两条入口），
+    # 摘要里给两行「一眼分得清」的路标，详见 `mcp --help`。
     lines.append(
-        "mcp：kind 默认 openapi（mcp ls / mcp call 相同）；目标是 MCP server 时请加 --kind mcp。"
-        f"例：{cc.MCP_CALL_EXAMPLE}"
+        "mcp：MCP 服务用 mcp list / mcp call <server-name>.<tool-name> --args '{...}' / "
+        "mcp session start|status|stop；OpenAPI/GraphQL 直传仍用 mcp ls <spec-path-or-url>"
     )
     lines.append("用法：<资源> <操作> [位置参数] [--选项 ...]")
     lines.append("create/update 的配置输入（可选）：'<json>' 或 --from payload（payload 字段传 JSON object），也可只用 --选项")
@@ -184,35 +181,6 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     # （沿 #223 §3.2.1 T5）：登记的是指向外部服务的指针、不是 team 内实体——这句差异
     # 必须钉在人也能看到的 help 里；kind 默认 mcp 与 `mcp call` 的默认 openapi 不同，
     # 必须明写。#273：注册表改全局（不分 team）、alias 改 name、新增 enable。
-    "mcp add": (
-        "登记到全局注册表（不分 team），非创建业务实体（动作词 add 而非 create 是有意的）。"
-        "登记后所有团队都可用 `mcp call <name>` 复用；写入不要求管理员权限（#277）。",
-        "kind 默认 mcp（注意：`mcp call` 直接调用的默认是 openapi，两者有意不同；"
-        "spec 文件请显式 --kind openapi）。stdio 启动命令含空格必须加引号，如 "
-        "--target \"npx -y @browserbasehq/mcp\"。",
-        "默认 insert-only：name 已存在会报 mcp_name_exists，覆盖必须显式 --overwrite true。"
-        "凭证原样存值（#277：明文直接入库，不再要求 env: 引用；如 --config "
-        "'{\"headers\":{\"Authorization\":\"Bearer sk-...\"}}'）；查看面只见掩码。",
-    ),
-    "mcp rm": (
-        "只按 name 精确删（不支持按 target 或前缀匹配）；name 不存在报 mcp_name_not_found，不静默成功。"
-        "返回体带被删条目的脱敏摘要（target/凭证已打码）。",
-    ),
-    "mcp enable / mcp disable": (
-        "启用/禁用一个登记项（禁用≠删除：`mcp ls` 仍列出并标注 enable=false；"
-        "禁用后 `mcp call` 报 mcp_server_disabled；注册表本身不进 Agent 工具列表）。"
-        "用法：mcp enable ctx7 / mcp disable ctx7；写入不要求管理员权限（#277）。",
-    ),
-    "mcp ls": (
-        "无参 = 列全局注册表（忽略一切选项，返回 servers/count；禁用条目仍列出并标注 enable=false）；"
-        "有参 = 对 name 或完整 target 列工具清单（name 命中用注册项的 target/kind，未命中原样透传）。",
-        "有参列的是 openapi spec 时：⚠️ 若 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发）；"
-        "此时请改用完整 URL 的 target，或在该 spec 里补 servers。",
-        "count 超过 20 时返回体会建议收窄；写入不要求管理员权限（#277）。",
-        # #281 · Operator 02:27 追加：有参分支的 --extra 同样不支持 session 一族。
-        "--extra 里不支持 session 开关（--session / --session-start / --session-stop / --session-list）："
-        "依赖 mcp2cli 起会话 daemon，打包产物里没有 Python 解释器 ⇒ 起不来；传了直接报 mcp_unsupported_extra。",
-    ),
     "task ls": (
         "只列未完结任务（要含已完结请用 --status 显式列出，如 --status DONE,CANCELLED）。",
         "状态：TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED",
@@ -223,20 +191,6 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "建单不会自动唤醒执行人：建完请另发 send_chat_msg 通知对方（返回体 hint 字段会再提醒一次）。",
         "必填 --title / --assignee-id；其余可选。数组/对象型参数（--depends-on）"
         "建议用 --from payload 传，避免引号被 shell 拆坏。",
-    ),
-    "mcp call": (
-        "先 `mcp ls <target>` 拿工具清单，再 `mcp call <target> --tool 名 --args '{...}'`。",
-        "target 形态由 --kind 决定：openapi=spec 文件路径或 URL（默认）/ mcp=MCP server（配 --protocol stdio=启动命令（含参数，整体加引号）/ sse=纯 SSE 地址 / streamable_http=URL，缺省）/ "
-        "graphql=endpoint。",
-        "⚠️ 若目标 spec 里**没有 servers 段**，请求的 base path 会丢失（只按 path 发，"
-        "表现为 404 或打错服务）；请在 spec 里补 servers，或直接用带完整 path 的 URL。"
-        "该限制由 mcp2cli 的 spec 解析决定，本工具不改写你的 target。",
-        "--args 建议用 --from payload 传（嵌套结构免引号转义）。",
-        # #281 · Operator 02:27 追加：session 一族在 console 里**不支持**，必须写明，
-        # 否则使用者会传了之后撞上一堆看不懂的失败（打包产物无 python 解释器，daemon 起不来）。
-        "--extra 里不支持 session 开关：--session / --session-start / --session-stop / --session-list。"
-        "原因：它们依赖 mcp2cli 起会话 daemon（sys.executable -c），打包产物里没有 Python 解释器 ⇒ 会话起不来；"
-        "传了会直接报 mcp_unsupported_extra。每次 mcp call 直连即可，功能不受影响。",
     ),
     "task update": (
         "配置字段：new_status / note / reviewer_id。撤销验收人用 --remove-field reviewer_id。",
@@ -385,6 +339,11 @@ def _help_text(tokens: list[str]) -> dict[str, Any]:
         return {"success": True, "help": _render_help(_build_help_summary(visible))}
     resource = tokens[1].lower()
     action = tokens[2].lower() if len(tokens) > 2 else ""
+    # #291：`mcp` 子树的 help 由专用解析器提供（三层子命令、`list` 与 `ls` 两条路径分列）。
+    # 命令表里不再有 mcp spec（T0 删旧包装），所以这里必须显式委托，不能靠派生。
+    if resource == "mcp":
+        payload = mcp_console.help_payload(["mcp"] + tokens[2:])
+        return {"success": True, "help": _render_help(str(payload.get("text") or ""))}
     key = f"{resource} {action}".strip()
     if key in visible_keys:
         detail = _help_detail().get(key)
@@ -959,6 +918,12 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
         tokens = cp._tokenize(command)
     except ConsoleError as exc:
         return cp._error_payload(exc)
+
+    # #291：`mcp` 子树整体交给专用解析器（三层子命令 / 双位置参数 / `name=value` 只属于
+    # mcp；Q3 决定不扩 34 条既有命令的通用语义）。命中条件只有一个词 `mcp`，
+    # 其余命令的解析路径一个字节都不经过这里。
+    if tokens and tokens[0].lower() == "mcp":
+        return await mcp_console.dispatch(command, tokens, _context)
 
     # 全局 `--help` / `-h`（D12）：任何位置命中即短路返回该命令的 help，不占选项白名单。
     if any(token in cp.HELP_FLAGS for token in tokens):

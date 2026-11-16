@@ -459,35 +459,6 @@ def _spec(
     )
 
 
-#: `mcp` 命令缺 target 时的说明块（#222 A4）。
-#:
-#: 放在命令表**外面**：元组字面量里不能赋值，而这段文案两条 mcp 命令共用一份，
-#: 各抄一遍就会漂移，模型照谁写都不对。
-#:
-#: `kind` 的默认值**只有一处事实**：`mcp ls` 与 `mcp call` 都默认 `openapi`
-#: （`tools.py` 里两条都按 `kind="openapi"` 调 `mcp2cli`，argv 均以 `--spec` 开头）。
-#: 所以「（默认）」标在 `openapi` 行 —— 与 `help` 里的事实句、
-#: `HELP_DETAIL['mcp call']` 的「openapi=…（默认）」同一口径（#281 F1，38 打回项）。
-MCP_KIND_HINT: tuple[str, ...] = (
-    "用法：mcp <ls|call> <target> [--kind mcp|openapi|graphql] [--protocol stdio|sse|streamable_http]，target 形态取决于 kind：",
-    "  --kind mcp              MCP server；配合 --protocol stdio（启动命令）/ sse / streamable_http（URL，缺省）",
-    "  --kind openapi（默认）  spec 文件路径或 URL",
-    "  --kind graphql          GraphQL endpoint",
-    "示例：mcp ls ./openapi.json ｜ mcp ls http://127.0.0.1:8000/mcp --kind mcp ｜ mcp ls \"npx -y server\" --kind mcp --protocol stdio",
-)
-
-
-#: `mcp call` 的**正确调用示例**（#281 P1）：固定文案 + `<占位符>`，不做动态拼装
-#: （Operator 02:10/02:12 明确否掉拼装：要处理值是否存在、引号怎么写，脆且必须多一层
-#: 分支）。P1（未知选项）与 P2（`--target` 被写成选项）**共用这一处实现**
-#: （Operator 02:13 定）：示例行只有一份，避免两份文案各自漂移。
-MCP_CALL_EXAMPLE: str = "mcp call <名称> --tool <工具名> --args '{\"键\":\"值\"}'"
-
-#: `mcp call` 未知选项时的一句领域说明（#281 P1）。**只挂 mcp 命令** ——
-#: `unknown_option` 是所有 console 命令共用的，把 MCP 专属文案全局套上会让
-#: `task ls --bogus` 弹出「MCP 工具的参数请放进 --args」（#281 单里专门有这条
-#: 「非 mcp 命令不被污染」判据）。
-MCP_OPTION_TIP: str = "MCP 工具的参数请放进 --args。"
 
 
 #: 全部 console 子命令。**这张表是权限校验、命令解析与 help 的唯一事实源。**
@@ -630,73 +601,11 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     # 其他
     _spec("time", "get", "get_time", verb="GET"),
     _spec("reload", "", "reload_team", verb="DIRECT", self_interrupt=True),
-    # 外部服务（#202 mcp2cli 接入）：一条 `mcp` 资源词转发到 `mcp_call`。
-    #
-    # 位置参数只承载 target（`mcp list ./openapi.json`）；`tool` / `args` 走选项，
-    # 因为现有 DIRECT 处理器只把**第一个**位置参数映射到第一个工具参数，要多段位置
-    # 参数就得改 console 核心语义（#202 明确不改既有语义）。选项面由 `mcp_call` 的
-    # signature 派生（`--tool` / `--args '{"k":"v"}'` / `--kind` / `--extra`），
-    # `args` 声明成 dict ⇒ 上游 `_convert_option` 按 object 走 JSON 解析。
-    #
-    # `mcp call` 用 SAVE 只为拿到 `input_defaults`（把 `action` 补成 `call`）；
-    # 它不落库、不吃 `overwrite`，`patch_by_name` 保持默认。
-    # `empty_target_hint`（#222 A4）：裸敲 `mcp ls` 只会拿到「需要 1~1 个位置参数，
-    # 收到 0 个」——而 target 的形态完全取决于 `--kind`，不说清就没法照着改。这里把
-    # kind 与 target 的对应关系、两个可抄的示例直接放进失败返回体。
-    _spec(
-        "mcp", "call", "mcp_call", verb="SAVE",
-        accepts_input=True, needs_target=True, min_args=1, max_args=1,
-        locator=_loc(name_param="target"),
-        input_defaults=(("action", "call"),),
-        empty_target_hint=MCP_KIND_HINT,
-        example=MCP_CALL_EXAMPLE,
-        option_tip=MCP_OPTION_TIP,
-    ),
-    # MCP 注册表（#224，按 #223 设计稿 §3.5）：
-    #
-    # `mcp call <name>` 与 `mcp call <完整 target>` **无法靠 spec 区分**（一个 spec
-    # 只有一个 legacy_tool），name 解析只能放在工具内部（`tools.mcp_call` 入口的
-    # `resolve_name`，沿 #223 §3.6）——本表对 `mcp call` 一个字符都不改。
-    #
-    # `add`：照抄 dept create（create 族）的 SAVE 形态。动作词用 `add` 是**有意
-    # 偏离**（§3.2.1 已裁定）：create 建的是 team 内新实体，add 登记的是指向外部
-    # 服务的指针；差异已钉进 `_HELP_OVERLAY`（「登记到 team 级注册表，非创建业务
-    # 实体」）。真正拦住多余位置参数的是 accepts_input 分支写死的 upper=1，不是
-    # `max_args=0`（那只是与 dept create 的写法同构，§3.2/C1）。
-    _spec(
-        "mcp", "add", "save_mcp_server", verb="SAVE",
-        accepts_input=True, max_args=0,
-    ),
-    # `rm`：照抄 dept rm / room rm 的 DELETE 形态；只按 name 精确删，不存在时工具层
-    # 返回 mcp_name_not_found（不静默成功，沿 §5.2）。
-    _spec(
-        "mcp", "rm", "delete_mcp_server", verb="DELETE",
-        needs_target=True, min_args=1, max_args=1,
-        locator=_loc(name_param="name"),
-    ),
-    # `enable` / `disable`（#273）：同一底层工具 set_mcp_server_enabled，用
-    # input_defaults 把 enable 补成 true/false；禁用≠删除，`mcp ls` 仍可见。
-    _spec(
-        "mcp", "enable", "set_mcp_server_enabled", verb="SAVE",
-        needs_target=True, min_args=1, max_args=1,
-        locator=_loc(name_param="name"),
-        input_defaults=(("enable", True),),
-    ),
-    _spec(
-        "mcp", "disable", "set_mcp_server_enabled", verb="SAVE",
-        needs_target=True, min_args=1, max_args=1,
-        locator=_loc(name_param="name"),
-        input_defaults=(("enable", False),),
-    ),
-    # `ls`：三条里唯一无法同构的一条（设计稿 §3.3）。需求要求「无参列注册表、
-    # 有参列工具清单」两种形态都到达工具——LIST 丢位置参数、GET 强制 target、
-    # SAVE 的 arity 写死 0~1/1~2，只有 DIRECT 支持 0~1 段位置参数。**这是本设计
-    # 唯一一处新增的机制用法**，三条硬事实见设计稿 §3.3。有参分支由工具委托
-    # `mcp_call`（action=list），name 解析复用同一条 `resolve_name`（C3）。
-    _spec(
-        "mcp", "ls", "list_mcp_servers", verb="DIRECT",
-        min_args=0, max_args=1,
-    ),
+    # `mcp` 子树（#291）：**不在本表**。mcp 的 CLI 需要三层子命令（`mcp config list`）、
+    # 双位置参数（`mcp config add <n> <target>` / `mcp resource <server> <uri>`）与
+    # `name=value` 具名参数（`mcp call <server>.<tool> a=1`）—— 这些语义只属于 mcp，
+    # 塞进本表会把其余命令的解析路径一起改（Q3 裁定）。解析与 help 移到
+    # `mcpConsole.py`，`consoleTool.console()` 在 `tokens[0] == "mcp"` 时短路过去。
 )
 
 #: `help` 是纯本地命令，不映射任何原工具，也不做权限校验（它不碰数据）。
