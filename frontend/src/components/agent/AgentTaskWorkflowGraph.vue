@@ -157,14 +157,13 @@ function resolveStagePresentation(
 
 const nodes = computed<WorkflowNode[]>(() => {
   const task = props.task;
-  const isPending = task.status === 'PENDING';
   const creatorNode: WorkflowNode = {
     key: 'creator',
     kind: 'creator',
     stageLabel: t('agent.taskWorkflowCreate'),
     ownerName: props.creatorLabel || props.actorLabel(task.creator_id),
-    statusText: isPending ? t('agent.taskWorkflowWaitingDeps') : t('agent.taskWorkflowCreated'),
-    visualState: isPending ? 'waiting' : 'approved',
+    statusText: t('agent.taskWorkflowCreated'),
+    visualState: 'approved',
     isCurrentHolder: false,
   };
 

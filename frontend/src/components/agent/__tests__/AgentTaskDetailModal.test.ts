@@ -259,6 +259,38 @@ describe('AgentTaskDetailModal 多节点流转图', () => {
     expect(doneNodes[2].attributes('data-state')).toBe('approved');
   });
 
+  it('任务处于 PENDING（等待依赖）时创建节点显示为已完成（approved），后续执行节点显示为等待', async () => {
+    const pendingWrapper = await mountModal(baseTask({
+      status: 'PENDING',
+      stages: [
+        {
+          stage_index: 0,
+          node_type: 'EXECUTION',
+          name: '',
+          owner_id: 2,
+          owner_name: '网关开发',
+          stage_status: 'ACTIVE',
+        },
+        {
+          stage_index: 1,
+          node_type: 'REVIEW',
+          name: '',
+          owner_id: 3,
+          owner_name: '网关测试',
+          stage_status: 'WAITING',
+        },
+      ],
+    }));
+
+    const nodes = pendingWrapper.findAll('.task-workflow-graph__node');
+    const edges = pendingWrapper.findAll('.task-workflow-graph__edge');
+    expect(nodes[0].attributes('data-state')).toBe('approved');
+    expect(nodes[0].attributes('title')).toContain('已创建');
+    expect(edges[0].classes()).toContain('is-done');
+    expect(nodes[1].attributes('data-state')).toBe('waiting');
+    expect(nodes[2].attributes('data-state')).toBe('waiting');
+  });
+
   it('事件时间线存在 REJECT 时将对应打回节点标红，重新 ADVANCE 后恢复', async () => {
     const baseEvents: AgentTaskEvent[] = [
       {
