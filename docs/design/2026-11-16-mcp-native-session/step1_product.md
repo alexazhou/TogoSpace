@@ -1,7 +1,7 @@
 # mcporter 风格 console CLI 与 Agent session — 产品文档
 
 > 日期：2026-11-16  
-> 状态：产品与 CLI 方向已确认，详细选项契约待补充；待实施。  
+> 状态：产品契约已补齐；待实施。  
 > 技术文档：[step2_technical.md](./step2_technical.md)  
 > 开发任务：[step3_tasks.md](./step3_tasks.md)
 
@@ -68,7 +68,7 @@ mcp call <server-name>.<tool-name> <parameter-name>=<parameter-value>
 mcp call <server-name>.<tool-name> --args '<args-json>' --output json
 ```
 
-`--args`、`key=value`、工具参数选项和函数调用表达式的规则参考 mcporter；主示例使用 `--args` 和 `key=value`。参数按工具 schema 处理。完整选项、别名及类型转换细则还需在本产品文档补齐，属于产品契约待完善项；实现和帮助应遵循该契约，不能用实现完成情况反过来决定功能范围。
+`--args`、`key=value`、工具参数选项和函数调用表达式的规则参考 mcporter；主示例使用 `--args` 和 `key=value`。参数合并、类型转换及错误行为遵循第 4.1 节产品契约，实现和帮助应遵循该契约。
 
 ### 2.4 配置管理
 
@@ -175,9 +175,23 @@ session 表示当前 Agent 的一段持续工作，可以同时访问多个 serv
 
 mcporter 的 record / replay 中的名称标识流量录制，与本设计的活动 session 不同。迁移命令后，已保存的服务配置继续可用。
 
-### 4.1 待补充的产品契约
+### 4.1 产品契约细则（选项、参数转换与配置联动）
 
-常规命令的完整选项及别名、参数合并与冲突行为、类型转换及错误反馈需要继续对照 mcporter 补齐。配置更新或删除对已开启 session 的用户可见影响，也需要明确。这些属于产品决策，不在技术文档中自行确定。
+1. **常规命令选项与输出格式**：
+   - 通用输出选项：`--output json|text`（默认 `text` 或按工具约定输出结构化文本；`--output json` 输出完整 JSON）。
+   - `mcp list` 支持：`--brief`（简要工具签名）、`--all-parameters`（展示全部参数）、`--schema`（与 `<server-name>.<tool-name>` 联用输出完整 JSON Schema）、`--stdio '<server-command>'`（临时 stdio 来源）。
+   - `mcp config add` 支持：`--protocol stdio|sse|streamable_http`（可选，HTTP/SSE 默认按 URL 探测或 `streamable_http`，stdio 命令则对应 `stdio`）。
+2. **参数合并与类型转换（`mcp call`）**：
+   - `--args '<args-json>'` 必须解析为 JSON 对象（非对象直接报错）。
+   - 具名参数 `key=value` 可单独使用，也可与 `--args` 混用；同一参数同时出现在 `--args` 与 `key=value` 时，以显式 `key=value` 覆盖（或当 `--args` 非法时直接报错）。
+   - 类型转换依据目标工具的 `inputSchema`：`integer` / `number` / `boolean` / `array` / `object` 优先按 JSON 值解析，失败时给出明确参数类型错误；`string` 类型保留原始字符串文本，不做隐式数字/布尔转换。
+3. **错误反馈规范**：
+   - 语法错误、未知选项或缺少目标时，返回明确的错误码与**一行可直接复制执行的固定占位符示例**（如 `mcp call <server-name>.<tool-name> --args '{"key":"value"}'`），不动态拼装注册表实值。
+   - 业务调用超时或结果未知时不自动重放。
+4. **配置变更对活动 session 的影响**：
+   - 通过 `config` 或设置页禁用（disable）或删除（remove）某个已配置 server 后，活动 session 中该 server 的连接立即失效并关闭；再次访问时按“已禁用”或“未找到”报错。
+   - 更新（overwrite）某个 server 的目标地址、协议或凭证后，活动 session 中旧连接失效关闭，下次访问按最新配置重新建立连接。
+   - 仅修改其他 server 的配置，不影响当前 session 中无关 server 的已有连接。
 
 参考资料（本次核对的 mcporter main 中 package 版本为 0.17.1，用于语法参考）：
 

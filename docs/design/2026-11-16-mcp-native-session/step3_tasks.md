@@ -8,9 +8,9 @@
 
 | 编号 | 任务 | 完成判据 |
 |---|---|---|
-| D0 | 补齐产品契约 | 完整 CLI 选项、参数与错误行为，以及配置变化对活动 session 的影响写入产品文档 |
-| D1 | 补齐技术方案 | 按产品契约明确模块接口、连接标识、并发、取消和生命周期接入点，不以待补充清单代替完成的技术设计 |
-| T0 | 清理前序 daemon 试验补丁 | 移除试验 monkeypatch / runtime hook，保留其他工作区改动 |
+| D0 | 补齐产品契约 | 完整 CLI 选项、参数与错误行为，以及配置变化对活动 session 的影响写入产品文档（已补齐） |
+| D1 | 补齐技术方案 | 按产品契约明确模块接口、连接标识、并发、取消和生命周期接入点（已补齐） |
+| T0 | 清理旧会话限制与历史包装 | 清理 `consoleTool.py` / `consoleCommands.py` 中旧 `mcp ls` / `mcp call --tool` 包装及 `mcp2cli` session daemon 禁用提示，保留 OpenAPI / GraphQL 现有能力 |
 | T1 | 对齐 mcporter 常规 CLI | list / call / config / resource、server.tool、--args、具名参数和常用显示选项对齐参考语法，实际支持范围明确 |
 | T2 | 对接现有服务配置 | config 命令、设置页和 HTTP 接口使用同一份全局注册数据，不新增 bake 配置体系 |
 | T3 | 无名称 Agent session | session start / status / stop 不接受名称或 server 参数；每个 Agent 至多一个活动 session，重复 start / stop 幂等 |
@@ -18,11 +18,11 @@
 | T5 | Agent 隔离与资源清理 | 归属来自可信身份，连接不跨 Agent 共享；Agent / Team / 后端按归属清理，turn 结束和正常休眠保留 |
 | T6 | 同步说明与回归 | help、preset、示例和用例统一；移除旧调用包装及具名会话语法；相关验证及真实桌面 smoke 通过 |
 
-产品契约在产品文档维护，技术约束及实现方式在技术文档维护，本表维护工作步骤和验证记录。实施顺序为先补齐 D0 / D1，再清理试验补丁并执行 T1–T6；不把 mcporter 全部功能自动纳入本次任务。
+产品契约在产品文档维护，技术设计在技术文档维护，本表维护工作步骤和验证记录。D0 / D1 已在文档中补齐，实施顺序为先完成 T0 清理旧包装，再执行 T1–T6；不把 mcporter 全部功能自动纳入本次任务。
 
-### 1.1 前序试验补丁清理
+### 1.1 历史代码清理说明
 
-先前写入的 daemon 试验补丁未提交、未验证，不代表新方案已实现。T0 执行时移除 `src/util/mcp2cliPatch.py`、`scripts/rthook_mcp2cli_session.py` 及相关 runtime hook 引用，保留其他工作区改动。本次只 review 和调整文档，没有撤销该试验代码。
+此前记录的 daemon 试验补丁（`mcp2cliPatch.py` / `rthook_mcp2cli_session.py`）在当前分支已不存在；T0 实施时重点清理 `consoleCommands.py` / `consoleTool.py` 中旧版 `mcp ls`、`--tool` 包装及 `mcp2cli` session daemon 相关禁用提示，保留 OpenAPI / GraphQL 既有能力与工作区其他改动。
 
 ## 2. 验收清单
 
@@ -63,8 +63,8 @@
 - [x] 确认 mcporter 风格常规 CLI、无名称 session、跨 server keepalive 和 Agent 隔离。
 - [x] 按设计目录规范整理产品文档、技术文档和任务表，同步索引与引用。
 - [x] Review 文档归属，移除技术文档中重复的产品规则，将试验清理步骤归入任务表。
-- [ ] 补齐产品选项与行为契约。
-- [ ] 明确具体技术方案。
+- [x] 补齐产品选项与行为契约。
+- [x] 明确具体技术方案。
 - [ ] 完成代码迁移。
 - [ ] 完成回归与真实桌面验证。
 - [ ] 同步最终 help、示例和支持范围。
