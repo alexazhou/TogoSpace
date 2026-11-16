@@ -154,9 +154,13 @@ class Agent:
         """
         return await self.driver.enter_container(container_id)
 
-    async def exit_to_host(self) -> bool:
-        """把 Agent 的执行环境切回宿主（§5.2）；具体切换由 Driver 负责。"""
-        return await self.driver.exit_to_host()
+    async def exit_to_host(self, keep_alive: bool = False) -> bool:
+        """把 Agent 的执行环境切回宿主（§5.2）；具体切换由 Driver 负责。
+
+        `keep_alive=True` 表示保活挂起（容器与会话继续存活，供下次进入复用），
+        由 TSP Driver 决定怎么实现；不支持容器的驱动忽略该参数。
+        """
+        return await self.driver.exit_to_host(keep_alive=keep_alive)
 
     # ─── 任务管理 ──────────────────────────────────────────────
 

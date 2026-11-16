@@ -341,7 +341,17 @@ async def test_enter_container_maps_state_errors(monkeypatch, container_agent):
 
 
 async def test_exit_to_host_reports_host_workdir(monkeypatch, container_agent):
-    """退出后必须告诉模型宿主工作目录在哪、容器路径已失效。"""
+    """退出后必须告诉模型宿主工作目录在哪、容器路径已失效。
+
+    必须显式构造「退出前在自建容器」的状态：`exit_to_host` 的文案要按
+    `is_managed × keep_alive` 分支生成（产品文档 §3.2），mock 不可用时会被判成
+    宿主幂等格，测不到容器分支。
+    """
+    from model.coreModel import ContainerTarget
+
+    container_agent.driver.current_container = ContainerTarget(
+        container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64
+    )
     container_agent.exit_to_host = AsyncMock(return_value=None)
 
     result = await tools_module.exit_to_host(_context=_ctx())
@@ -349,7 +359,66 @@ async def test_exit_to_host_reports_host_workdir(monkeypatch, container_agent):
     assert result["success"] is True
     assert result["exec_env"] == "host"
     assert result["workdir"] == "/tmp/agent-workdir"
+    assert result["keep_alive"] is False
     assert "/workspace/self" in result["message"]
+    assert "自动停止" in result["message"]
+
+
+async def test_exit_to_host_when_already_on_host_uses_idempotent_message(monkeypatch, container_agent):
+    """本来就在宿主：返回宿主幂等文案，不谎称容器被停/被挂起。"""
+    container_agent.driver.current_container = None
+    container_agent.exit_to_host = AsyncMock(return_value=None)
+
+    result = await tools_module.exit_to_host(_context=_ctx())
+
+    assert result["success"] is True
+    assert result["keep_alive"] is False
+    assert "当前已处于宿主机环境" in result["message"]
+    assert "容器" not in result["message"]
+
+
+@pytest.mark.parametrize(
+    ("is_managed", "keep_alive", "expect", "forbid"),
+    [
+        # 五格矩阵（产品文档 §3.2）——一格都不能漏
+        (True, False, ["你自己创建的容器已自动停止", "文件仍保留"], ["仍会继续运行", "挂起"]),
+        (False, False, ["该容器不是由你创建的", "仍会继续运行"], ["自动停止", "挂起"]),
+        (True, True, ["容器已保持运行并挂起当前会话", "可直接恢复"], ["已自动停止", "外部"]),
+        (False, True, ["已挂起该外部容器的会话", "可直接恢复"], ["已自动停止", "你自己创建的容器"]),
+    ],
+)
+async def test_exit_to_host_message_matrix(monkeypatch, container_agent, is_managed, keep_alive, expect, forbid):
+    """`is_managed × keep_alive` 四格文案 + 宿主幂等格，逐格核对关键措辞。"""
+    from model.coreModel import ContainerTarget
+
+    container_agent.driver.current_container = ContainerTarget(
+        container_id="c0ffee123456" if is_managed else "deadbeef0002",
+        is_managed=is_managed,
+        arch=ContainerArch.ARM64,
+    )
+    container_agent.exit_to_host = AsyncMock(return_value=None)
+
+    result = await tools_module.exit_to_host(keep_alive=keep_alive, _context=_ctx())
+
+    assert result["success"] is True
+    assert result["keep_alive"] is keep_alive
+    assert result["exec_env"] == "host"
+    # 四格都必须明确「容器路径不可用」，只差「暂/已」与容器归属的说明
+    assert "/workspace/self" in result["message"]
+    for word in expect:
+        assert word in result["message"], f"缺少措辞: {word} → {result['message']}"
+    for word in forbid:
+        assert word not in result["message"], f"串格措辞: {word} → {result['message']}"
+
+
+async def test_exit_to_host_passes_keep_alive_through(monkeypatch, container_agent):
+    """`keep_alive` 必须透传到 Agent（否则工具答应了保活、底层照旧断开）。"""
+    container_agent.driver.current_container = None
+    container_agent.exit_to_host = AsyncMock(return_value=None)
+
+    await tools_module.exit_to_host(keep_alive=True, _context=_ctx())
+
+    container_agent.exit_to_host.assert_awaited_once_with(keep_alive=True)
 
 
 async def test_exit_to_host_propagates_failure(monkeypatch, container_agent):

@@ -965,8 +965,10 @@ async def test_null_injection_exhaustive_table() -> None:
     # ⇒ p1_required 48→53、p1_optional 77→86。
     # kind/protocol 拆分：`save_mcp_server.protocol` 为新增 Optional + None 默认
     # ⇒ p1_optional 86→87、总数 139→140。
-    assert p1_required + p1_optional == 140, (p1_required, p1_optional)
-    assert p1_required == 53, p1_required
+    # #292：`exit_to_host.keep_alive: bool = False` —— bool 注解不含 None，计入
+    # 「有默认值但注解不含 None」⇒ p1_required 53→54、总数 140→141。
+    assert p1_required + p1_optional == 141, (p1_required, p1_optional)
+    assert p1_required == 54, p1_required
     assert p1_optional == 87, p1_optional
     assert p2 == 15, f"P2={p2}"
     # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
@@ -980,8 +982,9 @@ async def test_null_injection_exhaustive_table() -> None:
     # 199 = 44 + 53 + 87 + 15 + 0（#273 实测口径：工具 40→44、P1 125→138、P2 恒 15，
     # P3 内部 key 恒 0；p3_fields（7→10，裸 object 计数）不进 total，同 #202 口径）。
     # （kind/protocol 拆分：`save_mcp_server.protocol` +1 ⇒ 198→199）
+    # （#292：`exit_to_host.keep_alive` +1 ⇒ 199→200 = 44 + 54 + 87 + 15 + 0）
     # （#202 实测：166 = 39 + 46 + 68 + 13 + 0；#196 前 148；#189 时 146）
-    assert total == 199, total
+    assert total == 200, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 
