@@ -34,12 +34,20 @@ from exception import ForwardToolCall
 from service.agentService import toolRegistry
 from service.funcToolService import consoleCommands as cc
 from service.funcToolService import core as func_tool_core
+from service.funcToolService import mcpConsole as mcp_console
 from util import llmApiUtil
 
 
 #: 去重后的**全部**转发目标（含 #187 新接进来的 task 三工具、#203 的 container note）。
+#:
+#: #291 起 console 的转发面有两个来源：① 通用命令表的 `legacy_tool`；② `mcp` 子树的
+#: `mcpConsole.FORWARD_TOOL_NAMES`（它不走 spec 机制，T0 删掉 6 条 mcp spec 后仍然转发
+#: 那 5 个工具）。判据必须按「console 真实会转发谁」取值，否则漏掉一半。
 FORWARD_TARGETS: tuple[str, ...] = tuple(
-    sorted({s.legacy_tool for s in cc.COMMAND_SPECS if s.legacy_tool})
+    sorted(
+        {s.legacy_tool for s in cc.COMMAND_SPECS if s.legacy_tool}
+        | set(mcp_console.FORWARD_TOOL_NAMES)
+    )
 )
 #: 全部带转发目标的命令 key（参数化用，与 COMMAND_SPECS 同源，不手抄）。
 FORWARD_COMMANDS: tuple[str, ...] = tuple(s.key for s in cc.COMMAND_SPECS if s.legacy_tool)
@@ -161,11 +169,11 @@ def test_forward_targets_are_exactly_the_converged_set():
 
 def test_forward_command_count():
     """报总数：全部命令、带转发目标的命令、去重目标数。"""
-    # 34 条 = 30（#222 A6 后）+ #224→#273 MCP 注册表 4 条（add/rm/enable/disable，
-    # 旧 `mcp ls` GET spec 被新 DIRECT spec 取代：净 +3，再 + enable/disable = +2 → 30+2+2）；
-    # 转发目标 26 个 = 22 + create_task + MCP 四工具。
-    assert len(cc.COMMAND_SPECS) == 34, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条）"
-    assert len(FORWARD_COMMANDS) == 34
+    # #291：28 条 = 34 − 6（T0 删掉的 6 条 mcp spec：add / rm / enable / disable / ls / call）。
+    # 命令数少了 6，但**转发目标数不变**（26 = 22 + create_task + MCP 四工具 + mcp_call）：
+    # 那 5 个 mcp 工具仍由子树转发，只是转发的发起方从 spec 变成 `mcpConsole`。
+    assert len(cc.COMMAND_SPECS) == 28, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条）"
+    assert len(FORWARD_COMMANDS) == 28
     assert len(FORWARD_TARGETS) == 26
     assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "收敛清单必须仍是 16 项（#187 裁定②：本单不动）"
     assert cc.HELP_SPEC.legacy_tool == ""

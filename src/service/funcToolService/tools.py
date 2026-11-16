@@ -145,7 +145,7 @@ async def mcp_call(
     本列举中移除，勿再据此写用例。）
 
     **注册表解析（#273，全局注册表）**：target 若命中全局 MCP 注册表的 name
-    （`mcp add` 登记），则自动替换为注册项的 target/kind，并注入其凭证值
+    （`mcp config add` 登记），则自动替换为注册项的 target/kind，并注入其凭证值
     （#277 起原样存值、明文注入；日志与返回体由 mcpTool 出口打码）；未命中按完整
     target 原样透传（既有用法一字不改）。返回体恒带 `resolved_from_registry`（命中
     true、未命中 false）；命中时另带 `name` 字段。命中且显式 kind 与注册项不同时报
@@ -154,7 +154,7 @@ async def mcp_call(
 
     Args:
         target: spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint；
-            也可以是注册表 name（`mcp add` 登记的名字，如 `ctx7`）。
+            也可以是注册表 name（`mcp config add` 登记的名字，如 `ctx7`）。
         action: `list` 只列工具，`call` 真调一次。
         tool: action=call 时的工具名（从 list 结果里取）。
         args: action=call 时的参数对象，键名与 list 里该工具的参数名一致。
@@ -169,7 +169,7 @@ async def mcp_call(
             而打包产物里没有 Python 解释器 ⇒ 会话起不来；传了直接给 `mcp_unsupported_extra`，
             不要重试。每次 `mcp call` 直连即可，调用功能不受影响。
     """
-    # ---- 注册表解析（#273：唯一插入点；`mcp ls <name>` 经 list_mcp_servers 复用本入口）----
+    # ---- 注册表解析（#273：唯一插入点；`mcp ls <name>` 与本工具共同复用本入口）----
     registry_name: str | None = None
     resolved_from_registry = False
     config: dict | None = None
@@ -214,7 +214,7 @@ async def mcp_call(
                         "message": (
                             f"server {registry_name!r} 已禁用（enable=0），不能调用。"
                             "让 leader 执行 `mcp enable " + registry_name + "` 重新启用；"
-                            "`mcp ls` 仍能看到该条目。"
+                            "`mcp config list` 仍能看到该条目。"
                         ),
                     }
                 kind = entry.kind
@@ -267,26 +267,32 @@ _MCP_CALL_DEFAULT_KIND = "openapi"
 #: `mcp ls` 无参时的固定提示（#281 P3）。一段话**同时覆盖「有配置 / 无配置」**两种状态
 #: —— 这正是 Operator 02:12 否掉动态拼装的理由之一：没有任何 server 时拼不出真实名称。
 MCP_LS_HINT: str = (
-    "mcp ls 列出已配置的 MCP server。看某个 server 的工具清单：mcp ls <名称>。\n"
+    "本列表是已配置的 server（`mcp config list` 是同一份数据的纯配置视角）。\n"
+    "看某个 server 的工具清单：`mcp list <名称>`（MCP 原生）/ `mcp ls <spec-path-or-url>`（OpenAPI·GraphQL 直传）。\n"
     "还没有 server 时先登记，例如：\n"
-    "  mcp add --name ctx7 --kind mcp --target https://mcp.context7.com/mcp"
+    "  mcp config add ctx7 https://mcp.context7.com/mcp"
 )
 
 #: `mcp ls <名称>` 有参时的固定调用模板（#281 P5）：`--tool` 取返回项里的 `name` 字段，
 #: `--args` 的键名抄该工具的 `parameters`。不按 parameters 生成骨架（那是动态拼装）。
 MCP_LS_CALL_HINT: str = (
-    "调用工具：mcp call <名称> --tool <工具名> --args '{\"参数名\":\"值\"}'"
-    "   （--tool 取上面的 name 字段，参数名见各工具的 parameters）"
+    "调用工具：mcp call <server-name>.<工具名> --args '{\"参数名\":\"值\"}'"
+    "   （工具名取上面的 name 字段，参数名见各工具的 parameters；"
+    "kind=openapi/graphql 的注册项仍可用 mcp call <名称> --tool <工具名>）"
 )
 
-#: `mcp call` / `mcp ls <URL>` 按默认 `openapi` 解析失败时的 kind 提示（#281 P4）：
-#: 实测两条命令的 kind **都默认 `openapi`**（`list_mcp_servers` 与 `mcp_call` 缺省
-#: 都按 `openapi` 走，传给 `mcp2cli` 的 argv 均以 `--spec` 开头，直接传 MCP server
-#: 的 URL 会报 405），所以直接传 URL 时最容易踩到。固定两步示例，不解析用户输入。
+#: `mcp call` / `mcp ls <URL>` 按默认 `openapi` 解析失败时的提示（#281 P4）：实测两条
+#: 命令的 kind 都默认 `openapi`（`list_mcp_servers` 与 `mcp_call` 缺省都按 `openapi` 走，
+#: 传给 `mcp2cli` 的 argv 均以 `--spec` 开头，直接传 MCP server 的 URL 会报 405），
+#: 所以直接传 URL 时最容易踩到。
+#:
+#: #291：示例换到 MCP 原生路径（旧示例 `mcp call <URL> --kind mcp --tool …` 随 T0 移除，
+#: 直传路径不再接受 kind=mcp 的 URL 调用）。判据要求不变：**只追加、不改错误码**。
 MCP_KIND_SUGGESTION: str = (
-    "\n若目标是 MCP server，请加 --kind mcp：\n"
-    "  mcp ls <URL> --kind mcp\n"
-    "  mcp call <URL> --kind mcp --tool <工具名> --args '{\"键\":\"值\"}'"
+    "\n若目标是 MCP server（本路径只认 OpenAPI / GraphQL）：\n"
+    "  临时看工具：mcp list <URL> --brief      （MCP 原生，SDK 直连）\n"
+    "  登记后反复调用：mcp config add <server-name> <URL> → "
+    "mcp call <server-name>.<工具名> --args '{\"键\":\"值\"}'"
 )
 
 
@@ -307,7 +313,7 @@ async def save_mcp_server(
     overwrite: bool = False,
     _context: ToolCallContext = None,
 ) -> dict:
-    """把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp add` 的底层工具）。
+    """把一个外部服务连接描述登记到**全局** MCP 注册表（`mcp config add` 的底层工具）。
 
     登记**不创建任何 team 内实体**，只存一条指向外部服务的指针；注册表不分 team
     （#273），所有团队都能用 `mcp call <name>` 复用。默认 insert-only：name 已存在
@@ -364,7 +370,7 @@ async def delete_mcp_server(
     name: Optional[str] = None,
     _context: ToolCallContext = None,
 ) -> dict:
-    """从全局 MCP 注册表删除一个 name（`mcp rm` 的底层工具）。
+    """从全局 MCP 注册表删除一个 name（`mcp config remove` 的底层工具）。
 
     只按 name 精确删（不支持按 target 或前缀匹配）；name 不存在返回
     `mcp_name_not_found`，**不静默成功**。返回体带被删条目的脱敏摘要
@@ -397,7 +403,7 @@ async def list_mcp_servers(
     extra: Optional[dict] = None,
     _context: ToolCallContext = None,
 ) -> dict:
-    """无参列出**全局** MCP 注册表；有参时对 name/完整 target 列工具清单（`mcp ls` 的底层工具）。
+    """无参列出**全局** MCP 注册表；有参时对 name/完整 target 列工具清单（`mcp list` / `mcp config list` 的底层工具）。
 
     **无参**：返回 `{success, servers: [...], count}`——每条只含脱敏摘要
     （`target_masked` / `config_masked` / `has_config` / `enable`；#277 起
@@ -466,7 +472,7 @@ async def set_mcp_server_enabled(
 ) -> dict:
     """启用 / 禁用全局 MCP 注册表里的一个 name（`mcp enable/disable` 的底层工具，#273）。
 
-    禁用 ≠ 删除：条目保留，`mcp ls` 仍列出并标注 enable=false；禁用的落地语义是
+    禁用 ≠ 删除：条目保留，`mcp config list` 仍列出并标注 enable=false；禁用的落地语义是
     `mcp call` 明确报 `mcp_server_disabled`（说「已禁用」，不是「不存在」）。
     注意：注册表本身从不进入 Agent 可用工具列表，**没有**「禁用⇒该 server 工具从
     工具列表消失」的结构落地（#273 未做按启用态过滤工具列表），勿如此宣称。
@@ -485,7 +491,7 @@ async def set_mcp_server_enabled(
         entry = await mcpRegistryService.set_enabled(str(name or ""), bool(enable))
     except TogoException as exc:
         return toolResult.error_result(exc)
-    state = "已启用" if enable else "已禁用（`mcp call` 将报 mcp_server_disabled，`mcp ls` 仍可见）"
+    state = "已启用" if enable else "已禁用（`mcp call` 将报 mcp_server_disabled，`mcp config list` 仍可见）"
     return {
         "success": True,
         "message": f"server {entry.name!r} {state}。",

@@ -792,14 +792,22 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: `keep_alive: bool = False` 并重写 description（保活挂起/五格文案的来源说明），
 #: **工具数 44、参数数 140 → 141**（+1 可选参数）；其余 43 个工具的
 #: description / required 逐字未动。
-#: #298 重算（`bb47a715…` → `41db25edab3087e61fd4830ab00b8af7d4b724ae7df721c5b3793d52f11e369e`）：`update_task` 新增依赖变更能力——
+#: #298 重算（`bb47a715…` → `41db25ed…
+#: 41db25edab3087e61fd4830ab00b8af7d4b724ae7df721c5b3793d52f11e369e`）：`update_task` 新增依赖变更能力——
 #: ①工具说明扩写（`new_status`/`workflow_action`/节点调整/验收人变更/**依赖变更**五类意图
 #: 互斥，`depends_on` 三态：省略=不改 / `[]`=清空 / `[..]`=整体替换）；②新增参数
 #: `depends_on: Optional[list[int]] = None`（**工具数 44 不变、参数数 141 → 142**、
-#: 全部 required 不变）。其余 42 个工具的 description / required 逐字未动——复核方式：
+#: 全部 required 不变）。其余工具 description / required 逐字未动——复核方式：
 #: 在 rebase 基点树（`e737c0c5`）上跑 `scripts/tool_schema_snapshot.py` 与本树 diff，
 #: 只应出现 `[update_task]` 一项；基点树现算 digest 仍为 `bb47a715…`（旧常量逐字相同）。
-BASELINE_TEXT_DIGEST = "41db25edab3087e61fd4830ab00b8af7d4b724ae7df721c5b3793d52f11e369e"
+#:
+#: #291 再算（`41db25ed…` → 见下）：四个 MCP 注册表工具的 docstring 里，调用语法从
+#: 已删除的 `mcp add/rm/ls` 改成 `mcp config add/remove/list` 与
+#: `mcp call <server-name>.<工具名>`（只改文案，工具数与参数数不变：44 / 142，
+#: 其中 142 = 141（#292 keep_alive）+ 1（#298 update_task.depends_on））。
+#: 注：本值是在 #298 之后叠加 #291 文案改动重新计算的，不是 #291 分支上的 `6b5f912a…`
+#: （那个是在 #298 之前算的），两者不可混用。
+BASELINE_TEXT_DIGEST = "9369c9ff23def10b5e712bd89c6d68bc8461c060bc128fd5674bc7b60c533f67"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -842,6 +850,10 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
     # 38 → 39 / 108 → 114：`mcp_call`（#202）。40 → 44 / 125 → 139：MCP 注册表四工具
     # （#224 三工具 + #273 set_mcp_server_enabled，+`mcp_call` 说明改写）。
+    # #291：44 / 141 不变，**只改文案**（digest 变）—— 四个注册表工具的 docstring 里
+    # 写的调用语法从已删除的 `mcp add/rm/ls` 换成 `mcp config add/remove/list`
+    # 与 `mcp call <server-name>.<工具名>`。不动文案的代价是模型看到指向不存在命令的
+    # 说明，所以这是「模型接口说明确实该变」的有意变更。
     assert tools == 44, tools
     assert params == 142, params  # #292 keep_alive +1、#298 depends_on +1
     assert digest == BASELINE_TEXT_DIGEST, (
