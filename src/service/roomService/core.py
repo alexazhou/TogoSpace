@@ -18,6 +18,7 @@ from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from constants import MessageBusTopic, RoomState, RoomType, SpecialAgent
 from .chatRoom import ChatRoom
+from .messageStore import RoomMessageStore
 
 logger = logging.getLogger("service.roomService")
 
@@ -114,8 +115,15 @@ async def close_team_rooms(team_id: int) -> None:
 
 
 async def _restore_room_runtime_state(room: ChatRoom) -> None:
-    """恢复单个房间的消息、已读指针和轮次进度。"""
-    gt_room_messages, _ = await gtRoomMessageManager.get_room_messages(room.room_id)
+    """恢复单个房间的消息、已读指针和轮次进度。
+
+    消息只加载**最近 WINDOW_SIZE 条**（部分加载）：更早的历史留在 DB，
+    由 `RoomMessageStore._collect_unread` 在读游标越界时补读。
+    窗口外的未读不会丢，但内存占用不再随房间历史线性增长。
+    """
+    gt_room_messages, _ = await gtRoomMessageManager.get_room_messages(
+        room.room_id, limit=RoomMessageStore.WINDOW_SIZE,
+    )
     agent_read_index, speaker_index = await gtRoomManager.get_room_state(room.room_id)
     recovered_from_db = bool(gt_room_messages)
     restored_messages: list[GtRoomMessage] | None = None
@@ -311,8 +319,10 @@ async def update_room_agents(room_id: int, agent_ids: list[int]) -> None:
         )
 
     persisted_read_index, speaker_index = await gtRoomManager.get_room_state(room_id)
-    room_messages, _ = await gtRoomMessageManager.get_room_messages(room_id)
-    join_read_index = _resolve_join_read_index(room_messages)
+    # 只为算 join 游标（新成员只能看到加入之后的消息）：取最后一条即可，
+    # 不再全量拉房间历史——窗口化后历史可能很长，全量查询纯属浪费。
+    tail_messages, _ = await gtRoomMessageManager.get_room_messages(room_id, limit=1)
+    join_read_index = _resolve_join_read_index(tail_messages)
 
     room.agent_ids = agent_ids
     await gtRoomManager.save_room(room)

@@ -164,16 +164,16 @@ class ChatRoom:
     # ─── 消息 ─────────────────────────────────────────────────
 
     async def get_unread_messages(self, agent_id: int) -> List[GtRoomMessage]:
-        new_msgs = self._store.get_unread(agent_id)
+        new_msgs = await self._store.get_unread(agent_id)
         if self._scheduler.state != RoomState.INIT:
             await self._scheduler.persist_state()
         return new_msgs
 
-    def has_unread_immediate_messages(self, agent_id: int) -> bool:
-        return self._store.has_unread_immediate_messages(agent_id)
+    async def has_unread_immediate_messages(self, agent_id: int) -> bool:
+        return await self._store.has_unread_immediate_messages(agent_id)
 
-    def has_unread_messages(self, agent_id: int) -> bool:
-        return self._store.has_unread_messages(agent_id)
+    async def has_unread_messages(self, agent_id: int) -> bool:
+        return await self._store.has_unread_messages(agent_id)
 
     async def add_message(self, sender_id: int, content: str, send_time: datetime | None = None, *,
                           insert_immediately: bool = False) -> None:
@@ -233,7 +233,7 @@ class ChatRoom:
             self._scheduler.publish_status(next_agent_id, need_scheduling=True)
 
     async def escalate_message_to_immediate(self, db_id: int) -> None:
-        msg = self._store.escalate_to_immediate(db_id)
+        msg = await self._store.escalate_to_immediate(db_id)
         await gtRoomMessageManager.escalate_message_to_immediate(db_id)
         messageBus.publish(MessageBusTopic.ROOM_MSG_CHANGED, gt_room=self.gt_room, gt_message=msg)
         logger.info("消息升级为 immediately: room=%s, db_id=%d", self.key, db_id)
@@ -286,7 +286,15 @@ class ChatRoom:
     # ─── 辅助 ─────────────────────────────────────────────────
 
     def format_log(self) -> str:
-        lines = [f"=== {self.key} 聊天记录 ==="]
+        """格式化内存中的聊天记录。
+
+        ⚠️ 内存窗口化后这里**只有最近 WINDOW_SIZE 条**，不是完整历史；
+        标题行显式标注，避免看日志的人误以为是全部记录。完整历史走 DB 分页。
+        """
+        lines = [
+            f"=== {self.key} 聊天记录（仅内存最近 {len(self.messages)} 条，"
+            f"窗口上限 {RoomMessageStore.WINDOW_SIZE}；完整历史请查 DB 分页）==="
+        ]
         for msg in self.messages:
             lines.append(f"[{msg.send_time}] {msg.sender_display_name}: {msg.content}")
         return "\n".join(lines)

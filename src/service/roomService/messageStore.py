@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List
 
-from dal.db import gtRoomMessageManager
+from dal.db import gtAgentManager, gtRoomMessageManager
 
 logger = logging.getLogger("service.roomService")
 from constants import SpecialAgent
@@ -30,6 +30,10 @@ class RoomMessageStore:
     本类**不再提供**这些入口。
     """
 
+    # 内存窗口大小：内存里最多保留最近这么多条消息，更早的只在 DB。
+    # 固定窗口（而非按最小读游标动态收缩）——淘汰是机械截断，无需维护动态下界。
+    WINDOW_SIZE = 100
+
     def __init__(self, *, gt_room: GtRoom):
         self._messages: List[GtRoomMessage] = []
         self._agent_seq_read: Dict[int, int] = {}  # agent_id -> 下一个待读的 seq（不含）
@@ -42,7 +46,11 @@ class RoomMessageStore:
 
     @property
     def messages(self) -> List[GtRoomMessage]:
-        """返回房间内全部消息（均已分配 seq）。"""
+        """返回**内存窗口内**的消息（最多 `WINDOW_SIZE` 条，均已分配 seq）。
+
+        ⚠️ 窗口化后 `len(room.messages)` **不等于房间消息总数**；需要真实总数请用
+        `gtRoomMessageManager.count_room_messages(room_id)`。
+        """
         return list(self._messages)
 
     async def append_and_assign_seq(self, msg: GtRoomMessage, *,
@@ -67,49 +75,89 @@ class RoomMessageStore:
             msg.id = db_msg.id
 
         self._messages.append(msg)
+        self._trim_to_window()
 
         if publish:
             messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self._gt_room, gt_message=msg)
 
-    def get_unread(self, agent_id: int) -> List[GtRoomMessage]:
+    def _trim_to_window(self) -> None:
+        """把内存消息列表截断到最近 `WINDOW_SIZE` 条（最老的从头部淘汰）。"""
+        overflow = len(self._messages) - self.WINDOW_SIZE
+        if overflow > 0:
+            del self._messages[:overflow]
+
+    async def _collect_unread(self, agent_id: int, *, advance: bool) -> List[GtRoomMessage]:
+        """取 agent_id 未读消息的**统一内核**（三处对外方法共用，避免越界逻辑写三遍）。
+
+        两条路径：
+        - 游标在窗口内（`next_seq >= 窗口下界`）：纯内存过滤，零 DB 开销；
+        - 游标落后超过窗口（`next_seq < 窗口下界`）：从 DB 补读缺口
+          `[next_seq, 窗口下界)` 后与内存窗口拼接 —— 这是「部分加载后未读不丢」
+          的唯一保证，窗口外的未读只能靠它取回。
+
+        补读结果**不回填内存窗口**：读一次、推进游标后不会再读第二次，
+        回填反而会把窗口挤走。
+        """
+        next_seq = self._agent_seq_read.get(agent_id, 0)
+        rows: List[GtRoomMessage]
+        if self._messages and next_seq < self._messages[0].seq:
+            gap = await gtRoomMessageManager.get_room_messages_by_seq_range(
+                self._gt_room.id, next_seq, self._messages[0].seq,
+            )
+            await self._backfill_display_names(gap)
+            rows = gap + [m for m in self._messages if m.seq is not None]
+        else:
+            rows = [m for m in self._messages if m.seq is not None and m.seq >= next_seq]
+        if advance and rows:
+            self._agent_seq_read[agent_id] = rows[-1].seq + 1  # type: ignore[operator]
+        return rows
+
+    async def _backfill_display_names(self, rows: List[GtRoomMessage]) -> None:
+        """给补读出的 DB 消息回填 `sender_display_name`（一次批量查询，不做 N+1）。
+
+        漏回填会让 `collect_room_messages` 用空 sender 构造 prompt 与活动记录。
+        窗口内的内存对象天然带 display_name，无需回填。
+        """
+        sender_ids = sorted({m.sender_id for m in rows if m.sender_id is not None})
+        if not sender_ids:
+            return
+        agents = await gtAgentManager.get_agents_by_ids(sender_ids)
+        name_map = {a.id: a.display_name for a in agents if a.id is not None}
+        for row in rows:
+            row.sender_display_name = name_map.get(row.sender_id, "")
+
+    async def get_unread(self, agent_id: int) -> List[GtRoomMessage]:
         """拉取 agent_id 未读的全部消息，并推进其读游标。
 
         **不过滤 `sender_id == agent_id`**：游标必须能越过 Agent 自己的发言，
         否则客服自己说完一句就再也读不到后续他人消息（游标被自己卡住）。
         过滤自身消息是调用方（`collect_room_messages`）的事。
-        """
-        next_seq = self._agent_seq_read.get(agent_id, 0)
-        new_msgs = [m for m in self._messages if m.seq is not None and m.seq >= next_seq]
-        if new_msgs:
-            self._agent_seq_read[agent_id] = new_msgs[-1].seq + 1  # type: ignore[operator]
-        return new_msgs
 
-    def has_unread_messages(self, agent_id: int) -> bool:
+        async：游标落后超过内存窗口时要查 DB 补读缺口。
+        """
+        return await self._collect_unread(agent_id, advance=True)
+
+    async def has_unread_messages(self, agent_id: int) -> bool:
         """是否存在 agent_id 尚未读取的**他人**消息（只读，不推进游标）。
 
         必须排除自己发的消息：AI 自己刚发言完 seq 前进了一格，若把自身消息算作未读，
         调用方（Turn 结束的尾唤醒、安全边界）会误判「还有事要做」而空转。
         """
-        next_seq = self._agent_seq_read.get(agent_id, 0)
-        return any(
-            m.seq is not None and m.seq >= next_seq and m.sender_id != agent_id
-            for m in self._messages
-        )
+        rows = await self._collect_unread(agent_id, advance=False)
+        return any(m.sender_id != agent_id for m in rows)
 
-    def has_unread_immediate_messages(self, agent_id: int) -> bool:
+    async def has_unread_immediate_messages(self, agent_id: int) -> bool:
         """是否存在 agent_id 尚未读取的**他人立即注入**消息（只读，不推进游标）。
 
         替代旧 `has_pending_immediate_messages`。旧实现判断的是「队列里有没有
         seq=NULL 的 immediate 消息」，即「还没注入」；新实现判断的是「有条 immediate
         消息还没被读」——语义从「待注入」变成「待读取」，与 seq 解耦。
+
+        **窗口外的 immediate 消息靠本方法的越界补读分支才能被发现**：escalate 的
+        DB fallback 把窗口外消息置位后，若这里不补读，AI 永远收不到，升级形同失效。
         """
-        next_seq = self._agent_seq_read.get(agent_id, 0)
-        return any(
-            m.seq is not None and m.seq >= next_seq
-            and m.sender_id != agent_id
-            and m.insert_immediately
-            for m in self._messages
-        )
+        rows = await self._collect_unread(agent_id, advance=False)
+        return any(m.sender_id != agent_id and bool(m.insert_immediately) for m in rows)
 
     def mark_all_read(self) -> None:
         self._agent_seq_read = {aid: self._next_seq for aid in self._agent_ids}
@@ -141,24 +189,39 @@ class RoomMessageStore:
                     pass  # 忽略无效的 key
             self._agent_seq_read = converted
 
-    def escalate_to_immediate(self, db_id: int) -> GtRoomMessage:
+    async def escalate_to_immediate(self, db_id: int) -> GtRoomMessage:
         """把一条已发出的普通消息升级为「立即注入」。
 
         升级**只置标志位**：不清空 seq、不移动位置、不排序。
         顺序在消息发出的那一刻就固定了，升级改变的是「什么时候读」，不是「排在哪」。
+
+        内存窗口内命中走快路径；**已被窗口淘汰**（更早的历史）走 DB fallback：
+        按 id 查单条 → 校验 `room_id` → 置位。不这么做的话，Operator 对一条
+        窗口外的排队消息点「升级」会直接 ValueError，是真实功能回退。
+
+        fallback 查出的对象**不塞回内存窗口**：它只用于置 `insert_immediately`，
+        不参与 seq 分配 / 顺序 / 未读判定，落库 + 广播后即丢弃。
 
         允许升级：单聊中任意发往 AI 接收方、且该接收方尚未读取的消息
         （既覆盖 Operator 发给 AI 的排队消息，也覆盖 Agent 之间单聊的排队消息）。
 
         拒绝条件：
         - 消息不存在 → ValueError
+        - 消息不属于本房间 → ValueError（防越权升级别的房间消息）
         - SYSTEM 消息 → ValueError（系统消息没有「立即引导」语义）
         - 房间内没有 AI 接收方（如 AI 发给 Operator 的消息）→ ValueError
         - 已被任一 AI 接收方读取 → RuntimeError（读都读过了，再升级无意义）
         """
         msg = next((m for m in self._messages if m.id == db_id), None)
         if msg is None:
-            raise ValueError(f"message db_id={db_id} not found")
+            msg = await gtRoomMessageManager.get_room_message_by_id(db_id)
+            if msg is None:
+                raise ValueError(f"message db_id={db_id} not found")
+            # 按 id 查单条不带 room 条件，必须自行校验，否则可越权升级别的房间的消息
+            if msg.room_id != self._gt_room.id:
+                raise ValueError(
+                    f"message db_id={db_id} does not belong to room {self._gt_room.id}"
+                )
 
         if msg.sender_id == int(SpecialAgent.SYSTEM.value):
             raise ValueError(f"SYSTEM messages cannot be escalated, db_id={db_id}")
