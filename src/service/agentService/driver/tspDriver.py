@@ -42,6 +42,18 @@ _RUN_CHAT_TURN_ERROR_ACTION_HINT = (
     "你必须通过调用 send_chat_msg / finish_action 工具，而不是在消息内容中输出 JSON。"
     "请重新行动，直接调用相应的工具。"
 )
+# `enter_container` 的 resolve 失败里，只有这两个错误码**证明容器已经不在**，
+# 才允许淘汰挂起记录。两者语义都是「查了，确实没有」：
+# - `container_lost`：库里有记录但 inspect 取不到对象（被外部删除）；
+# - `container_not_found`：docker 明确回 `no such container`。
+# 其余错误（典型 `container_enter_failed`：inspect 超时 / daemon 抖动 / 输出异常）
+# 只说明**这次查不清**，容器与挂起的会话可能都还健康 —— 见 enter_container 的注释。
+_SUSPEND_EVICT_ERROR_CODES = frozenset(
+    {
+        containerService.ERROR_CONTAINER_LOST,
+        containerService.ERROR_CONTAINER_NOT_FOUND,
+    }
+)
 
 
 def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[str]:
@@ -140,7 +152,8 @@ class TspAgentDriver(AgentDriver):
 
         流程：
         1. `resolve_enter_target` 解析目标并取实时状态（含 12 位 ID 校验、存在性、
-           架构；只做一次 `docker inspect`）；
+           架构；只做一次 `docker inspect`）；失败时只有「容器确实不在」才淘汰该容器
+           的挂起记录，瞬时 docker 故障保留挂起会话（见下方注释）；
         2. 同容器幂等：已在目标容器且连接存活 → 直接成功；
         3. 状态判定（`validate_enter_state`）：自建只收 created/exited，外部只收 running；
         4. 外部容器先注入 gtsp（自建在 create 时已注入）；
@@ -154,13 +167,24 @@ class TspAgentDriver(AgentDriver):
             target, state = await containerService.resolve_enter_target(
                 self.host.gt_agent.id, container_id
             )
-        except Exception:
-            # 解析失败意味着容器已查不到/已删除（典型 `container_lost`）：这次进入
-            # 必然失败，但**挂起池里那份记录也随之作废**，必须在这里淘汰。
-            # 否则它永远等不到「下次健康检测」——健康检测在 resolve 之后，走不到；
-            # 结果就是死 client 与它的管道 fd 一直留着（step1 §3.3 步骤 2 要求
-            # 「自动清理失效的挂起记录」）。清完原样抛出，错误码不变。
-            await self._evict_suspended(container_id)
+        except TogoException as exc:
+            # 解析失败分两类，处置相反：
+            #
+            # 1. 容器确实不在了（`container_lost` / `container_not_found`）：这次进入
+            #    必然失败，挂起池里那份记录也随之作废，必须在这里淘汰。否则它永远
+            #    等不到「下次健康检测」——健康检测在 resolve 之后，走不到；结果就是
+            #    死 client 与它的管道 fd 一直留着（step1 §3.3 步骤 2 要求「自动清理
+            #    失效的挂起记录」）。
+            # 2. 只是这次查不清（`container_enter_failed`：inspect 超时 / daemon 抖动
+            #    / 输出异常）：容器还在、挂起会话也健康，**不许**淘汰。关掉那个 client
+            #    会让容器内 gtsp 收到 EOF 退出，自建容器 PID 1 一死就停机、保活的后台
+            #    进程全没 —— 而用户以为仍在保活，正是本功能要治的病被一次瞬时抖动
+            #    触发。保留池，下次 resolve 成功仍可复用。非 TogoException 的意外异常
+            #    同理：不知道容器状态时不动池。
+            #
+            # 两种都原样抛出，错误码不变。
+            if exc.error_code in _SUSPEND_EVICT_ERROR_CODES:
+                await self._evict_suspended(container_id)
             raise
 
         if (

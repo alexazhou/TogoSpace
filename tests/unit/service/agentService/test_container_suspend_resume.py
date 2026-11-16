@@ -321,6 +321,59 @@ async def test_enter_container_resolve_failure_evicts_suspended(_patched_contain
     assert driver.connect_calls == []
 
 
+async def test_enter_container_not_found_evicts_suspended(_patched_container_primitives):
+    """`container_not_found`（docker 明确回 no such container）同样要淘汰挂起记录。"""
+    driver = _Driver()
+    orphan = _FakeClient()
+    driver._suspended_clients["c0ffee123456"] = orphan
+    _patched_container_primitives["resolve_error"] = TogoException(
+        "容器不存在", containerService.ERROR_CONTAINER_NOT_FOUND
+    )
+
+    with pytest.raises(TogoException) as excinfo:
+        await driver.enter_container("c0ffee123456")
+
+    assert excinfo.value.error_code == containerService.ERROR_CONTAINER_NOT_FOUND
+    assert driver._suspended_clients == {}
+    assert orphan.disconnect_calls == 1
+    assert driver.connect_calls == []
+
+
+async def test_enter_container_transient_resolve_failure_keeps_suspended(
+    _patched_container_primitives,
+):
+    """瞬时 docker 故障（`container_enter_failed`）不许淘汰健康的挂起会话。
+
+    inspect 超时 / daemon 抖动时容器还在、挂起会话也健康：关掉那个 client 会让
+    容器内 gtsp 收到 EOF 退出，自建容器 PID 1 一死就停机、保活的后台进程全没，
+    而用户以为仍在保活。所以这类失败只透出错误码，池原样保留，下次 resolve
+    成功仍可复用。
+    """
+    driver = _Driver()
+    suspended = _FakeClient()
+    driver._suspended_clients["c0ffee123456"] = suspended
+    _patched_container_primitives["resolve_error"] = TogoException(
+        "查询容器状态失败: docker inspect 超时", containerService.ERROR_CONTAINER_ENTER_FAILED
+    )
+
+    with pytest.raises(TogoException) as excinfo:
+        await driver.enter_container("c0ffee123456")
+
+    # 错误码原样透出，且没被动过池
+    assert excinfo.value.error_code == containerService.ERROR_CONTAINER_ENTER_FAILED
+    assert driver._suspended_clients == {"c0ffee123456": suspended}
+    assert suspended.disconnect_calls == 0
+    assert driver.connect_calls == []
+
+    # 抖动过去后重试：仍走复用，不重连
+    _patched_container_primitives["resolve_error"] = None
+    _patched_container_primitives["target"] = _MANAGED
+    _patched_container_primitives["state"] = ContainerState.RUNNING
+    await driver.enter_container("c0ffee123456")
+    assert driver._client is suspended
+    assert driver.connect_calls == []
+
+
 async def test_shutdown_clears_all_suspended_clients():
     """`shutdown` 必须清空挂起池：漏掉就是孤儿进程 + 自建容器一直 running。"""
     driver = _Driver()
