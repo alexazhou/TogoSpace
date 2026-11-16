@@ -18,6 +18,7 @@ from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
 from service.agentService.promptBuilder import build_agent_system_prompt
 from service import llmService, roomService, persistenceService, deptService, agentActivityService, serviceUtil, containerService
+from service import mcpSessionService
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheduleJobManager
 from peewee import IntegrityError
 from exception import TogoException
@@ -138,6 +139,14 @@ async def _reset() -> None:
     if close_tasks:
         await asyncio.gather(*close_tasks, return_exceptions=True)
     _agents.clear()
+    # MCP 原生 session（#291 T5）：Agent 全部卸载后，进程级的会话/连接也不能留下 ——
+    # stdio server 是真实子进程，进程退出前不关就变成孤儿。幂等，无 session 时返回 0。
+    try:
+        closed = await mcpSessionService.shutdown()
+        if closed:
+            logger.info("已关闭 %s 条 MCP session 连接（agentService reset）", closed)
+    except Exception:  # noqa: BLE001 - 关停路径不允许因 MCP 清理失败而中断
+        logger.warning("MCP session 关闭失败（agentService reset）", exc_info=True)
 
 
 @serviceUtil.service_start_wrapper(s_status, on_error=_reset)
@@ -328,6 +337,14 @@ async def _unload_team_agents(team_id: int) -> None:
         await asyncio.gather(*close_tasks, return_exceptions=True)
     for agent_id in keys_to_remove:
         _agents.pop(agent_id, None)
+    # MCP 原生 session（#291 T5）：team 卸载 ⇒ 该 team 下所有 Agent 的会话与连接一起关。
+    # 放在 `pop` 之后是刻意的：先摘掉 Agent，再释放连接，关连接过程中不会再被新调用复用。
+    try:
+        closed = await mcpSessionService.close_team_sessions(team_id)
+        if closed:
+            logger.info("已关闭 team=%s 的 %s 条 MCP session 连接", team_id, closed)
+    except Exception:  # noqa: BLE001 - 卸载路径 best-effort，不因 MCP 清理失败中断
+        logger.warning("MCP session 关闭失败（unload_team team=%s）", team_id, exc_info=True)
 
 
 async def unload_team(team_id: int) -> None:

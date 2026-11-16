@@ -163,3 +163,67 @@ async def test_removed_config_closes_connection_on_next_access(mcp_db, tmp_path:
     assert getattr(caught.value, "error_code", "") == "mcp_registered_server_not_found"
     assert lease.connection.state is svc.ConnectionState.CLOSED
     assert (await svc.session_status(5, 4))["connection_count"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# T5：生命周期钩子（team 卸载 / 进程关停）——真子进程，看子进程会不会留下
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_unload_team_closes_only_that_team_sessions(mcp_db, tmp_path: Path):
+    """§2.2/§2.3 归属清理：`agentService.unload_team(t)` 只关 t 的会话。
+
+    判据打在**可观察结果**上：team 7 的 session 变 inactive 且连接关闭；
+    team 8 的 session 仍 active、连接仍 ready —— 清理不能跨 team 误伤。
+    """
+    import service.agentService.core as agent_core
+
+    cmd = _server_command(tmp_path, "zeta", "echo_z")
+    await registry.save_server(name="zeta", kind="mcp", protocol="stdio", target=cmd)
+    ref = await svc.resolve_ref("zeta")
+
+    await svc.start_session(7, 1)
+    lease_7 = await svc.acquire_connection(7, 1, ref)
+    await svc.start_session(8, 1)
+    lease_8 = await svc.acquire_connection(8, 1, ref)
+    assert lease_7.connection.ready and lease_8.connection.ready
+
+    await agent_core.unload_team(7)
+
+    status_7 = await svc.session_status(7, 1)
+    assert status_7["active"] is False
+    assert status_7["connection_count"] == 0
+    assert lease_7.connection.state is svc.ConnectionState.CLOSED
+
+    status_8 = await svc.session_status(8, 1)
+    assert status_8["active"] is True, "别的 team 的 session 不能被连带关闭"
+    assert status_8["connection_count"] == 1
+    assert lease_8.connection.state is svc.ConnectionState.READY
+
+
+@pytest.mark.asyncio
+async def test_agent_service_reset_closes_all_sessions(mcp_db, tmp_path: Path):
+    """`agentService` 的进程级清理（`_reset`）⇒ MCP 会话全关（stdio 子进程不留孤儿）。
+
+    为什么打 `_reset()` 而不是 `shutdown()`：`shutdown` 被 `service_stop_wrapper` 包住，
+    `Idle` 态直接 no-op（本测试不启动整套 agentService，起不来）。而 `_reset()` 正是
+    「正常 shutdown 与启动失败回滚共用」的那份纯清理实现（serviceUtil 文档契约），
+    `shutdown` 的 body 就是 `await _reset()`——钩子挂在真正释放资源的地方，测它就够。
+    """
+    import service.agentService.core as agent_core
+
+    cmd = _server_command(tmp_path, "eta", "echo_eta")
+    await registry.save_server(name="eta", kind="mcp", protocol="stdio", target=cmd)
+    ref = await svc.resolve_ref("eta")
+
+    await svc.start_session(9, 2)
+    lease = await svc.acquire_connection(9, 2, ref)
+    assert lease.connection.ready
+    assert svc.active_session_count() == 1
+
+    await agent_core._reset()
+
+    assert svc.active_session_count() == 0
+    assert lease.connection.state is svc.ConnectionState.CLOSED
+    assert (await svc.session_status(9, 2))["active"] is False
