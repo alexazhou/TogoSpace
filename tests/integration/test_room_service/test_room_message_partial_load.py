@@ -181,6 +181,45 @@ class TestRoomMessagePartialLoad(ServiceTestCase):
         assert unread == []
         assert calls == [], "游标已在窗口内，不应再触发 DB 补读"
 
+    async def test_cursor_at_window_boundary_not_lost_not_duplicated(self):
+        """**已读/未读边界落在窗口交界处**时仍正确：不漏、不重、顺序对。
+
+        窗口 = `[150..249]`（下界 150）。窗口化最容易破坏的正是这条边界：
+        补读区间 `[游标, 150)` 与窗口 `[150..]` 的拼接点若写错（左开/右闭搞反、
+        或拼接时重复计入窗口首条），就会出现「漏一条」或「同一条读两次」。
+
+        覆盖 5 个位置：跨边界 145（补读 5 + 窗口 100）、仅补读 1 条 149、
+        恰好等于窗口下界 150（纯内存路径）、窗口内 151、已读到底 250。
+        """
+        gt_room = await self._make_room("boundary_room")
+        await self._seed_history(gt_room, HISTORY)
+        room = await self._load(gt_room)
+        alice_id = await self._agent_id("alice")
+        store = room._store
+        lower = HISTORY - WINDOW  # 150
+        assert [m.seq for m in room.messages][0] == lower, "前置：窗口下界必须是 150"
+
+        cases = [
+            (145, list(range(145, HISTORY))),
+            (lower - 1, list(range(lower - 1, HISTORY))),
+            (lower, list(range(lower, HISTORY))),
+            (lower + 1, list(range(lower + 1, HISTORY))),
+            (HISTORY, []),
+        ]
+        for cursor, expected in cases:
+            store._agent_seq_read[alice_id] = cursor
+            unread = await room.get_unread_messages(alice_id)
+            seqs = [m.seq for m in unread]
+            assert seqs == expected, f"游标={cursor}：期望 seq {expected[:3]}…，实际 {seqs[:3]}…"
+            assert len(set(seqs)) == len(seqs), f"游标={cursor}：出现重复消息（拼接点写错）"
+            if expected:
+                # 边界处的对象必须是真消息（补读对象回填完好），不是空壳
+                assert unread[0].content == f"历史消息#{expected[0]}"
+                assert unread[-1].content == f"历史消息#{expected[-1]}"
+                assert all(m.sender_display_name for m in unread), (
+                    f"游标={cursor}：补读段 display_name 未回填"
+                )
+
     # ─── 判据 3：反面对照 —— 补读缺失时历史确实会丢 ────────────────────────
 
     async def test_without_backfill_history_is_lost(self, monkeypatch):
