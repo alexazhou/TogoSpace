@@ -92,9 +92,11 @@ class _Driver(TspAgentDriver):
 @pytest.fixture(autouse=True)
 def _patched_container_primitives(monkeypatch):
     """容器原语一律打桩：这里测的是编排，不测 docker。"""
-    state = {"target": _MANAGED, "state": ContainerState.EXITED, "prepare_calls": []}
+    state = {"target": _MANAGED, "state": ContainerState.EXITED, "prepare_calls": [], "resolve_error": None}
 
     async def _resolve(agent_id, container_id):
+        if state["resolve_error"] is not None:
+            raise state["resolve_error"]
         return state["target"], state["state"]
 
     async def _prepare(target):
@@ -292,6 +294,31 @@ async def test_enter_container_dead_suspended_falls_back_to_normal_start(_patche
     assert dead.disconnect_calls == 1
     assert driver.connect_calls == [(ExecEnv.CONTAINER, "c0ffee123456")]
     assert driver.current_container_id == "c0ffee123456"
+
+
+async def test_enter_container_resolve_failure_evicts_suspended(_patched_container_primitives):
+    """容器已被外部删除（resolve 抛 `container_lost`）时，挂起记录必须一并清掉。
+
+    这是 §3.3 步骤 2 的另一半：`_resume_suspended` 的健康检测在 resolve **之后**，
+    所以「容器都查不到」这条路径根本走不到它——不在这里淘汰，死 client 与其管道 fd
+    就永久留在池里（36 真容器实测过：错误码对，但池里还留着那个 TSPClient）。
+    """
+    driver = _Driver()
+    orphan = _FakeClient()
+    driver._suspended_clients["c0ffee123456"] = orphan
+    _patched_container_primitives["resolve_error"] = TogoException(
+        "容器已不存在", containerService.ERROR_CONTAINER_LOST
+    )
+
+    with pytest.raises(TogoException) as excinfo:
+        await driver.enter_container("c0ffee123456")
+
+    # 错误码原样透出（不能被清理动作改动）
+    assert excinfo.value.error_code == containerService.ERROR_CONTAINER_LOST
+    assert driver._suspended_clients == {}
+    assert orphan.disconnect_calls == 1
+    # 失败路径不该顺手连任何环境
+    assert driver.connect_calls == []
 
 
 async def test_shutdown_clears_all_suspended_clients():

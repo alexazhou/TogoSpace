@@ -150,9 +150,18 @@ class TspAgentDriver(AgentDriver):
         Raises:
             TogoException: 任一步失败
         """
-        target, state = await containerService.resolve_enter_target(
-            self.host.gt_agent.id, container_id
-        )
+        try:
+            target, state = await containerService.resolve_enter_target(
+                self.host.gt_agent.id, container_id
+            )
+        except Exception:
+            # 解析失败意味着容器已查不到/已删除（典型 `container_lost`）：这次进入
+            # 必然失败，但**挂起池里那份记录也随之作废**，必须在这里淘汰。
+            # 否则它永远等不到「下次健康检测」——健康检测在 resolve 之后，走不到；
+            # 结果就是死 client 与它的管道 fd 一直留着（step1 §3.3 步骤 2 要求
+            # 「自动清理失效的挂起记录」）。清完原样抛出，错误码不变。
+            await self._evict_suspended(container_id)
+            raise
 
         if (
             self.current_container is not None
@@ -205,6 +214,16 @@ class TspAgentDriver(AgentDriver):
             self.host.gt_agent.id, container_id, target.is_managed, state,
         )
         return target, state
+
+    async def _evict_suspended(self, container_id: str) -> None:
+        """摘掉某容器的挂起记录并关闭它（best-effort，不抛异常）。
+
+        用于「该容器这条线已经不可用」的路径：容器被外部删除/查不到、或改为非保活
+        退出。调用方随后按各自的错误码上报，这里只负责不让死 client 与管道 fd 滞留。
+        """
+        async with self._connect_lock:
+            client = self._suspended_clients.pop(container_id, None)
+        await self._close_client_quietly(client)
 
     async def _resume_suspended(
         self, target: ContainerTarget, container_id: str
@@ -289,10 +308,7 @@ class TspAgentDriver(AgentDriver):
         if not keep_alive:
             # 顺手清掉同容器的历史挂起对象：此前保活过、后来又用非保活方式退出时，
             # 池里那个 client 已经没人会复用了，留着只会泄漏一个子进程。
-            async with self._connect_lock:
-                to_close.append(self._suspended_clients.pop(container_id, None))
-            for client in to_close:
-                await self._close_client_quietly(client)
+            await self._evict_suspended(container_id)
             await self.disconnect()
         else:
             async with self._connect_lock:
