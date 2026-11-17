@@ -213,12 +213,9 @@ class AgentTasksHandler(BaseHandler):
 
         # v3：未完成视图按「当前持棒人」过滤（执行中 + 审核中都能看到）；
         # 包含已关闭任务的视图按 scope="self"（执行人或验收人）过滤，避免任务完成后从原执行人列表消失。
-        filter_kwargs = (
-            {"scope": "self"}
-            if include_closed
-            else {"mine": True}
-        )
-
+        # 两个过滤器互斥：各传一个，另一个保持默认值（`scope=None` / `mine=False`）。
+        # 不用 `**filter_kwargs` 合并成一个字典：两分支的值会被推成 `str | bool`，
+        # mypy 无法逐键精化，`**` 展开处必然报 arg-type。
         self.return_json(
             await taskService.list_tasks(
                 team_id=agent.team_id,
@@ -227,7 +224,8 @@ class AgentTasksHandler(BaseHandler):
                 limit=limit,
                 # Agent 任务卡看「最近改过的在最上面」，与团队级列表的优先级优先区分开。
                 order=gtAgentTaskManager.ORDER_UPDATED_DESC,
-                **filter_kwargs,
+                scope="self" if include_closed else None,
+                mine=not include_closed,
             )
         )
 
