@@ -286,6 +286,17 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* 按钮文字必须单行：本页 6 列（含长 URL 列）在窄内容区里会把「操作」列压到 72px 上下，
+     两个按钮作为 flex 项默认 `flex-shrink: 1` + `min-width: auto`，会被压到「一个字宽」
+     ⇒ 「编辑」断成「编/辑」。参照页的做法（RolesSettingsSection / SkillsSettingsSection）
+     是给按钮 `white-space: nowrap`；这里写在容器上让两个按钮一起继承，语义相同、少一处重复。 */
+  white-space: nowrap;
+}
+
+.row-actions .ghost-button {
+  /* 有了 nowrap 之后 min-content 已经是整词宽度，理论上不会再被压缩；
+     `flex: 0 0 auto` 把「不许压」写成显式约束，避免以后有人给容器加宽度限制时又退回去。 */
+  flex: 0 0 auto;
 }
 
 .text-danger {
