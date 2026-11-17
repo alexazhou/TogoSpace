@@ -44,6 +44,7 @@ from service import mcpSessionService as sessions
 
 from . import consoleParsing as cp
 from .consoleParsing import ConsoleError
+from .mcpContent import render_content_text
 
 # --------------------------------------------------------------------------- #
 # 固定占位符示例（唯一实现：help、错误文案、报告实收都引用这里，不各抄一份）
@@ -252,18 +253,16 @@ def _render_tools(server: str, tools: list[Any], *, brief: bool, full: bool) -> 
     return "\n".join(lines)
 
 
-def _content_text(result: Any) -> str:
-    """`CallToolResult` ⇒ 文本（优先 text 段，其余按 JSON 序列化）。"""
-    parts: list[str] = []
-    for item in getattr(result, "content", None) or []:
-        text = getattr(item, "text", None)
-        if text is not None:
-            parts.append(str(text))
-            continue
-        data = getattr(item, "data", None)
-        if data is not None:
-            parts.append(str(data))
-    return "\n".join(parts)
+def _content_text(result: Any, tool_name: str = "") -> str:
+    """`CallToolResult` ⇒ 文本（多模态段按 `content[].type` 分发，见 `mcpContent`）。
+
+    改造前这里只做「有 `text` 取 text，否则把 `data` 拼进去」，`type` / `mimeType` 全丢
+    ⇒ 截图类工具会把近 1MB 裸 base64 灌进上下文（need_fix_3 §2）。现在 image/audio 段落盘
+    并返回路径占位，`tool_name` 只用于文件名溯源。
+    """
+    return render_content_text(
+        getattr(result, "content", None) or [], tool_name=tool_name or "mcp"
+    )
 
 
 def _jsonable(value: Any) -> Any:
@@ -704,7 +703,7 @@ async def _cmd_call(positional: list[str], options: dict[str, Any], context: Any
     }
     if is_error:
         body["error_code"] = "mcp_tool_error"
-        body["message"] = _content_text(result)
+        body["message"] = _content_text(result, tool_name)
         return body
     if mode == "json":
         body["content"] = [_jsonable(item) for item in getattr(result, "content", None) or []]
@@ -712,7 +711,7 @@ async def _cmd_call(positional: list[str], options: dict[str, Any], context: Any
         if structured is not None:
             body["structured_content"] = structured
         return body
-    body["text"] = _content_text(result)
+    body["text"] = _content_text(result, tool_name)
     return body
 
 
