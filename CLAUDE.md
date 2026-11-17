@@ -261,11 +261,11 @@ STORAGE_ROOT/
 - docs/tech/04_agent/：Driver 架构、调度逻辑、任务生命周期、状态持久化、Token 压缩
 - docs/tech/05_llm/：LLM 配置指南、Prompt Cache
 - docs/tech/06_i18n/：国际化设计方案、Web 实体 i18n 方案
-- docs/tech/07_test/：测试执行架构、测试用例设计指南、单元/集成测试边界、本地环境自查清单
+- docs/tech/07_test/：测试执行架构、测试用例设计指南、单元/集成测试边界、本地环境自查清单、测试写配置文件的隔离边界
 - docs/tech/08_debugging/：轮次与消息排查指南
 - docs/tech/09_tui/：TUI 布局方案
 - docs/tech/10_release/：桌面打包发布方案、演示模式只读方案、未初始化场景调度闸门
-- docs/tech/11_refactor/：前端基础组件重复清单（去重待办）
+- docs/tech/11_refactor/：前端基础组件重复清单（去重待办）、前端架构优化与重构方案
 - docs/tech/12_common/：通用命名规则与约定
 
 ### 设计文档
