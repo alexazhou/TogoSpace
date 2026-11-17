@@ -442,6 +442,8 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 覆盖 UiTag 的 line-height: 1：否则 overflow: hidden 会裁掉字形下伸部分 */
+  line-height: normal;
 }
 .provider-model-modalities {
   display: inline-flex;
