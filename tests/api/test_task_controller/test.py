@@ -48,21 +48,27 @@ class TestTaskController(ServiceTestCase):
 
         `updated_at` 显式传入时按原样落库（格式 `YYYY-MM-DD HH:MM:SS.ffffff`）：
         排序断言不能依赖「插入顺序 = 时间戳单调」这种巧合，需要可控时间戳时必须写死。
+
+        **`current_owner_id` 必须写**，这里与真实创建路径保持一致（`taskService.py`
+        创建任务时写 `current_owner_id=assignee_id`）。`GET /agents/<id>/tasks.json`
+        在 v3 按「当前持棒人」过滤（`caller_id= + mine=True` ⇒ `current_owner_id == caller`），
+        裸 sqlite3 造数漏写这一列，行会被过滤掉——症状是「行确实插进去了、列表却是空/缺条」，
+        断言报 `picked == []` 时先查这里，不要先怀疑排序实现。
         """
         with sqlite3.connect(self._get_test_db_path()) as conn:
             if updated_at is None:
                 cursor = conn.execute(
                     "INSERT INTO agent_tasks (team_id, title, description, assignee_id, creator_id,"
-                    " reviewer_id, status, priority, depends_on)"
-                    " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]')",
-                    (team_id, title, agent_id, agent_id, reviewer_id, priority),
+                    " reviewer_id, status, priority, depends_on, current_owner_id)"
+                    " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]', ?)",
+                    (team_id, title, agent_id, agent_id, reviewer_id, priority, agent_id),
                 )
             else:
                 cursor = conn.execute(
                     "INSERT INTO agent_tasks (team_id, title, description, assignee_id, creator_id,"
-                    " reviewer_id, status, priority, depends_on, created_at, updated_at)"
-                    " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]', ?, ?)",
-                    (team_id, title, agent_id, agent_id, reviewer_id, priority,
+                    " reviewer_id, status, priority, depends_on, current_owner_id, created_at, updated_at)"
+                    " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]', ?, ?, ?)",
+                    (team_id, title, agent_id, agent_id, reviewer_id, priority, agent_id,
                      updated_at, updated_at),
                 )
             task_id = cursor.lastrowid
