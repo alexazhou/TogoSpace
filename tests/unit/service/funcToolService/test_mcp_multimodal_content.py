@@ -211,27 +211,68 @@ def test_resource_link_keeps_uri():
     assert "report.pdf" in out
 
 
-def test_embedded_resource_blob_omitted():
-    """`resource` 兜底：结构保留，但内嵌 `blob`（base64）必须省略。"""
-    blob = base64.b64encode(_make_png(4, 4)).decode()
+def test_embedded_resource_blob_saved_with_prompt():
+    """`resource`(blob)：**落盘 + 一行提示**，上下文零 base64（#300 评论 1846）。
+
+    Operator 23:27「对 resource 应该 dump 到本地，并且给 agent 注入提示」⇒ 原
+    「序列化 + 省略 blob」不满足（blob 是丢的）。这里钉三件事：文件真的落盘、
+    扩展名与 mimeType 一致、上下文里只有提示。
+    """
+    png = _make_png(4, 4)
+    blob = base64.b64encode(png).decode()
     out = mcpContent.render_content_text(
         [
             {
                 "type": "resource",
                 "resource": {
-                    "uri": "shot://1",
+                    "uri": "shot://raw",
                     "mimeType": "image/png",
                     "blob": blob,
                 },
             }
-        ]
+        ],
+        tool_name="take_screenshot",
     )
     _assert_no_base64(out)
-    assert "shot://1" in out
-    assert "<base64 已省略" in out
+    assert out.startswith("[资源已保存: "), out
+    saved = Path(re.search(r"\[资源已保存: ([^ ]+) ", out).group(1))
+    assert saved.suffix == ".png"
+    assert saved.read_bytes() == png, "落盘内容必须与解码后字节逐字节一致"
+    assert "image/png" in out
+    assert len(out) < 200, f"提示应当只有一行，实际 {len(out)} 字符: {out}"
+
+
+def test_embedded_resource_text_saved_not_inlined():
+    """`resource`(text)：正文**落盘但不内联**（PM 假设：text 型同样只落盘 + 提示）。"""
+    body = "SECRET-NOTE-BODY " * 20
+    out = mcpContent.render_content_text(
+        [
+            {
+                "type": "resource",
+                "resource": {
+                    "uri": "note://hello",
+                    "mimeType": "text/plain",
+                    "text": body,
+                },
+            }
+        ],
+        tool_name="export_note",
+    )
+    assert "SECRET-NOTE-BODY" not in out, "正文不得进入上下文"
+    assert out.startswith("[资源已保存: "), out
+    saved = Path(re.search(r"\[资源已保存: ([^ ]+) ", out).group(1))
+    assert saved.read_text(encoding="utf-8") == body, "落盘内容必须与正文逐字节一致"
+    assert "text/plain" in out
+    assert len(out) < 200, f"提示应当只有一行，实际 {len(out)} 字符"
+
+
+def test_embedded_resource_without_content_falls_back_to_structure():
+    """协议上不该出现「既无 blob 又无 text」：退回结构兜底，至少保住 uri。"""
+    out = mcpContent.render_content_text(
+        [{"type": "resource", "resource": {"uri": "empty://1", "mimeType": "text/plain"}}]
+    )
     payload = json.loads(out)
-    assert payload["type"] == "resource"
-    assert payload["resource"]["mimeType"] == "image/png"
+    assert payload["resource"]["uri"] == "empty://1"
 
 
 def test_unknown_type_json_fallback():

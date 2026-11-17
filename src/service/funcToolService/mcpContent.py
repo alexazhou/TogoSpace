@@ -27,14 +27,16 @@ MCP 协议里 `CallToolResult.content[]` 是**多态数组**：
 - `image` / `audio` → base64 解码 → 写 `tempfile.gettempdir()` → 返回
   `[图片已保存: <绝对路径> (size, mimeType)]` 占位，Agent 用现有 `read_image` 即可看图
 - `resource_link` → 保留 URI（改造前这类段**整段丢失**，因为它既无 `text` 也无 `data`）
-- `resource` / 未知 type → JSON 结构兜底，其中 base64 字段省略为占位
+- `resource`（内嵌资源）→ 内容（`blob` 或 `text`）落盘 → `[资源已保存: <路径> (size, mimeType)]`
+  （#300 评论 1846：Operator 要求「dump 到本地 + 注入提示」，正文不进上下文）
+- 未知 type → JSON 结构兜底，其中 base64 字段省略为占位
 
-## 红线：任何分支都不把 base64 拼回文本
+## 红线：任何分支都不把 base64 或资源正文拼回文本
 
 解码失败、超过大小上限、落盘失败 ⇒ 都返回带原因的占位文本。失败时回吐原始 base64
-会把「零 base64」的收益全部作废（这正是本单要修的问题）。同理，`resource` 兜底里
-的 `blob` / 超长 base64 外观字符串也替换为 `<base64 已省略: N 字符>` ——
-若照字面「JSON 序列化」，内嵌资源的 base64 会原样进上下文。
+会把「零 base64」的收益全部作废（这正是本单要修的问题）。同理，`resource` 的 `text`
+正文也不内联（只落盘 + 提示），未知 type 的兜底序列化里 `blob` / 超长 base64 外观
+字符串也替换为 `<base64 已省略: N 字符>`。
 
 ## 生命周期
 
@@ -136,15 +138,38 @@ def _render_item(item: Any, tool_name: str) -> Optional[str]:
         details = "、".join(part for part in (name, mime_type) if part)
         suffix = f"（{details}）" if details else ""
         return f"[资源链接: {uri}{suffix}]"
-    # `resource`（内嵌资源）与未知 type：结构兜底。
-    # 注意：改造前这些段是**丢掉的**（既无 text 也无 data），而文档 §3 把它记为
-    # 「JSON 序列化兜底」——按文档字面序列化会把内嵌 `blob` 的 base64 灌进上下文，
-    # 所以这里序列化的同时省略 base64 字段（见 `_strip_binary_fields`）。
+    if type_name == "resource":
+        # 内嵌资源：落盘 + 一行提示（Operator 2026-11-17 23:27 / #300 评论 1846）。
+        return _render_embedded_resource(item, tool_name)
+    # 未知 type：结构兜底（不丢内容；base64 字段省略，见 `_strip_binary_fields`）。
+    return _dump_structure(item)
+
+
+def _render_embedded_resource(item: Any, tool_name: str) -> str:
+    """`content[].type == "resource"`：内容落盘 + 提示，**正文与 base64 都不进上下文**。
+
+    需求变更（#300 单评论 1846，Operator 23:27 原话「对 resource 应该 dump 到本地，
+    并且给 agent 注入提示」）取代原文档 §4「不展开 `resource`」；不变量改成
+    「不把内容正文塞进上下文」，落地形式就是落盘 + 一行提示。
+
+    带 `text` 的文本型资源同样只落盘、不内联（PM 明确这是他的假设；Operator 若要内联
+    另改）。落盘复用本模块的 temp 目录、`mcp-{tool}-{uuid8}.{ext}` 命名与
+    mimeType→扩展名映射 —— 与 image/audio 是同一条路，不新造第二套。
+    """
+    resource = _field(item, "resource") or {}
+    mime_type = str(_field(resource, "mimeType") or _field(resource, "mime_type") or "")
+    blob = _field(resource, "blob")
+    if blob is not None:
+        return _save_binary(str(blob), mime_type, tool_name, "资源")
+    text = _field(resource, "text")
+    if text is not None:
+        return _save_text(str(text), mime_type, tool_name, "资源")
+    # 协议上不该出现「既无 blob 又无 text」：退回结构兜底，至少保住 uri / 元信息。
     return _dump_structure(item)
 
 
 def _save_binary(data: str, mime_type: str, tool_name: str, label: str) -> str:
-    """解码 → 校验 → 落盘，返回占位文本。任何失败都不回吐 base64。"""
+    """base64 解码 → 落盘，返回占位文本。解码失败不回吐 base64。"""
     try:
         raw = base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError):
@@ -152,7 +177,20 @@ def _save_binary(data: str, mime_type: str, tool_name: str, label: str) -> str:
             f"mcp 二进制内容解码失败，已省略: tool={tool_name}, mime={mime_type}, chars={len(data)}"
         )
         return f"[{label}无法解码: {mime_type or '未知类型'}（data 长度 {len(data)} 字符，已省略）]"
+    return _persist(raw, mime_type, tool_name, label)
 
+
+def _save_text(text: str, mime_type: str, tool_name: str, label: str) -> str:
+    """文本型内嵌资源：UTF-8 落盘，上下文只留提示（正文不内联）。"""
+    return _persist(text.encode("utf-8"), mime_type, tool_name, label)
+
+
+def _persist(raw: bytes, mime_type: str, tool_name: str, label: str) -> str:
+    """统一落盘 + 占位：超限 / 扩展名推导 / magic 校验 / 写入 / 提示都在这一处。
+
+    image、audio、resource 三类走同一条路（共用 temp 目录、命名与 mime 映射），
+    避免同一件事出现两套实现与两套口径。
+    """
     if len(raw) > MAX_BINARY_BYTES:
         return (
             f"[{label}过大: {_human_size(len(raw))}, {mime_type or '未知类型'}，"

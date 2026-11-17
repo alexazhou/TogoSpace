@@ -48,10 +48,18 @@ _BASE64_RUN = re.compile(r"[A-Za-z0-9+/]{100,}={0,2}")
 #: 自造 MCP server：返回 chrome-devtools 形态的 `content[]`（说明文本 + image 段）。
 #: 图片字节在 server 端用 zlib 现场构造，保证是**真 PNG**；JPEG 用最小合法段。
 _STDIO_SERVER = '''
+import base64
 import struct
 import zlib
 
 from mcp.server.fastmcp import FastMCP, Image
+from mcp.types import (
+    BlobResourceContents,
+    CallToolResult,
+    EmbeddedResource,
+    TextContent,
+    TextResourceContents,
+)
 
 
 def _make_png(width=8, height=8):
@@ -98,6 +106,41 @@ def take_screenshot(format: str = "png") -> list:
 def echo_text(x: str) -> str:
     """纯文本工具（回归：文本路径行为必须不变）"""
     return "echo:" + x
+
+
+@mcp.tool()
+def export_resource() -> CallToolResult:
+    """导出内嵌资源（自造：text + resource(blob) 两段）"""
+    return CallToolResult(
+        content=[
+            TextContent(type="text", text="Exported one resource."),
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri="shot://raw",
+                    mimeType="image/png",
+                    blob=base64.b64encode(PNG).decode(),
+                ),
+            ),
+        ]
+    )
+
+
+@mcp.tool()
+def export_note() -> CallToolResult:
+    """导出文本型内嵌资源（正文不得内联进上下文）"""
+    return CallToolResult(
+        content=[
+            EmbeddedResource(
+                type="resource",
+                resource=TextResourceContents(
+                    uri="note://hello",
+                    mimeType="text/plain",
+                    text="SECRET-NOTE-BODY " * 20,
+                ),
+            )
+        ]
+    )
 
 
 mcp.run()
@@ -297,3 +340,78 @@ async def test_console_call_text_tool_unchanged_and_json_structure_intact(
     assert "text" not in js, "json 模式下不应再多拼一份 text（改前也没有）"
 
     await _run("r_rm", "mcp config remove shot")
+
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.mark.asyncio
+async def test_console_call_embedded_resource_blob_saved(
+    mcp_db, leader_ctx, loaded_tools, tmp_path: Path
+):
+    """`resource`(blob) 端到端：落盘 + 只给一行提示，上下文零 base64。
+
+    Operator 23:27 需求增量（#300 评论 1846）。自造 server 测得（非真实 chrome-devtools）。
+    """
+    command = _stdio_command(tmp_path)
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
+    )
+
+    async def _run(call_id: str, console_command: str) -> dict:
+        result = await registry.execute_tool_call(
+            _console_call(call_id, console_command), context=leader_ctx
+        )
+        return result.result
+
+    assert (await _run("e_add", f"mcp config add shot '{command}'")).get("success") is True
+
+    called = await _run("e_res", "mcp call shot.export_resource")
+    assert called.get("success") is True, called
+    text = called["text"]
+    _assert_no_base64(text)
+    assert "Exported one resource." in text
+    assert "[资源已保存: " in text
+
+    saved = _saved_path(text, label="资源")
+    assert saved.suffix == ".png"
+    assert saved.read_bytes().startswith(_PNG_MAGIC)
+    assert "PNG image data" in _file_kind(saved), _file_kind(saved)
+    print(f"\n[measure] resource(blob) 返回文本字符数={len(text)}")
+    assert len(text) < 250, f"上下文增量超预期: {len(text)} 字符"
+
+    await _run("e_rm", "mcp config remove shot")
+
+
+@pytest.mark.asyncio
+async def test_console_call_embedded_resource_text_not_inlined(
+    mcp_db, leader_ctx, loaded_tools, tmp_path: Path
+):
+    """`resource`(text) 端到端：正文落盘可读，但**不进上下文**（PM 假设：text 型同样只落盘）。"""
+    command = _stdio_command(tmp_path)
+    registry = _build_registry()
+    registry.apply_tool_allow_specs(
+        ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute"]
+    )
+
+    async def _run(call_id: str, console_command: str) -> dict:
+        result = await registry.execute_tool_call(
+            _console_call(call_id, console_command), context=leader_ctx
+        )
+        return result.result
+
+    assert (await _run("n_add", f"mcp config add shot '{command}'")).get("success") is True
+
+    called = await _run("n_note", "mcp call shot.export_note")
+    assert called.get("success") is True, called
+    text = called["text"]
+    assert "SECRET-NOTE-BODY" not in text, "正文不得进入上下文"
+    assert text.startswith("[资源已保存: "), text
+
+    saved = _saved_path(text, label="资源")
+    assert saved.read_text(encoding="utf-8") == "SECRET-NOTE-BODY " * 20
+    print(f"\n[measure] resource(text) 返回文本字符数={len(text)}")
+    assert len(text) < 250, f"上下文增量超预期: {len(text)} 字符"
+
+    await _run("n_rm", "mcp config remove shot")
