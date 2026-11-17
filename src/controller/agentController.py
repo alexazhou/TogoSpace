@@ -211,14 +211,23 @@ class AgentTasksHandler(BaseHandler):
             error_code="agent_not_found",
         )
 
+        # v3：未完成视图按「当前持棒人」过滤（执行中 + 审核中都能看到）；
+        # 包含已关闭任务的视图按 scope="self"（执行人或验收人）过滤，避免任务完成后从原执行人列表消失。
+        filter_kwargs = (
+            {"scope": "self"}
+            if include_closed
+            else {"mine": True}
+        )
+
         self.return_json(
             await taskService.list_tasks(
                 team_id=agent.team_id,
-                assignee_id=agent.id,
+                caller_id=agent.id,
                 open_only=not include_closed,
                 limit=limit,
                 # Agent 任务卡看「最近改过的在最上面」，与团队级列表的优先级优先区分开。
                 order=gtAgentTaskManager.ORDER_UPDATED_DESC,
+                **filter_kwargs,
             )
         )
 

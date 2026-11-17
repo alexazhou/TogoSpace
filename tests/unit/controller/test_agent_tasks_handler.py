@@ -52,7 +52,9 @@ async def test_agent_tasks_handler_requests_updated_desc_order(monkeypatch):
     await handler.get("3")
 
     assert received["order"] == gtAgentTaskManager.ORDER_UPDATED_DESC
-    assert received["assignee_id"] == 3
+    assert received["caller_id"] == 3
+    assert received["mine"] is True
+    assert "assignee_id" not in received
     assert received["team_id"] == 7
     assert captured == [{"success": True, "tasks": [], "count": 0, "total": 0, "limit": 30}]
 
@@ -75,6 +77,9 @@ async def test_agent_tasks_handler_keeps_include_closed_and_limit_semantics(monk
     await handler.get("3")
 
     assert received["open_only"] is False
+    assert received["caller_id"] == 3
+    assert received["scope"] == "self"
+    assert "mine" not in received
     assert received["limit"] == 100
 
 
