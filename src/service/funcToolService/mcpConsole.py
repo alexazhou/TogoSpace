@@ -44,6 +44,10 @@ from service import mcpSessionService as sessions
 
 from . import consoleParsing as cp
 from .consoleParsing import ConsoleError
+# `_save_binary` 是 #300 已交付的落盘入口（内部即 `_persist()`：超限/扩展名/magic 校验/
+# 写入/占位全在一处）。这里**只调用、不复制**：mcpContent.py 属已验收契约（#300），本单
+# 一个字节都不改，避免出现第二条落盘实现与第二套占位口径。
+from .mcpContent import _save_binary as _save_mcp_binary
 from .mcpContent import render_content_text
 
 # --------------------------------------------------------------------------- #
@@ -916,10 +920,21 @@ async def _cmd_resource(
     for item in contents:
         text = getattr(item, "text", None)
         if text is not None:
+            # 文本资源：原文照出，逐字节不变（B66 明确要求）。
             texts.append(str(text))
-        else:
-            blob = getattr(item, "blob", None)
-            texts.append(f"<binary {len(blob) if blob else 0} bytes>")
+            continue
+        blob = getattr(item, "blob", None)
+        if not blob:
+            # 既无 text 又无 blob：协议上不该出现，保持改前的占位口径。
+            texts.append("<binary 0 bytes>")
+            continue
+        # 二进制资源（B66）：落盘 + 一行事实型提示。
+        # 改前这里是 `<binary N bytes>` —— 只有长度、内容既看不见也拿不到，等于白读一次。
+        # 落盘复用 #300 的 `_save_binary`（内部 `_persist`）：同一 temp 目录、同一
+        # `mcp-{name}-{uuid8}.{ext}` 命名、同一 mimeType→扩展名映射，没有第二套实现。
+        # 提示只陈述事实（有文件、在哪、多大、什么类型），不写使用建议（Operator 23:29）。
+        mime_type = str(getattr(item, "mimeType", "") or "")
+        texts.append(_save_mcp_binary(str(blob), mime_type, ref.display, "资源"))
     body["text"] = "\n".join(texts)
     return body
 
