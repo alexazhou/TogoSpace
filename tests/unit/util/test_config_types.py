@@ -131,3 +131,34 @@ class TestGetSlotModelName:
     def test_unknown_slot(self):
         setting = _make_setting(default_models=DefaultModelSlots(primary="gpt-4o@openai"))
         assert setting.get_slot_model_name("unknown") == ""
+
+
+# ===== #305：模型的「上游默认开思考」元数据 =====
+
+
+class TestThinkingDefault:
+    """`thinking_default` 是模型级元数据：它把「这个模型上游默认就跑思考模式」
+    从代码里的硬编码名单搬到配置里，新增同类模型不必改代码。
+
+    缺省 `None` 表示「未声明」——此时退回代码里的兜底名单，现网语义不变。
+    """
+
+    def test_parsed_from_config(self):
+        model = LlmModelConfig(
+            name="deepseek-flash", protocol=LlmProtocol.OPENAI, thinking_default=True,
+        )
+        assert model.thinking_default is True
+
+    def test_defaults_to_none(self):
+        model = LlmModelConfig(name="gpt-4o", protocol=LlmProtocol.OPENAI)
+        assert model.thinking_default is None
+
+    def test_not_serialized_when_unset(self):
+        data = LlmModelConfig(name="gpt-4o", protocol=LlmProtocol.OPENAI).model_dump(mode="json")
+        assert "thinking_default" not in data
+
+    def test_serialized_when_declared(self):
+        model = LlmModelConfig(
+            name="deepseek-flash", protocol=LlmProtocol.OPENAI, thinking_default=True,
+        )
+        assert model.model_dump(mode="json")["thinking_default"] is True

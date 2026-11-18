@@ -503,3 +503,152 @@ def test_no_rules_triggered_when_no_conditions_match():
     assert next_request.tool_choice == "auto"
     assert next_request.messages == request.messages
     assert applied_rules == ()
+
+# ===== #305：上游默认开思考、但模型名不带推理标识（主模型 deepseek-flash）=====
+#
+# 背景：主模型与视觉默认模型都是 `deepseek-flash`（assets/config_template.json），
+# 上游在缺省参数下就跑在思考模式；但它的名字不含 r1 / reasoner / v4 / pro 等前缀，
+# 旧的「纯名单」判定会把它当非思考模型，于是两条护栏同时失效：
+#   ① agentTurnRunner 重试分支下发的 tool_choice="required" 原样上线
+#      ⇒ 400 `Thinking mode does not support this tool_choice`；
+#   ② FillMissingReasoningContentRule 不触发 ⇒ 历史 assistant tool_call 缺
+#      reasoning_content ⇒ 另一条 400。
+# 判据分两层：兜底名单要覆盖它；模型配置能显式声明，且配置优先于名单。
+
+_FLASH = "deepseek-flash"
+
+
+def _single_user_request(model: str, tool_choice=None, extra_params=None):
+    return llmApiUtil.OpenAIRequest(
+        model=model,
+        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        tool_choice=tool_choice,
+        extra_params={} if extra_params is None else extra_params,
+    )
+
+
+def test_deepseek_flash_is_recognized_as_thinking_model():
+    """主模型名必须在兜底名单里命中，否则下面两条护栏都会静默失效。"""
+    assert _model_in_list(_FLASH, _AUTO_ENABLE_THINKING_MODELS) is True
+
+
+def test_deepseek_flash_strips_required_tool_choice():
+    """主症状：deepseek-flash + `tool_choice="required"` + 未显式传 thinking 参数
+    ⇒ 必须剥掉 required（上游默认开思考，带 required 直接 400）。"""
+    next_request, applied_rules = apply_llm_request_rules(
+        _single_user_request(_FLASH, tool_choice="required")
+    )
+
+    assert next_request.tool_choice is None
+    assert "StripRequiredToolChoiceForReasoningRule" in applied_rules
+
+
+def test_deepseek_flash_fills_missing_reasoning_content():
+    """第二条 400 路径：同一模型也要补 `reasoning_content`。"""
+    request = llmApiUtil.OpenAIRequest(
+        model=_FLASH,
+        messages=[
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
+            _make_assistant_tool_call_msg(reasoning_content=None),
+        ],
+        extra_params={},
+    )
+
+    next_request, applied_rules = apply_llm_request_rules(request)
+
+    assert "FillMissingReasoningContentRule" in applied_rules
+    assistant_msgs = [m for m in next_request.messages if m.role == llmApiUtil.OpenaiApiRole.ASSISTANT]
+    assert assistant_msgs[0].reasoning_content == ""
+
+
+def test_thinking_default_true_covers_model_outside_name_list():
+    """承接配置变更：模型配置声明 `thinking_default: true` ⇒ 名单外的新模型也按思考模式
+    处理，不必回来改 `_AUTO_ENABLE_THINKING_MODELS`。"""
+    next_request, applied_rules = apply_llm_request_rules(
+        _single_user_request("vendor-brand-new-reasoner", tool_choice="required"),
+        thinking_default=True,
+    )
+
+    assert next_request.tool_choice is None
+    assert "StripRequiredToolChoiceForReasoningRule" in applied_rules
+
+
+def test_thinking_default_false_overrides_name_list():
+    """配置声明 `thinking_default: false` ⇒ 即使模型名命中兜底名单也不剥 required
+    （配置优先于名单，名单只是兜底默认）。"""
+    next_request, applied_rules = apply_llm_request_rules(
+        _single_user_request("deepseek-r1", tool_choice="required"),
+        thinking_default=False,
+    )
+
+    assert next_request.tool_choice == "required"
+    assert applied_rules == ()
+
+
+def test_thinking_default_none_keeps_existing_name_list_behavior():
+    """未声明（None）⇒ 与 #305 之前完全一致：名单命中就剥（不改变现网语义）。"""
+    next_request, _ = apply_llm_request_rules(
+        _single_user_request("deepseek-r1", tool_choice="required"),
+        thinking_default=None,
+    )
+
+    assert next_request.tool_choice is None
+
+
+def test_explicit_thinking_disabled_overrides_thinking_default_true():
+    """请求里显式 `thinking.type="disabled"` 优先于配置声明：用户显式选择最优先，
+    否则「明明关了思考却还被剥 required」会削弱强制工具能力。"""
+    next_request, applied_rules = apply_llm_request_rules(
+        _single_user_request(
+            _FLASH,
+            tool_choice="required",
+            extra_params={"thinking": {"type": "disabled"}},
+        ),
+        thinking_default=True,
+    )
+
+    assert next_request.tool_choice == "required"
+    assert applied_rules == ()
+
+
+def test_build_request_passes_model_config_thinking_default(monkeypatch):
+    """接缝判据：`_build_request` 必须把模型配置里的 `thinking_default` 交给规则链。
+    否则「配置里能声明」只是空话——读了但没接上，症状与没修一样。"""
+    from types import SimpleNamespace
+
+    from service.llmService import core
+
+    captured: dict = {}
+
+    def _fake_apply(request, thinking_default=None):
+        captured["model"] = request.model
+        captured["thinking_default"] = thinking_default
+        captured["tool_choice"] = request.tool_choice
+        return request, ()
+
+    monkeypatch.setattr(core, "apply_llm_request_rules", _fake_apply)
+    monkeypatch.setattr(
+        core.configUtil,
+        "get_app_config",
+        lambda: SimpleNamespace(
+            setting=SimpleNamespace(
+                context_config=SimpleNamespace(reserve_output_tokens=1024),
+            )
+        ),
+    )
+
+    ctx = SimpleNamespace(
+        system_prompt="sys", messages=[], tools=None,
+        tool_choice="required", prompt_cache=False,
+    )
+    model_config = SimpleNamespace(
+        name=_FLASH, input=[], temperature=None, extra_params={},
+        thinking_default=True,
+        context_config=SimpleNamespace(reserve_output_tokens=1024),
+    )
+
+    core._build_request(ctx=ctx, model_config=model_config)
+
+    assert captured["model"] == _FLASH
+    assert captured["thinking_default"] is True
+    assert captured["tool_choice"] == "required"
