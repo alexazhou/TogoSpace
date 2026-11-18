@@ -510,9 +510,18 @@ export interface LlmModelConfig {
   protocol: string;
   /** 支持的输入类型，如 ['text', 'image']。缺省为纯文本 ['text']。 */
   input?: string[] | null;
+  /** 该模型是否启用。后端缺省 `true`；模型编辑器不暴露此字段，保存时必须原样带回。 */
+  enabled?: boolean;
+  /** 采样温度。后端缺省 `null`（用服务商默认）；模型编辑器不暴露此字段，保存时必须原样带回。 */
+  temperature?: number | null;
   context_config: LlmContextConfig | null;
   extra_headers: Record<string, string> | null;
   extra_params: Record<string, unknown> | null;
+  /**
+   * 该模型在上游缺省参数下是否就跑在思考模式（只影响本地请求护栏，不发给上游）。
+   * `null`/缺省 = 未声明，后端退回已知模型名单。
+   */
+  thinking_default?: boolean | null;
 }
 
 export interface LlmProviderConfig {
