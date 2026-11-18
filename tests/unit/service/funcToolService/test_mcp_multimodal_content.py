@@ -363,3 +363,75 @@ def test_realistic_screenshot_context_increment(
     assert len(out) < 200, f"真实量级下上下文增量仍超预期: {len(out)} 字符"
     assert "[图片已保存: " in out
     assert "image/png" in out
+
+
+# ---------------------------------------------------------------------------
+# #308：`_BASE64_CHARS` 漏 `/`、`_dump_structure` 失败分支 fail-open
+# ---------------------------------------------------------------------------
+
+
+def _b64_with_slash(min_chars: int = 600) -> str:
+    """构造**含 `/` 的真实 base64**（标准字母表 `A-Za-z0-9+/=` 里最容易被漏掉的就是 `/`）。"""
+    raw = bytes(range(256)) * 8
+    while True:
+        data = base64.b64encode(raw).decode("ascii")
+        if "/" in data and len(data) >= min_chars:
+            return data
+        raw += bytes(range(256))
+
+
+def test_base64_with_slash_recognized_and_omitted():
+    """#308 修点 1：含 `/` 的真实 base64 必须被判为 base64 并省略。
+
+    改前：`_BASE64_CHARS` 少了 `/` ⇒ `set(sample) <= _BASE64_CHARS` 为 False
+    ⇒ 判成「不是 base64」⇒ 整块 base64 原样进上下文（正是这套机制要防的事）。
+    """
+    data = _b64_with_slash()
+    assert "/" in data and len(data) >= mcpContent._BASE64_MIN_CHARS
+    out = mcpContent.render_content_text([{"type": "future_kind", "data": data}])
+    _assert_no_base64(out)
+    assert str(len(data)) in out, "省略时至少要给出原长度，便于判断规模"
+
+
+def test_long_text_without_base64_alphabet_not_stripped():
+    """反方向格：补齐 `/` 之后，不得把「普通长文本」误判成 base64 而省略。"""
+    text = ("普通文本 with spaces/and 中文 " * 60)[:800]
+    assert len(text) >= mcpContent._BASE64_MIN_CHARS
+    out = mcpContent.render_content_text([{"type": "future_kind", "data": text}])
+    assert json.loads(out)["data"] == text, "非 base64 的长文本必须原样保留（不能过度省略）"
+
+
+class _Unserializable:
+    """`json.dumps` 会抛 `TypeError` 的对象；`str()` 仍会带出内容（模拟 fail-open 的泄漏源）。"""
+
+    def __init__(self, blob: str) -> None:
+        self.blob = blob
+
+    def __str__(self) -> str:
+        return f"_Unserializable({self.blob})"
+
+    __repr__ = __str__
+
+
+def test_dump_structure_failure_does_not_leak_binary():
+    """#308 修点 2：序列化失败分支不得回吐未经 `_strip_binary_fields` 的原对象。
+
+    改前 `except: return str(item)` ⇒ 大块二进制字段（这里放在不可序列化对象里，好让本用例
+    **只**依赖修点 2）会原样进上下文。路径走公开入口（未知 type ⇒ `_dump_structure`）。
+    """
+    blob = _b64_with_slash()
+    out = mcpContent.render_content_text(
+        [{"type": "future_kind", "meta": _Unserializable(blob)}]
+    )
+    _assert_no_base64(out)
+
+
+def test_dump_structure_failure_keeps_useful_keys():
+    """降级后仍要给出可用信息：键名与可序列化字段保留，不可序列化叶子只留类型占位。"""
+    out = mcpContent.render_content_text(
+        [{"type": "future_kind", "uri": "empty://1", "meta": _Unserializable("x")}]
+    )
+    payload = json.loads(out)
+    assert payload["type"] == "future_kind"
+    assert payload["uri"] == "empty://1"
+    assert "_Unserializable" in str(payload["meta"]), "不可序列化的叶子要能看出类型"

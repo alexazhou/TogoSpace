@@ -85,7 +85,7 @@ _TYPE_LABELS = {"image": "图片", "audio": "音频"}
 
 #: 文件名里允许出现的字符（工具名来自远端 server，必须清洗后才能进路径）。
 _SAFE_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
-_BASE64_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+=\r\n")
+_BASE64_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\r\n")
 #: 「看起来像 base64」的长度门槛：低于它更可能是普通文本，不做省略（避免误伤）。
 _BASE64_MIN_CHARS = 512
 
@@ -266,12 +266,31 @@ def _magic_ok(extension: str, raw: bytes) -> bool:
 
 
 def _dump_structure(item: Any) -> str:
-    """`resource` / 未知 type 的结构化兜底（base64 字段省略，不灌上下文）。"""
+    """`resource` / 未知 type 的结构化兜底（base64 字段省略，不灌上下文）。
+
+    序列化失败时**只降级、不回吐原始对象**：`str(item)` 会绕过 `_strip_binary_fields`，
+    把未处理的二进制（base64）原样带进上下文，等于 fail-open。这里改为对**已剥离二进制**
+    的 `payload` 再用 `default` 序列化一次，无法序列化的叶子只留类型名占位。
+    """
     payload = _strip_binary_fields(_jsonable(item))
     try:
         return json.dumps(payload, ensure_ascii=False)
     except (TypeError, ValueError):
-        return str(item)
+        try:
+            return json.dumps(payload, ensure_ascii=False, default=_unsupported_placeholder)
+        except (TypeError, ValueError):
+            # 二次失败（如循环引用）：内容一律不回吐，只报外层类型。
+            return f"<结构化内容无法序列化: {type(item).__name__}>"
+
+
+def _unsupported_placeholder(value: Any) -> str:
+    """`json.dumps` 的 `default` 兜底：**只描述类型，不调用 `str(value)`**。
+
+    理由：`str(value)` 可能带出该对象内部的原始二进制/大段文本，而 `payload` 里
+    「键名是 `blob`/`data`」的那类字段才被 `_strip_binary_fields` 处理过，对象内部字段没有。
+    宁可少给一个字段的值，也不让这套省略机制被一条异常路径绕过。
+    """
+    return f"<{type(value).__name__} 无法序列化，已省略>"
 
 
 def _jsonable(value: Any) -> Any:
