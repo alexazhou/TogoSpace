@@ -71,6 +71,10 @@ class ChatRoom:
     def current_turn_has_content(self, value: bool) -> None:
         self._scheduler.current_turn_has_content = value
 
+    def has_spoken_in_turn(self, agent_id: int) -> bool:
+        """本 agent 自上一次换人以来，是否在本房间写过消息（#307 判定源）。"""
+        return self._scheduler.has_spoken(agent_id)
+
     @property
     def messages(self) -> List[GtRoomMessage]:
         return self._store.messages
@@ -217,17 +221,23 @@ class ChatRoom:
         # 唯一写入路径：插入即分配 seq，无论 insert_immediately 与房间状态。
         await self._store.append_and_assign_seq(message, publish=True)
 
-        if state == RoomState.INIT:
-            return
-
+        next_agent_id = None
         # 调度推进不再区分 immediate / queued：两者走同一条 on_message。
         # - 房间 IDLE 时，on_message 会把状态切到 SCHEDULING 并返回下一位 AI
         #   ⇒ 普通消息和立即注入消息都能唤醒房间。
         # - 房间已在 SCHEDULING 且当前发言人是 AI 时，sender 是 OPERATOR，
         #   on_message 天然返回 None，不会打断当前 Turn。
-        if not update_turn_state or not self._agent_ids:
+        if state != RoomState.INIT and update_turn_state and self._agent_ids:
+            next_agent_id = self._scheduler.on_message(sender_id)
+
+        # #307：消息一旦落地就记「该 agent 本轮在本房间发过言」——**必须在 on_message 之后**，
+        # 因为 on_message 在「非 SCHEDULING / IDLE 唤醒」分支会清空本轮记录；否则此处会被它擦掉。
+        # finish_action 的判定读这条记录，而不是 `current_turn_has_content`（后者是「调度器当前
+        # turn 有没有内容」，房间不在该 agent 的 turn 上时会假 False，造成误报）。
+        self._scheduler.mark_spoken(sender_id)
+
+        if state == RoomState.INIT:
             return
-        next_agent_id = self._scheduler.on_message(sender_id)
         if next_agent_id is not None:
             await self._scheduler.persist_state()
             self._scheduler.publish_status(next_agent_id, need_scheduling=True)

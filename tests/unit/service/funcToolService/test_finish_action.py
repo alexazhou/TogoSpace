@@ -6,10 +6,17 @@ from service.roomService.core import ToolCallContext
 
 
 def _make_context(has_content: bool) -> ToolCallContext:
-    """构造一个模拟的 ToolCallContext。"""
+    """构造一个模拟的 ToolCallContext。
+
+    #307 起判定源是 `has_spoken_in_turn(agent_id)`（「这个 agent 在本房间发过言」），
+    不再是 `current_turn_has_content`（「调度器当前 turn 有内容」）——后者在房间已不在
+    该 agent 的 turn 上时是假 False。这两个 mock 属性都保持与 `has_content` 一致，
+    避免其它测试误读旧字段。
+    """
     room = MagicMock()
     room.name = "test_room"
     room.current_turn_has_content = has_content
+    room.has_spoken_in_turn = MagicMock(return_value=has_content)
     room.handle_finish_request = AsyncMock(return_value=True)
     return ToolCallContext(agent_id=1, team_id=1, chat_room=room)
 

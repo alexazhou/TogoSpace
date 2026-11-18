@@ -41,6 +41,12 @@ class RoomScheduler:
         self.current_turn_has_content: bool = False
         self._state: RoomState = RoomState.INIT
         self._last_speaker_id: int | None = None
+        # #307：自上一次换人以来，在本房间**写过消息**的 agent。
+        # 与 `current_turn_has_content` 的区别：后者是「调度器当前 turn 有没有内容」，
+        # 房间一旦不在该 agent 的 turn 上（IDLE 唤醒 / 人工停止 / 已推进到下一位），
+        # 它会被清零，而 agent 的消息其实已经落库 ⇒ finish_action 误报「未发言」。
+        # 判定「本 agent 本轮有没有发言」必须用这个集合，而不是那个布尔。
+        self._turn_speakers: set[int] = set()
 
     # ─── 外部可读属性 ──────────────────────────────────────
 
@@ -62,6 +68,7 @@ class RoomScheduler:
             self._current_speaker_index = None
         self._current_round_skipped_set = set()
         self.current_turn_has_content = False
+        self._turn_speakers.clear()
         self._last_speaker_id = None
 
     def _effective_max_rounds(self) -> int:
@@ -89,6 +96,7 @@ class RoomScheduler:
             self._round_count = 0
             self._current_round_skipped_set = set()
             self.current_turn_has_content = False
+            self._turn_speakers.clear()
             self._state = RoomState.SCHEDULING
             next_id = self._advance_to_first_dispatchable()
             if next_id is not None:
@@ -135,6 +143,7 @@ class RoomScheduler:
         if self._state != RoomState.SCHEDULING:
             return
         self.current_turn_has_content = False
+        self._turn_speakers.clear()
         self._current_speaker_index = None
         self._state = RoomState.IDLE
         logger.info("房间 %s 当前 turn 被人工停止，切回 IDLE 等待新消息唤醒", self._key)
@@ -149,6 +158,7 @@ class RoomScheduler:
             self._round_count = 0
             self._current_round_skipped_set = set()
             self.current_turn_has_content = False
+            self._turn_speakers.clear()
             self._state = RoomState.SCHEDULING
             self._current_speaker_index = None
             return self._advance_to_first_dispatchable()
@@ -172,6 +182,15 @@ class RoomScheduler:
         if self._current_speaker_index == 0:
             self._round_count += 1
         self.current_turn_has_content = False
+        self._turn_speakers.clear()
+
+    def mark_spoken(self, agent_id: int) -> None:
+        """记录「该 agent 本轮在本房间写过消息」（#307 的判定源）。"""
+        self._turn_speakers.add(agent_id)
+
+    def has_spoken(self, agent_id: int) -> bool:
+        """该 agent 自上一次换人以来，是否在本房间写过消息。"""
+        return agent_id in self._turn_speakers
 
     def _should_skip(self) -> bool:
         """当前发言人是否应被自动跳过并继续推进。
