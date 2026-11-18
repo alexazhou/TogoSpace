@@ -598,7 +598,7 @@
       "providerLabel": "服务商",
       "extraHeaders": "额外请求头",
       "extraParams": "额外参数（JSON 透传）",
-      "extraParamsPlaceholder": "{\n  \"reasoning_effort\": \"high\"\n}",
+      "extraParamsPlaceholder": "{'{'}\n  \"reasoning_effort\": \"high\"\n{'}'}",
       "extraParamsHint": "传入 JSON 对象后会追加到 LiteLLM 请求中；不要填写 model、messages、api_key 等系统字段。",
       "extraParamsInvalid": "额外参数必须是合法 JSON",
       "extraParamsObjectOnly": "额外参数必须是 JSON 对象",
