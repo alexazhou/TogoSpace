@@ -919,7 +919,11 @@ def test_split_multiple_image_attachments_one_message():
 # ─── _split_tool_result_messages：supports_vision 三分支（V26 视觉 Fallback） ──────────
 
 def test_split_vision_support_image_normal():
-    """supports_vision=True：图片原样生成 image_url（V25 回归）。"""
+    """supports_vision=True：图片原样生成 image_url（V25 回归）。
+
+    #306 起：USER + 附件只产出一条消息（改前是 USER 文本 + 追加 USER 图片两条，
+    同一张图发两遍），因此这里断言单条消息、图只出现一次。
+    """
     from service.llmService.core import _split_tool_result_messages
 
     sent = _split_tool_result_messages(
@@ -928,11 +932,10 @@ def test_split_vision_support_image_normal():
         ])],
         supports_vision=True,
     )
-    assert [m.role for m in sent] == [
-        llmApiUtil.OpenaiApiRole.USER,
-        llmApiUtil.OpenaiApiRole.USER,
-    ]
-    assert _image_url(sent[1]) == "data:image/png;base64,QQ=="
+    assert [m.role for m in sent] == [llmApiUtil.OpenaiApiRole.USER]
+    assert _count_image_url_blocks(sent) == 1
+    assert sent[0].content[0].type == "text" and sent[0].content[0].text == "看图"
+    assert _image_url(sent[0]) == "data:image/png;base64,QQ=="
 
 
 def test_split_vision_not_support_with_recognition():
@@ -956,7 +959,11 @@ def test_split_vision_not_support_with_recognition():
 
 
 def test_split_vision_not_support_no_recognition():
-    """supports_vision=False + 无 recognition：插入 VISION_UNAVAILABLE_PROMPT 说明文本。"""
+    """supports_vision=False + 无 recognition：插入 VISION_UNAVAILABLE_PROMPT 说明文本。
+
+    #306 起：USER + 附件只产出一条消息；原文本与降级说明都在这一条里，且**没有任何 image_url**
+    （改前 USER 角色会被 `to_openai_message()` 无条件塞进 image_url，能力门控在 USER 上失效）。
+    """
     from service.llmService.core import VISION_UNAVAILABLE_PROMPT, _split_tool_result_messages
 
     user_msg = AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="看图", attachments=[
@@ -964,15 +971,27 @@ def test_split_vision_not_support_no_recognition():
     ])
     sent = _split_tool_result_messages([user_msg], supports_vision=False)
 
-    assert [m.role for m in sent] == [
-        llmApiUtil.OpenaiApiRole.USER,
-        llmApiUtil.OpenaiApiRole.USER,
-    ]
-    user = sent[1]
-    assert user.content[0].type == "text"
-    assert user.content[0].text == VISION_UNAVAILABLE_PROMPT
+    assert [m.role for m in sent] == [llmApiUtil.OpenaiApiRole.USER]
+    user = sent[0]
+    assert user.content[0].type == "text" and user.content[0].text == "看图"
+    assert user.content[1].type == "text"
+    assert user.content[1].text == VISION_UNAVAILABLE_PROMPT
     image_blocks = [b for b in user.content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)]
     assert len(image_blocks) == 0, "不支持视觉时不应生成 image_url block"
+
+
+def test_split_vision_not_support_user_image_with_recognition():
+    """supports_vision=False + USER 附件有 recognition：用识别文本替代图片，无 image_url。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    user_msg = AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="看图", attachments=[
+        MessageAttachment(kind="image", mime_type="image/png", data="QQ==", recognition="图中是一只猫"),
+    ])
+    sent = _split_tool_result_messages([user_msg], supports_vision=False)
+
+    assert [m.role for m in sent] == [llmApiUtil.OpenaiApiRole.USER]
+    assert _count_image_url_blocks(sent) == 0
+    assert sent[0].content[1].text == "图中是一只猫"
 
 
 def test_split_vision_not_support_tool_caption_without_recognition():
@@ -1014,3 +1033,78 @@ def test_split_vision_not_support_multi_images():
     for m in sent:
         image_blocks = [b for b in m.content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)]
         assert len(image_blocks) == 0, "不支持视觉时不应生成 image_url block"
+
+
+# ─── #306：同一张图在最终请求里只能出现一次 image_url ──────────
+
+def _count_image_url_blocks(messages: list[llmApiUtil.OpenAIMessage]) -> int:
+    """统计最终发送消息里 `image_url` block 的总出现次数（量具：只数块，不数字符串）。"""
+    total = 0
+    for m in messages:
+        if isinstance(m.content, list):
+            total += sum(1 for b in m.content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock))
+    return total
+
+
+def _image_urls(messages: list[llmApiUtil.OpenAIMessage]) -> list[str]:
+    """按出现顺序取出所有 image_url 的 url，便于断言「同一个附件只发一次」。"""
+    return [
+        b.image_url["url"]
+        for m in messages
+        if isinstance(m.content, list)
+        for b in m.content
+        if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)
+    ]
+
+
+def test_user_message_with_image_attachment_sends_image_url_once():
+    """USER + 图片附件（视觉识别请求的形态）：最终请求体里同一张图只出现一次。
+
+    改前：`to_openai_message()` 已把图注入 content，core 又追加一条 USER 图片消息 ⇒ 2 次。
+    """
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        AgentMessage(
+            role=llmApiUtil.OpenaiApiRole.USER,
+            content="这张图里是什么？",
+            attachments=[MessageAttachment(kind="image", mime_type="image/png", data="QQ==")],
+        ),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    assert _count_image_url_blocks(sent) == 1, "同一张图被发了多遍"
+    assert _image_urls(sent) == ["data:image/png;base64,QQ=="]
+    # 图片只能出现在 user 角色（OpenAI 规范）
+    for m in sent:
+        if isinstance(m.content, list) and any(
+            isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock) for b in m.content
+        ):
+            assert m.role == llmApiUtil.OpenaiApiRole.USER
+    # 原文本没丢
+    texts = [
+        b.text
+        for m in sent
+        if isinstance(m.content, list)
+        for b in m.content
+        if isinstance(b, llmApiUtil.OpenAITextContentBlock)
+    ]
+    assert "这张图里是什么？" in texts
+
+
+def test_tool_image_result_still_sends_image_url_once():
+    """TOOL + 图片附件：「TOOL 文本 + USER 图片」拆两条的既有设计不变，图只出现一次。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        _make_assistant_with_tool_calls("A"),
+        AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ==", "file_path": "/tmp/a.png"}),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    assert _count_image_url_blocks(sent) == 1
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
