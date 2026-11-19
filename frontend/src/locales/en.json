@@ -598,7 +598,7 @@
       "providerLabel": "Provider",
       "extraHeaders": "Extra Headers",
       "extraParams": "Extra Params (JSON passthrough)",
-      "extraParamsPlaceholder": "{\n  \"reasoning_effort\": \"high\"\n}",
+      "extraParamsPlaceholder": "{'{'}\n  \"reasoning_effort\": \"high\"\n{'}'}",
       "extraParamsHint": "This JSON object will be merged into the LiteLLM request. Do not include system fields such as model, messages, or api_key.",
       "extraParamsInvalid": "Extra Params must be valid JSON",
       "extraParamsObjectOnly": "Extra Params must be a JSON object",
