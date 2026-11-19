@@ -170,6 +170,42 @@ def _usage_to_log_json(usage: llmApiUtil.OpenAIUsage | None) -> str:
     return json.dumps(usage.model_dump(mode="json", exclude_none=False), ensure_ascii=False, default=str)
 
 
+def _user_message_with_attachments(
+    msg: AgentMessage,
+    *,
+    supports_vision: bool,
+) -> llmApiUtil.OpenAIMessage:
+    """USER 消息 + 附件的唯一转换口：文本块与图片块**一次成文**。
+
+    为什么需要它（#306）：`AgentMessage.to_openai_message()` 对 USER 角色也会把附件注入成
+    `image_url` block，若再走「为附件追加一条 USER 图片消息」的分支，同一张图的 base64 就会
+    在最终请求体里出现两遍（视觉识别请求 `visionFallback.recognize` 每次都命中）。
+    因此 USER 角色的附件在这里处理一次，调用方不再追加。
+
+    `supports_vision=False` 时图片不进请求体：有 `recognition` 用识别结果，否则用
+    `VISION_UNAVAILABLE_PROMPT` 说明文本（沿用 TOOL 图片的既有降级语义）。
+    """
+    blocks: list[llmApiUtil.OpenAIContentBlock] = []
+    if msg.content:
+        blocks.append(llmApiUtil.OpenAITextContentBlock(text=msg.content))
+    for att in (msg.attachments or []):
+        if att.kind == "image":
+            if supports_vision:
+                if att.caption:
+                    blocks.append(llmApiUtil.OpenAITextContentBlock(text=att.caption))
+                url = att.url or f"data:{att.mime_type or 'image/png'};base64,{att.data}"
+                blocks.append(llmApiUtil.OpenAIImageUrlContentBlock(image_url={"url": url}))
+            else:
+                text = att.recognition if (att.recognition and att.recognition.strip()) else VISION_UNAVAILABLE_PROMPT
+                blocks.append(llmApiUtil.OpenAITextContentBlock(text=text))
+        elif att.kind == "text" and att.caption:
+            blocks.append(llmApiUtil.OpenAITextContentBlock(text=att.caption))
+    return llmApiUtil.OpenAIMessage(
+        role=llmApiUtil.OpenaiApiRole.USER,
+        content=blocks or None,
+    )
+
+
 def _split_tool_result_messages(
     messages: list[AgentMessage],
     supports_vision: bool = True,
@@ -177,7 +213,8 @@ def _split_tool_result_messages(
     """把 AgentMessage 列表转成发送用 OpenAIMessage 列表。
 
     两步：
-    1. 直接转换：每条消息转 OpenAIMessage；带图片附件的 TOOL 消息拆出 USER 图片消息（紧跟其后）。
+    1. 直接转换：每条消息转 OpenAIMessage；带图片附件的 TOOL 消息拆出 USER 图片消息（紧跟其后）；
+       USER 消息的附件由 `_user_message_with_attachments` 一次成文（不追加第二条，避免重复发图）。
     2. 调整顺序：工具结果段（连续的 TOOL / USER）内稳定分区，TOOL 在前、USER（含图片）在后，
        避免多 tool_call 时图片 USER 消息插在工具结果中间（OpenAI 规范：tool 消息紧随
        assistant(tool_calls)，image_url 仅允许在 user 角色）。
@@ -192,6 +229,10 @@ def _split_tool_result_messages(
     # 1) 直接转换
     converted: list[llmApiUtil.OpenAIMessage] = []
     for msg in messages:
+        if msg.role == llmApiUtil.OpenaiApiRole.USER and msg.attachments:
+            # USER 的附件在这里处理完就结束，不再走下面的追加分支（否则同一附件发两遍，见 #306）
+            converted.append(_user_message_with_attachments(msg, supports_vision=supports_vision))
+            continue
         converted.append(msg.to_openai_message())
         for att in (msg.attachments or []):
             if att.kind == "image":
