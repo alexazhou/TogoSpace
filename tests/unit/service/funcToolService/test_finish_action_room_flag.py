@@ -129,22 +129,90 @@ async def test_other_agent_message_does_not_count_as_mine() -> None:
 
 
 @pytest.mark.asyncio
-async def test_round_turn_semantics_unchanged() -> None:
-    """针对性回归：发言轮次语义（`_should_skip`）本次**不许**被改动。
+async def test_same_agent_not_scheduled_twice_in_a_row() -> None:
+    """轮次语义：同一人不得连续发言（钉 `_should_skip` 的「与上一位发言人相同则跳过」）。
 
-    - 同一人不得连续发言（A 结束后下一位不是 A）；
-    - OPERATOR 始终跳过（不会被排上发言位）。
+    为什么用**只有 1 个 AI** 的房间 `[1]`：A 结束后，下一个候选绕回到 **A 自己**，只有「同人跳过」这条
+    规则才会让房间停下来。规则被破坏时 A 会被重新排上。
+    刻意**不放 OPERATOR**：否则「OPERATOR 跳过」那条规则也会影响本场景，M8 与 M9 就分不开了
+    （#311 要求的「只红自己」）。
+
+    **不读 `get_current_turn_agent_id()`**：`_stop_if_done()` 会把 `current_speaker_index` 置 None，
+    而该方法在 None 时退化成 `agent_ids[0]`（= 1），与「A 又被排上」的读数**巧合相同**——
+    旧用例正是被这个退化值骗过（#311 缺口 1）。这里改成断言 `state` 与 `current_speaker_index`。
+    """
+    room = _chat_room([1])
+    room._scheduler.activate()
+    assert room.state == RoomState.SCHEDULING
+    assert room._scheduler.get_current_turn_agent_id() == 1
+
+    await room.add_message(1, "唯一一个 AI 发言")
+    assert await room.handle_finish_request(1) is True
+
+    assert room.state == RoomState.IDLE, "下一候选是 A 自己 ⇒ 必须被跳过 ⇒ 全员跳过 ⇒ 停"
+    assert room._scheduler.current_speaker_index is None
+
+
+@pytest.mark.asyncio
+async def test_operator_never_scheduled_as_speaker() -> None:
+    """轮次语义：OPERATOR 始终跳过（钉 `_should_skip` 的第一条规则）。
+
+    用 `[1, 2, OP]` 群聊，两人各发言一次后轮次会绕到 OPERATOR：
+    - OPERATOR 被正确跳过 ⇒ 下一位是 1，且 `state == SCHEDULING`（不是退化值巧合）；
+    - OPERATOR 未被跳过 ⇒ 下一位会是 OP，断言立刻红。
     """
     room = _chat_room([1, 2, OP], RoomType.GROUP)
-    scheduler = room._scheduler
-    scheduler.activate()
-    assert scheduler.get_current_turn_agent_id() == 1
+    room._scheduler.activate()
+    assert room.state == RoomState.SCHEDULING
+    assert room._scheduler.get_current_turn_agent_id() == 1
 
+    await room.add_message(1, "A 发言")
     assert await room.handle_finish_request(1) is True
-    assert scheduler.get_current_turn_agent_id() == 2, "同一人不得连续发言"
+    assert room.state == RoomState.SCHEDULING
+    assert room._scheduler.get_current_turn_agent_id() == 2, "轮到下一位 AI（不是 A）"
 
+    await room.add_message(2, "B 发言")
     assert await room.handle_finish_request(2) is True
-    assert scheduler.get_current_turn_agent_id() == 1, "OPERATOR 必须被跳过（回到 A）"
+    assert room.state == RoomState.SCHEDULING, "还有可调度成员，不该停"
+    assert room._scheduler.get_current_turn_agent_id() != OP, "OPERATOR 不得被排上发言位"
+    assert room._scheduler.get_current_turn_agent_id() == 1
+
+
+@pytest.mark.asyncio
+async def test_previous_speaker_must_speak_again_after_turn_advance() -> None:
+    """换人后上一轮的发言记录必须失效（钉 `_go_next_agent` 里的 `_turn_speakers.clear()`）。
+
+    漏清 ⇒ 上一轮发言人跨轮记忆 ⇒ 他在新一轮**没发言也能通过** `finish_action` ——
+    方向与 #307 修的误报相反（假绿放行），比误报更危险。
+    """
+    room = _chat_room([1, 2])
+    room._scheduler.activate()
+    await room.add_message(1, "A 在第一轮发言")
+    assert room.has_spoken_in_turn(1) is True
+    assert await room.handle_finish_request(1) is True
+    assert room._scheduler.get_current_turn_agent_id() == 2, "已换到 B"
+
+    assert room.has_spoken_in_turn(1) is False, "换人后 A 上一轮的发言记录必须失效"
+    result = await finish_action(_context=_ctx(1, room))
+    assert result["success"] is False, "A 在新一轮没发言，不能被上一轮的记录放行"
+    assert "未在收到消息的房间" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_previous_speaker_must_speak_again_after_cancel() -> None:
+    """人工停止后同样要清（钉 `cancel_current_turn` 里的 `_turn_speakers.clear()`）。"""
+    room = _chat_room([1, OP])
+    room._scheduler.activate()
+    await room.add_message(1, "A 在被停止前发言")
+    assert room.has_spoken_in_turn(1) is True
+
+    room._scheduler.cancel_current_turn()
+    assert room.state == RoomState.IDLE
+
+    assert room.has_spoken_in_turn(1) is False, "人工停止后本轮记录必须失效"
+    result = await finish_action(_context=_ctx(1, room))
+    assert result["success"] is False
+    assert "未在收到消息的房间" in result["message"]
 
 
 @pytest.mark.asyncio
