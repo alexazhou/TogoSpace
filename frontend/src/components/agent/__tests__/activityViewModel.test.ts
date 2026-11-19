@@ -204,4 +204,32 @@ describe('#213 ③ view-model：9 种 Activity 类型的字段映射', () => {
     expect(host.execEnvBadge).toBe('');
     expect(host.execEnvBadgeTitle).toBe('');
   });
+
+  it('超长 tool_result / tool_arguments / stdout 在进 DOM 前截断', () => {
+    const bigBase64 = 'A'.repeat(10_000);
+    const imgView = view({
+      activity_type: 'tool_call',
+      detail: 'read_image',
+      metadata: {
+        tool_name: 'read_image',
+        tool_arguments: { path: 'x'.repeat(1_200) },
+        tool_result: { base64: bigBase64 },
+      },
+    });
+    expect(imgView.toolResult.length).toBeLessThan(2_100);
+    expect(imgView.toolResult).toContain('已截断');
+    expect(imgView.toolArguments.length).toBeLessThanOrEqual(501);
+    expect(imgView.toolArguments.endsWith('…')).toBe(true);
+
+    const bashView = view({
+      activity_type: 'tool_call',
+      detail: 'execute_bash',
+      metadata: {
+        tool_name: 'execute_bash',
+        tool_result: { stdout: 'B'.repeat(5_000) },
+      },
+    });
+    expect(bashView.stdout.length).toBeLessThan(2_100);
+    expect(bashView.stdout).toContain('已截断');
+  });
 });

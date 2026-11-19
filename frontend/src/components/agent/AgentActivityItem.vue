@@ -507,7 +507,7 @@ const activityView = computed(() => buildActivityView({
 
 .agent-activity-item__summary {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   color: var(--text-description);
   white-space: nowrap;
   overflow: hidden;
@@ -525,7 +525,7 @@ const activityView = computed(() => buildActivityView({
 }
 
 .agent-activity-item__tool-args {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;

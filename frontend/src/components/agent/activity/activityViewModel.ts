@@ -72,6 +72,17 @@ export type ActivityView = {
   toolResult: string;
 };
 
+export const TOOL_RESULT_PREVIEW_MAX_CHARS = 2000;
+export const TOOL_ARGUMENTS_PREVIEW_MAX_CHARS = 500;
+
+export function truncatePreview(value: string, maxChars: number, singleLine = false): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  const head = value.slice(0, maxChars);
+  return singleLine ? `${head}…` : `${head}\n…（已截断，共 ${value.length} 字符）`;
+}
+
 export function readTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -396,6 +407,10 @@ export function getExecuteBashExitCode(activity: AgentActivity): string {
 }
 
 export function getActivityToolResult(t: Translate, activity: AgentActivity, toolName: string): string {
+  return truncatePreview(resolveRawToolResult(t, activity, toolName), TOOL_RESULT_PREVIEW_MAX_CHARS);
+}
+
+function resolveRawToolResult(t: Translate, activity: AgentActivity, toolName: string): string {
   if (toolName === 'execute_bash') {
     return [getExecuteBashStdout(activity), getExecuteBashStderr(activity)].filter(Boolean).join('\n');
   }
@@ -616,7 +631,11 @@ export function buildActivityView(input: ActivityViewInput): ActivityView {
   const isFinishTurnActivity = activity.activity_type === 'tool_call' && currentToolName === 'finish_action';
   const currentTitle = activityTitle(t, activity, currentToolName);
   const currentToolCommand = getActivityToolCommand(activity);
-  const currentToolArguments = getActivityToolArguments(t, activity, currentToolName);
+  const currentToolArguments = truncatePreview(
+    getActivityToolArguments(t, activity, currentToolName),
+    TOOL_ARGUMENTS_PREVIEW_MAX_CHARS,
+    true,
+  );
   const currentModel = getActivityModel(activity);
   const currentMetadataToolName = getActivityToolName(activity);
   const currentDisplayToolName = displayToolName(t, currentToolName);
@@ -635,8 +654,12 @@ export function buildActivityView(input: ActivityViewInput): ActivityView {
     : '';
   const hasExecuteBashDetails = executeBashResult
     && (Boolean(currentExecuteBashDescription) || Boolean(currentToolCommand));
-  const currentStdout = executeBashResult ? getExecuteBashStdout(activity) : '';
-  const currentStderr = executeBashResult ? getExecuteBashStderr(activity) : '';
+  const currentStdout = executeBashResult
+    ? truncatePreview(getExecuteBashStdout(activity), TOOL_RESULT_PREVIEW_MAX_CHARS)
+    : '';
+  const currentStderr = executeBashResult
+    ? truncatePreview(getExecuteBashStderr(activity), TOOL_RESULT_PREVIEW_MAX_CHARS)
+    : '';
   const currentExitCode = executeBashResult ? getExecuteBashExitCode(activity) : '';
   const currentToolResult = getActivityToolResult(t, activity, currentToolName);
   const currentErrorMessage = readTrimmedString(activity.error_message);
