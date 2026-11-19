@@ -224,3 +224,116 @@ async def test_confirm_no_need_talk_still_rejected_after_speaking() -> None:
     result = await finish_action(_context=_ctx(1, room), confirm_no_need_talk=True)
     assert result["success"] is False
     assert "已经通过 send_chat_msg 发过消息" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# #313：剩下 3 处 `_turn_speakers.clear()` 的判据
+#（38 逐个删掉后本文件仍 9 passed 全绿 ⇒ 三处此前全无判据）
+# ---------------------------------------------------------------------------
+
+
+async def _idle_room_with_stale_record() -> ChatRoom:
+    """构造「房间已 IDLE，但上一轮某 agent 的发言记录还留着」的状态。
+
+    序列（全部走真实路径）：
+    - `activate` → 发言人 1；`finish(1)` 未发言 ⇒ 记入本轮跳过集，推进到 2；
+    - `post(1)`：1 在别人的发言位插话 ⇒ 记录 `{1}`（这是「自上次换人以来 1 说过话」）；
+    - `finish(2)` 未发言 ⇒ 本轮所有 AI 均已跳过 ⇒ `_stop_if_done()` 直接进 IDLE
+      （**这条路径不经过 `_go_next_agent`**，所以 `_turn_speakers` 仍是 `{1}`）。
+    """
+    room = _chat_room([1, 2])
+    room._scheduler.activate()
+    assert room._scheduler.get_current_turn_agent_id() == 1
+    # 1 未发言就结束 ⇒ 记入本轮跳过集，推进到 2
+    assert await room.handle_finish_request(1) is True
+    assert room._scheduler.get_current_turn_agent_id() == 2
+    # 1 在 2 的发言位插话 ⇒ 记录 {1}（「自上次换人以来 1 说过话」）
+    await room.add_message(1, "在 2 的发言位插话")
+    assert room.has_spoken_in_turn(1) is True
+    # 2 也未发言 ⇒ 本轮所有 AI 均已跳过 ⇒ `_stop_if_done()` 直接进 IDLE
+    assert await room.handle_finish_request(2) is True
+    return room
+
+
+@pytest.mark.asyncio
+async def test_set_current_speaker_index_clears_stale_record() -> None:
+    """钉 `set_current_speaker_index` 里的 `_turn_speakers.clear()`
+
+    入口是真实方法 `rebuild_state_from_history`（房间运行时态重建 / 恢复持久化发言位都会走它）：
+    重建后上一轮的发言记录必须失效，否则重建完就能白嫖通过 `finish_action`。
+    """
+    room = _chat_room([1, 2])
+    room._scheduler.activate()
+    await room.add_message(1, "重建前发过言")
+    assert room.has_spoken_in_turn(1) is True
+
+    room.rebuild_state_from_history(0)
+    assert room.has_spoken_in_turn(1) is False, "重建发言位后上一轮记录必须失效"
+
+    result = await finish_action(_context=_ctx(1, room))
+    assert result["success"] is False
+    assert "未在收到消息的房间" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_wake_from_idle_clears_stale_record() -> None:
+    """钉 `on_message` 非 SCHEDULING 分支（IDLE 唤醒）里的 `_turn_speakers.clear()`
+
+    房间 IDLE 且残留 `{1}` 时，被一条新消息唤醒 ⇒ 新一轮开始，1 的旧记录必须失效。
+    漏清 ⇒ 1 在新一轮**一句没说也能通过 `finish_action`**（假绿放行）。
+    """
+    room = await _idle_room_with_stale_record()
+    assert room.state == RoomState.IDLE
+    assert room.has_spoken_in_turn(1) is True, "前提：此刻 1 的记录还在（IDLE 停止路径不清集合）"
+
+    # 房间被 2 的新消息唤醒（非 SCHEDULING 分支）
+    await room.add_message(2, "唤醒房间的新消息")
+    assert room.state == RoomState.SCHEDULING
+    assert room.has_spoken_in_turn(2) is True, "唤醒者本人算发言"
+    assert room.has_spoken_in_turn(1) is False, "唤醒后上一轮的记录必须失效"
+
+    result = await finish_action(_context=_ctx(1, room))
+    assert result["success"] is False, "1 在新一轮没发言，不能被唤醒前的记录放行"
+    assert "未在收到消息的房间" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_finish_on_idle_room_clears_stale_record() -> None:
+    """钉 `handle_finish_request` 的「IDLE 唤醒」分支里的 `_turn_speakers.clear()`
+
+    该分支注释写着「IDLE 唤醒：重置轮次状态后直接调度」—— 它意味着「新一轮开始」，
+    所以进入后上一轮的记录必须失效；漏清 ⇒ 同一条记录能被用来**连续放行两次** `finish_action`。
+
+    为什么必须用 3 人房间且「插话者不在 0 号位」：`_advance_to_first_dispatchable()` 若把 0 号位
+    当作上一位发言人跳过，会在 `_go_next_agent()` 里顺手清掉集合，那处的 clear 就变成**不可观测**的
+    —— 我实测过：2 人房间下删掉这处 clear，用例仍全绿（等于没钉住）。这里让 2 号成员（index=1）插话，
+    进入 IDLE 分支后 0 号位（1）是可直接调度的 ⇒ 推进**不会**调用 `_go_next_agent`
+    ⇒ 只有这处 clear 能生效，判据才有牙。
+    """
+    room = _chat_room([1, 2, 3], RoomType.GROUP)
+    room._scheduler.activate()
+    assert room._scheduler.get_current_turn_agent_id() == 1
+
+    # 1、2 依次未发言就结束（各自记入本轮跳过集），轮次推进到 3
+    assert await room.handle_finish_request(1) is True
+    assert room._scheduler.get_current_turn_agent_id() == 2
+    assert await room.handle_finish_request(2) is True
+    assert room._scheduler.get_current_turn_agent_id() == 3
+
+    # 2 在 3 的发言位插话 ⇒ 记录 {2}（index=1，不是 0 号位）
+    await room.add_message(2, "2 在 3 的发言位插话")
+    assert room.has_spoken_in_turn(2) is True
+
+    # 3 也未发言就结束 ⇒ 本轮全员跳过 ⇒ `_stop_if_done()` 在推进前直接进 IDLE
+    #（这条路径**不经过** `_go_next_agent`，所以 2 的旧记录还在）
+    assert await room.handle_finish_request(3) is True
+    assert room.state == RoomState.IDLE
+    assert room.has_spoken_in_turn(2) is True, "前提：IDLE 停止路径不清集合，2 的旧记录仍在"
+
+    first = await finish_action(_context=_ctx(2, room))
+    assert first["success"] is True, "刚发过言 ⇒ 这一次应当放行（#307 的语义）"
+    assert room.has_spoken_in_turn(2) is False, "进了「IDLE 唤醒」分支 ⇒ 新一轮开始，旧记录必须失效"
+
+    second = await finish_action(_context=_ctx(2, room))
+    assert second["success"] is False, "同一条记录不能被用来连续放行两次"
+    assert "未在收到消息的房间" in second["message"]
