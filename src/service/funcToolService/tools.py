@@ -2097,13 +2097,18 @@ finish 失败，你负责验收的任务【{agent_task.title}】依然为 review
             logger.warning("结束行动失败，聊天室上下文未设置")
             return {"success": False, "message": "当前没有激活的房间上下文。"}
 
-        if confirm_no_need_talk and _context.chat_room.current_turn_has_content:
+        # 判定源：**本 agent 本轮在本房间发过言**（不是「调度器当前 turn 有内容」）。
+        # 后者在「房间已不在该 agent 的 turn 上」（人工停止 / IDLE 唤醒 / 已推进到下一位）
+        # 时会是假 False，于是消息明明已落库却报「未发言」——#307。
+        has_spoken = _context.chat_room.has_spoken_in_turn(_context.agent_id)
+
+        if confirm_no_need_talk and has_spoken:
             return {
                 "success": False,
                 "message": "finish_action 失败：你本轮已经通过 send_chat_msg 发过消息了，不需要设置 confirm_no_need_talk=true。请直接调用 finish_action（不带任何参数）结束行动。",
             }
 
-        if not confirm_no_need_talk and not _context.chat_room.current_turn_has_content:
+        if not confirm_no_need_talk and not has_spoken:
             room_name = _context.chat_room.name
             return {
                 "success": False,
