@@ -523,3 +523,4 @@
 - [2026-11-11 Token 数字增长放大动画](./2026-11-11-token-growth-animation/token_growth_animation_design.md) · [Demo](./2026-11-11-token-growth-animation/demo/token-growth-demo.html)
 - [2026-11-14 Agent 任务系统 v3（多级审核工作流）- 产品文档](./2026-11-14-agent-task-system-v3/step1_product.md) · [技术设计](./2026-11-14-agent-task-system-v3/step2_technical.md)
 - [2026-11-16 mcporter 风格 console CLI 与 Agent session（无名称、多 server keepalive，CLI 已确认，待实施）](./2026-11-16-mcp-native-session/step1_product.md) · [技术文档](./2026-11-16-mcp-native-session/step2_technical.md) · [开发任务表](./2026-11-16-mcp-native-session/step3_tasks.md)
+- [2026-11-20 Console CLI 重构：工具元数据收归 Tool（@tool 声明，console 只做派生；设计已确认，待实施）](./2026-11-20-console-tool-metadata/console_tool_metadata_design.md)
