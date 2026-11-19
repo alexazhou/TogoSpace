@@ -121,4 +121,18 @@ describe('ModelEditorDialog（#305：保存时保留表单未暴露的模型字�
     expect('thinking_default' in saved).toBe(false);
     expect('temperature' in saved).toBe(false);
   });
+
+  it('保留任意未声明的字段（防「点名补几个字段」的条件式补丁）', async () => {
+    // 这条判据的存在理由是 #305 验收时被变异戳出来的缺口：①②③ 只钉住三个**已知**字段，
+    // 一个「点名补 enabled / temperature / thinking_default」的条件式补丁能让它们全绿——
+    // 那种实现一旦上游再加一个字段，同样会丢，但 CI 不会响。
+    //
+    // 所以这里用一个**既不在表单里、也不在前端类型声明里**的字段（`foo_custom`）来钉
+    // 「通用保全」本身：只有「先把编辑前的整个对象展开、再用表单字段覆盖」这种实现能保留它。
+    // 反过来说，**不要**把 `foo_custom` 加进 `types/index.ts` 的 `LlmModelConfig`——
+    // 那是为了让判据通过而改被测对象，等于把判据变成自证。
+    const wrapper = mountDialog();
+    const saved = await editAndSave(wrapper, makeModel({ foo_custom: 42 }));
+    expect(saved.foo_custom).toBe(42);
+  });
 });
