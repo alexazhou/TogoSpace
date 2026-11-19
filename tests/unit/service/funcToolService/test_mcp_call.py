@@ -35,7 +35,7 @@ from service.agentService import toolRegistry
 from service.funcToolService import core as func_tool_core
 from service.funcToolService import mcpTool
 from service.funcToolService.consoleTool import console
-from service.funcToolService.tools import mcp_call
+from service.funcToolService.tools import openapi_call as mcp_call
 from util import llmApiUtil
 
 
@@ -161,71 +161,34 @@ def test_build_argv_list_uses_source_flag_json_and_list():
     assert argv == ["--spec", "./openapi.json", "--json", "--list"]
 
 
-def test_build_argv_mcp_protocol_selects_flag_and_transport():
-    """kind=mcp 时 protocol 决定来源开关与显式传输：stdio ⇒ --mcp-stdio；
-    sse / streamable_http ⇒ --mcp + --transport。显式 transport 是全局选项，
-    必须落在工具名之前。"""
-    sse = mcpTool.build_argv(
-        kind="mcp", protocol="sse", target="http://127.0.0.1:9/sse",
-        action="list", tool=None, args=None, extra=None,
-    )
-    assert sse == ["--mcp", "http://127.0.0.1:9/sse", "--transport", "sse", "--json", "--list"]
-
-    streamable = mcpTool.build_argv(
-        kind="mcp", protocol="streamable_http", target="http://127.0.0.1:9/mcp",
-        action="list", tool=None, args=None, extra=None,
-    )
-    assert streamable == ["--mcp", "http://127.0.0.1:9/mcp", "--transport", "streamable", "--json", "--list"]
-
-    stdio = mcpTool.build_argv(
-        kind="mcp", protocol="stdio", target="npx -y some-server",
-        action="list", tool=None, args=None, extra=None,
-    )
-    assert stdio == ["--mcp-stdio", "npx -y some-server", "--json", "--list"]
-
-
-def test_build_argv_mcp_without_protocol_keeps_engine_auto():
-    """注册表未命中的直连旧用法：protocol 缺省 ⇒ 无 --transport，引擎 auto
-    （先试 streamable、失败回落 SSE）。"""
-    argv = mcpTool.build_argv(
-        kind="mcp", target="http://127.0.0.1:9/mcp", action="list", tool=None, args=None, extra=None
-    )
-    assert argv == ["--mcp", "http://127.0.0.1:9/mcp", "--json", "--list"]
-
-
-def test_build_argv_mcp_rejects_unknown_protocol():
+def test_build_argv_rejects_mcp_kind():
+    """`mcpTool` 不再支持 `kind='mcp'`（MCP 服务统一走原生 SDK `mcp` 命令）。"""
     with pytest.raises(mcpTool.McpCallError) as excinfo:
         mcpTool.build_argv(
-            kind="mcp", protocol="websocket", target="https://x",
+            kind="mcp", target="http://127.0.0.1:9/mcp",
             action="list", tool=None, args=None, extra=None,
         )
-    assert excinfo.value.error_code == "mcp_invalid_protocol"
+    assert excinfo.value.error_code == "mcp_invalid_kind"
 
 
 def test_build_argv_call_maps_args_to_kebab_flags_and_booleans():
-    """`args` 的键按 mcp2cli 的口径 kebab-case；bool 走 `--flag` / `--no-flag`。
-
-    同时钉住**段序**：`extra` 是全局开关，必须落在工具名之前（上游
-    `_split_at_subcommand` 在工具名处切段，工具段里的全局开关会让子 parser `exit(2)`）。
-    """
+    """`args` 的键按 mcp2cli 的口径 kebab-case；bool 走 `--flag` / `--no-flag`。"""
     argv = mcpTool.build_argv(
-        kind="mcp",
-        target="http://127.0.0.1:9/mcp",
+        kind="graphql",
+        target="http://127.0.0.1:9/graphql",
         action="call",
         tool="read-file",
         args={"file_path": "/tmp/a.txt", "verbose": True, "dry_run": False, "n": 3},
-        extra={"head": 5, "transport": "sse"},
+        extra={"head": 5},
     )
-    assert argv[:7] == [
-        "--mcp",
-        "http://127.0.0.1:9/mcp",
+    assert argv[:5] == [
+        "--graphql",
+        "http://127.0.0.1:9/graphql",
         "--json",
         "--head",
         "5",
-        "--transport",
-        "sse",
     ], argv
-    assert argv[7:9] == ["read-file", "--file-path"], argv
+    assert argv[5:7] == ["read-file", "--file-path"], argv
     assert "/tmp/a.txt" in argv
     assert "--verbose" in argv and "--no-dry-run" in argv
     assert "--n" in argv and "3" in argv
@@ -503,61 +466,41 @@ async def test_call_after_timeout_still_succeeds(tmp_path: Path, dynamic_server)
 
 @pytest.mark.asyncio
 async def test_console_mcp_ls_forwards_to_mcp_call(tmp_path: Path):
-    """`mcp ls <target>` 的转发目标（#224 改写登记）。
-
-    #224 前本用例断言 `mcp ls` 直接转发 `mcp_call`（`{"target": …}`）。#224 按设计稿
-    §3.3 把 `mcp ls` 换成 `list_mcp_servers`（DIRECT，宽签名：0~1 段位置参数都要到达
-    工具），有参分支由该工具**委托** `mcp_call(action="list")`——旧用法一字不改，只是
-    多了一跳纯转发。改写后本用例钉新契约；委托关系由
-    `test_console_mcp_ls_with_target_delegates_to_mcp_call`（test_mcp_registry_console）
-    钉住。
-    """
+    """`openapi list <target>` 转发到 `list_mcp_servers` 并携带 `kind='openapi'`。"""
     spec_path = _write_spec(tmp_path, "http://127.0.0.1:9")
 
     with pytest.raises(ForwardToolCall) as excinfo:
-        await console(f"mcp ls {spec_path}")
+        await console(f"openapi list {spec_path}")
 
     forward = excinfo.value
     assert forward.tool_name == "list_mcp_servers"
-    assert forward.tool_args == {"name_or_target": spec_path}
+    assert forward.tool_args["name_or_target"] == spec_path
+    assert forward.tool_args["kind"] == "openapi"
 
 
 @pytest.mark.asyncio
 async def test_console_mcp_call_forwards_action_and_options(tmp_path: Path):
-    """既有 OpenAPI 直传的转发形态（A 类不变量，Q1=A）。
-
-    #291 起入口写法多了一项**显式 `--kind openapi|graphql`**（产品 §5：直传路径必须
-    说清来源；旧「省略 --kind 靠工具默认 openapi」的写法随 T0 移除）。转发目标工具
-    与参数语义不变：`action` 由命令语义补成 `call`，`target`/`tool` 原样透传。
-    """
+    """`openapi call <spec> --tool <name>` 转发到 `openapi_call`。"""
     spec_path = _write_spec(tmp_path, "http://127.0.0.1:9")
 
     with pytest.raises(ForwardToolCall) as excinfo:
-        await console(f"mcp call --kind openapi {spec_path} --tool get-thing")
+        await console(f"openapi call {spec_path} --tool get-thing")
 
     forward = excinfo.value
-    assert forward.tool_name == "mcp_call"
-    assert forward.tool_args == {
-        "action": "call",
-        "tool": "get-thing",
-        "target": spec_path,
-        "kind": "openapi",
-    }
+    assert forward.tool_name == "openapi_call"
+    assert forward.tool_args["action"] == "call"
+    assert forward.tool_args["tool"] == "get-thing"
+    assert forward.tool_args["target"] == spec_path
 
 
 @pytest.mark.asyncio
 async def test_console_mcp_call_without_kind_on_path_is_removed(tmp_path: Path):
-    """反向判据：`mcp call <spec> --tool x`（省略 --kind）不再被当成 OpenAPI 直传。
-
-    旧写法靠工具默认 `kind=openapi` 生效；新语法里 `<server>.<tool>` 是 MCP 原生定位，
-    路径形态的 target 一律指路到 `--kind openapi|graphql`（`mcp_legacy_syntax_removed`），
-    **不**静默按默认 kind 跑掉一次调用。
-    """
+    """反向判据：`mcp call <spec>` 不再处理 OpenAPI，而是指路 `openapi call` / `graphql call`。"""
     spec_path = _write_spec(tmp_path, "http://127.0.0.1:9")
-    body = await console(f"mcp call {spec_path} --tool get-thing")
+    body = await console(f"mcp call {spec_path}")
     assert body["success"] is False, body
     assert body["error_code"] == "mcp_legacy_syntax_removed", body
-    assert "--kind openapi" in body["message"], body["message"]
+    assert "openapi call" in body["message"], body["message"]
 
 
 @pytest.mark.asyncio
@@ -580,7 +523,7 @@ async def test_console_second_hop_executes_mcp_call(served_dir):
     ctx = toolRegistry.ToolCallContext(agent_id=1, team_id=1, chat_room=None)
     tool_call = llmApiUtil.OpenAIToolCall(
         id="tc_mcp_hop",
-        function={"name": "console", "arguments": json.dumps({"command": f"mcp ls {spec_path}"})},
+        function={"name": "console", "arguments": json.dumps({"command": f"openapi list {spec_path}"})},
     )
 
     result = await registry.execute_tool_call(tool_call, context=ctx)
@@ -599,7 +542,7 @@ async def test_console_second_hop_executes_mcp_call(served_dir):
         function={
             "name": "console",
             "arguments": json.dumps({
-                "command": f"mcp call --kind openapi {spec_path} --tool get-item-by-id --args '{{\"item_id\": \"7\"}}'"
+                "command": f"openapi call {spec_path} --tool get-item-by-id --args '{{\"item_id\": \"7\"}}'"
             }),
         },
     )

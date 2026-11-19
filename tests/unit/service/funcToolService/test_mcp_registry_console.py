@@ -35,8 +35,9 @@ from service.funcToolService import mcpTool
 from service.funcToolService.consoleTool import console
 from service.funcToolService.tools import (
     delete_mcp_server,
+    graphql_call,
     list_mcp_servers,
-    mcp_call,
+    openapi_call,
     save_mcp_server,
 )
 from service.ormService import AioSqliteDatabase
@@ -287,28 +288,26 @@ async def test_mcp_config_list_forwards_to_list_tool():
 
 @pytest.mark.asyncio
 async def test_mcp_ls_no_arg_and_one_arg_both_reach_the_tool():
-    """§3.3 + Q1=A：`mcp ls` 的 0 段与 1 段位置参数都要到达**同一个**工具（A 类不变）。"""
+    """`openapi list` 的 0 段与 1 段位置参数都要到达 `list_mcp_servers`。"""
     with pytest.raises(ForwardToolCall) as empty:
-        await console("mcp ls")
+        await console("openapi list")
     assert empty.value.tool_name == "list_mcp_servers"
     assert empty.value.tool_args == {}
 
     with pytest.raises(ForwardToolCall) as one:
-        await console("mcp ls ./openapi.json")
+        await console("openapi list ./openapi.json")
     assert one.value.tool_name == "list_mcp_servers"
-    assert one.value.tool_args == {"name_or_target": "./openapi.json"}
+    assert one.value.tool_args["name_or_target"] == "./openapi.json"
+    assert one.value.tool_args["kind"] == "openapi"
 
 
 @pytest.mark.asyncio
 async def test_mcp_target_option_and_positional_conflict_keeps_code():
-    """§3.6-5 不变量：位置参数与 `--target` 同时给 ⇒ `ambiguous_input_source`。
-
-    原触发走通用解析器（同一参数两处来源）；现由子树解析器显式判，**码不变**。
-    """
-    body = await _console_error("mcp call ctx7 --target https://x")
+    """位置参数与 `--target` 同时给 ⇒ `ambiguous_input_source`。"""
+    body = await _console_error("openapi call ctx7 --target https://x")
     assert body["error_code"] == "ambiguous_input_source", body
 
-    body = await _console_error("mcp ls ctx7 --target https://x")
+    body = await _console_error("openapi list ctx7 --target https://x")
     assert body["error_code"] == "ambiguous_input_source", body
 
 
@@ -327,12 +326,12 @@ async def test_help_mentions_registry_semantics(config_help_text):
     summary = await console("mcp --help")
     text = str(summary.get("text") or "")
     assert "mcp config list" in text, text
-    assert "mcp ls" in text, text
+    assert "openapi" in text and "graphql" in text, text
 
 
 @pytest.fixture
 def config_help_text():
-    from service.funcToolService import mcpConsole as mcp_console
+    from service.funcToolService import consoleMcp as mcp_console
 
     return str(mcp_console.MCP_HELP_DETAIL["config"])
 
@@ -432,29 +431,23 @@ async def test_resolved_from_registry_always_present(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("given_kind", "expect_ok", "expect_error"),
+    ("call_fn", "expect_ok", "expect_error"),
     [
-        (None, True, None),          # 缺省 ⇒ 放行，kind 取注册值（mcp）
-        ("mcp", True, None),         # 相同 ⇒ 放行（第三支的反向覆盖）
-        ("graphql", False, "mcp_name_kind_conflict"),
-        ("openapi", True, None),     # 签名默认值与缺省不可区分，视为缺省（§3.6 已承认）
+        (graphql_call, True, None),
+        (openapi_call, False, "mcp_name_kind_conflict"),
     ],
 )
 async def test_kind_conflict_three_branches(
-    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, given_kind, expect_ok, expect_error
+    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli, call_fn, expect_ok, expect_error
 ):
-    """kind 三分支（1331 批准口径）：命中取注册值；不同 ⇒ conflict；相同/缺省 ⇒ 放行。"""
-    await _register_server(kind="mcp")
-    kwargs = {}
-    if given_kind is not None:
-        kwargs["kind"] = given_kind
-    from service.funcToolService.tools import mcp_call
+    """kind 匹配与冲突（1331 批准口径）：匹配放行，不匹配报 mcp_name_kind_conflict。"""
+    await _register_server(kind="graphql", target="https://gql.example.com")
 
-    body = await mcp_call(target="ctx7", action="list", tool=None, **kwargs, _context=leader_ctx)
+    body = await call_fn(target="ctx7", action="list", tool=None, _context=leader_ctx)
     if expect_ok:
         assert body["success"] is True, body
         assert body["resolved_from_registry"] is True
-        assert stub_mcp2cli.runtime_argvs[-1][0] == "--mcp"  # kind 取了注册值
+        assert stub_mcp2cli.runtime_argvs[-1][0] == "--graphql"
     else:
         assert body["success"] is False
         assert body["error_code"] == expect_error
@@ -463,11 +456,11 @@ async def test_kind_conflict_three_branches(
 
 @pytest.mark.asyncio
 async def test_ls_and_call_share_one_resolve_name(mcp_db, leader_ctx, loaded_tools, stub_mcp2cli):
-    """C3：`mcp ls <name>` 与 `mcp call` 必须复用同一条 resolve_name（不许第二套）。"""
+    """C3：`list_mcp_servers` 与 `openapi_call` 必须复用同一条 resolve_name（不许第二套）。"""
     await _register_server(kind="graphql", target="https://gql.example.com")
 
-    listed = await list_mcp_servers(name_or_target="ctx7", kind="mcp", _context=leader_ctx)
-    assert listed["success"] is False
+    listed = await openapi_call(target="ctx7", action="list", _context=leader_ctx)
+    assert listed["success"] is False, listed
     assert listed["error_code"] == "mcp_name_kind_conflict", listed
 
     called = await list_mcp_servers(name_or_target="ctx7", _context=leader_ctx)
@@ -659,7 +652,7 @@ async def test_basic_agent_can_list_registry(mcp_db, loaded_tools):
     ctx = toolRegistry.ToolCallContext(agent_id=2, team_id=1, chat_room=None)
     call = llmApiUtil.OpenAIToolCall(
         id="tc_basic_ls",
-        function={"name": "console", "arguments": json.dumps({"command": "mcp ls"})},
+        function={"name": "console", "arguments": json.dumps({"command": "mcp list --output json"})},
     )
     result = await registry.execute_tool_call(call, context=ctx)
     body = result.result
@@ -682,7 +675,8 @@ async def test_exception_log_exit_masks_secret(
     可转义）与异常 warning 行（打码=最终形态）。
     """
     await _register_server(
-        target="https://mcp.example.com/mcp",
+        kind="openapi",
+        target="https://api.example.com/openapi.json",
         config={"headers": {"Authorization": _SECRET, "X-Api-Key": _TRICKY}},
     )
 
@@ -691,7 +685,7 @@ async def test_exception_log_exit_masks_secret(
 
     monkeypatch.setattr(stub_mcp2cli, "_main_impl", _explode)
     with caplog.at_level(logging.INFO, logger="service.funcToolService.mcpTool"):
-        body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+        body = await openapi_call(target="ctx7", action="list", _context=leader_ctx)
     assert body["success"] is False, body
     assert body["error_code"] == "mcp2cli_error", body
 
@@ -718,13 +712,12 @@ async def test_plain_value_reaches_dispatch_and_never_logs(
 ):
     """#277 日志判据：明文值送达分派 argv；日志与返回体里 0 命中（出口打码）。"""
     await _register_server(
-        target="https://mcp.example.com/mcp",
+        kind="openapi",
+        target="https://api.example.com/openapi.json",
         config={"headers": {"Authorization": _SECRET}},
     )
     with caplog.at_level(logging.INFO, logger="service.funcToolService.mcpTool"):
-        from service.funcToolService.tools import mcp_call
-
-        body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+        body = await openapi_call(target="ctx7", action="list", _context=leader_ctx)
     assert body["success"] is True, body
 
     returned_argv = body["argv"]
@@ -745,44 +738,19 @@ async def test_plain_value_reaches_dispatch_and_never_logs(
 
 
 @pytest.mark.asyncio
-async def test_stdio_env_value_verbatim_to_dispatch(
-    mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
-):
-    """env 层（mcp + stdio）：#277 起值是明文，直接注入子进程环境变量，无解析链。"""
-    await _register_server(
-        kind="mcp",
-        protocol="stdio",
-        target="npx -y some-server",
-        config={"env": {"API_KEY": _SECRET}},
-    )
-    from service.funcToolService.tools import mcp_call
-
-    body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
-    assert body["success"] is True, body
-    returned = json.dumps(body["argv"])
-    assert _SECRET not in returned, "返回体 argv 不得含明文值"
-    assert "--env" in returned
-
-    dispatch = stub_mcp2cli.runtime_argvs[-1]
-    value = dispatch[dispatch.index("--env") + 1]
-    assert value == f"API_KEY={_SECRET}", "分派 argv 必须收到真实明文值"
-
-
-@pytest.mark.asyncio
 async def test_registry_without_config_changes_nothing(
     mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
 ):
     """硬条件 ③ 旁证：零凭证条目不带任何凭证段，extra 通道照旧。"""
-    await _register_server()
-    from service.funcToolService.tools import mcp_call
+    await _register_server(kind="graphql", target="https://gql.example.com/graphql")
 
-    body = await mcp_call(
-        target="ctx7", action="list", extra={"transport": "sse"}, _context=leader_ctx
+    body = await graphql_call(
+        target="ctx7", action="list", extra={"head": 5}, _context=leader_ctx
     )
     assert body["success"] is True, body
     argv = stub_mcp2cli.runtime_argvs[-1]
     assert "--auth-header" not in argv and "--env" not in argv
-    assert "transport" in json.dumps(argv)
+    assert "--head" in argv
     assert "--auth-header" not in json.dumps(body["argv"])
 
 
@@ -793,8 +761,8 @@ async def test_registry_without_config_changes_nothing(
 
 def test_build_argv_config_segments_before_tool_name():
     argv = mcpTool.build_argv(
-        kind="mcp",
-        target="https://x",
+        kind="openapi",
+        target="https://x/openapi.json",
         action="call",
         tool="my-tool",
         args={"a": "1"},
@@ -804,7 +772,7 @@ def test_build_argv_config_segments_before_tool_name():
     # 全局段（含凭证）必须排在工具名之前（上游 _split_at_subcommand 语义）。
     assert argv.index("--auth-header") < argv.index("my-tool")
     assert argv == [
-        "--mcp", "https://x", "--json",
+        "--spec", "https://x/openapi.json", "--json",
         "--auth-header", f"Authorization:{_SECRET}",
         "my-tool", "--a", "1",
     ]
@@ -813,7 +781,7 @@ def test_build_argv_config_segments_before_tool_name():
 def test_mask_deep_only_touches_secret_values():
     """#277 打码只对**精确明文值**做子串替换：形似但不同的串不受误伤。"""
     argv = [
-        "--mcp", f"https://x?ref={_SECRET[:4]}-other", "--json",
+        "--spec", f"https://x?ref={_SECRET[:4]}-other", "--json",
         "--auth-header", f"Authorization:{_SECRET}",
         "--list",
     ]
@@ -832,19 +800,14 @@ def test_mask_deep_only_touches_secret_values():
 async def test_disabled_server_call_reports_mcp_server_disabled(
     mcp_db, leader_ctx, loaded_tools, stub_mcp2cli
 ):
-    """禁用后 `mcp call` 必须报 `mcp_server_disabled`，且不发起真实调用。
+    """禁用后 `openapi_call` 必须报 `mcp_server_disabled`，且不发起真实调用。"""
+    from service.funcToolService.tools import set_mcp_server_enabled
 
-    打回补判据：`tools.mcp_call` 的 `if not entry.enable:` 拦截段此前无任何测试
-    断言钉住（全仓 grep 仅 1 处注释）。M 变异（删拦截段）⇒ 本用例红：调用照常
-    分派、返回 stub 结果、error_code 缺失。
-    """
-    from service.funcToolService.tools import mcp_call, set_mcp_server_enabled
-
-    await _register_server(kind="mcp")
+    await _register_server(kind="openapi", target="https://api.example.com/openapi.json")
     disabled = await set_mcp_server_enabled(name="ctx7", enable=False, _context=leader_ctx)
     assert disabled["success"] is True, disabled
 
-    body = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    body = await openapi_call(target="ctx7", action="list", _context=leader_ctx)
     assert body["success"] is False, body
     assert body["error_code"] == "mcp_server_disabled", body
     assert body["resolved_from_registry"] is True
@@ -853,7 +816,7 @@ async def test_disabled_server_call_reports_mcp_server_disabled(
 
     # 重新启用后同一入口恢复可用（拦截是 enable 态的函数，不是一次性的）。
     await set_mcp_server_enabled(name="ctx7", enable=True, _context=leader_ctx)
-    revived = await mcp_call(target="ctx7", action="list", _context=leader_ctx)
+    revived = await openapi_call(target="ctx7", action="list", _context=leader_ctx)
     assert revived["success"] is True, revived
     assert stub_mcp2cli.runtime_argvs, "重新启用后必须恢复分派"
 
@@ -896,7 +859,7 @@ async def test_disabled_entry_ls_body_says_enable_false(
     registry = _build_registry()
     call = llmApiUtil.OpenAIToolCall(
         id="tc_console_ls_two_states",
-        function={"name": "console", "arguments": json.dumps({"command": "mcp ls"})},
+        function={"name": "console", "arguments": json.dumps({"command": "mcp list --output json"})},
     )
     result = await registry.execute_tool_call(call, context=leader_ctx)
     payload = result.result if hasattr(result, "result") else result

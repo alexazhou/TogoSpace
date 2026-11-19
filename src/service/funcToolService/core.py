@@ -13,7 +13,8 @@ from service import serviceUtil
 from util import llmApiUtil
 from service.roomService import ToolCallContext
 from .consoleCommands import COMMAND_SPECS, ENV_KEEP_LEGACY_TOOLS, LEGACY_CONVERGED_TOOLS
-from .mcpConsole import FORWARD_TOOL_NAMES as MCP_CONSOLE_FORWARD_TOOL_NAMES
+from .consoleMcp import FORWARD_TOOL_NAMES as MCP_CONSOLE_FORWARD_TOOL_NAMES
+from .consoleSpec import FORWARD_TOOL_NAMES as SPEC_CONSOLE_FORWARD_TOOL_NAMES
 from .toolArgsValidation import validate_tool_args
 from toolResult import error_result, invalid_json_args
 from .consoleTool import console, console_triggers_self_interrupt
@@ -41,8 +42,9 @@ from .tools import (
     list_tasks,
     load_skill,
     delete_mcp_server,
+    graphql_call,
     list_mcp_servers,
-    mcp_call,
+    openapi_call,
     set_mcp_server_enabled,
     memory_create,
     memory_list,
@@ -122,11 +124,20 @@ def resolve_effective_visibility(name: str, declared: ToolVisibility) -> ToolVis
 #: 于是子树转发它们的第 2 跳被判「工具不支持通过 console 调用」（实测红线）。
 _CONSOLE_FORWARD_TARGETS: frozenset[str] = frozenset(
     spec.legacy_tool for spec in COMMAND_SPECS if spec.legacy_tool
-) | MCP_CONSOLE_FORWARD_TOOL_NAMES
+) | MCP_CONSOLE_FORWARD_TOOL_NAMES | SPEC_CONSOLE_FORWARD_TOOL_NAMES
+
+#: 显式可见性覆盖：openapi_call / graphql_call 只作为 console `openapi`/`graphql` 的
+#: 第 2 跳转发靶子存在，不暴露给模型面板，也不允许模型第 1 跳直调。
+_EXPLICIT_VISIBILITY: dict[str, ToolVisibility] = {
+    "openapi_call": ToolVisibility.CONSOLE_ONLY,
+    "graphql_call": ToolVisibility.CONSOLE_ONLY,
+}
 
 
 def _declared_visibility(name: str) -> ToolVisibility:
-    """静态基准：console 会转发的工具 = BOTH，其余 = TOOL_ONLY。"""
+    """静态基准：显式覆盖优先，其次 console 会转发的工具 = BOTH，其余 = TOOL_ONLY。"""
+    if name in _EXPLICIT_VISIBILITY:
+        return _EXPLICIT_VISIBILITY[name]
     return ToolVisibility.BOTH if name in _CONSOLE_FORWARD_TARGETS else ToolVisibility.TOOL_ONLY
 
 
@@ -136,8 +147,9 @@ def load_func_tools() -> dict[str, FuncTool]:
         "get_time": get_time,
         "web_search": web_search,
         "webfetch": webfetch,
-        # mcp2cli 接入（#202）：任意外部 MCP / OpenAPI / GraphQL 服务的一条统一入口。
-        "mcp_call": mcp_call,
+        # OpenAPI / GraphQL（mcp2cli）：仅作为 console `openapi` / `graphql` 的内部转发靶子（CONSOLE_ONLY）。
+        "openapi_call": openapi_call,
+        "graphql_call": graphql_call,
         # MCP 注册表（#224）：登记/删除/列举 + `mcp call` 的别名解析落点。
         # console 会转发这三个工具 ⇒ `_declared_visibility` 推成 BOTH（设计稿 §3.7
         # 接受模型同时直调；BASIC 直调会被 ADMIN 类目在 enabled 处以 admin_denied 拒）。

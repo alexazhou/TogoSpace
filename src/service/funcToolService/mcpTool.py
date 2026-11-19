@@ -101,28 +101,10 @@ logger = logging.getLogger(__name__)
 #: 串行化「替换进程级 sys.stdout/stderr」的那一段（见模块 docstring「并发约束」）。
 _STDOUT_LOCK = threading.Lock()
 
-#: 允许的来源类型 → mcp2cli 的全局开关。
-#: `mcp_stdio` 对应 `--mcp-stdio`：Operator 2026-11-13 02:11 明确「不要禁用」，
-#: 所以这里和其它来源一样放行（本单不做任何白名单/禁用逻辑）。
+#: 允许的来源类型 → mcp2cli 的全局开关（仅 openapi / graphql；MCP 服务走原生 SDK）。
 _SOURCE_FLAGS: dict[str, str] = {
     "openapi": "--spec",
-    "mcp": "--mcp",
     "graphql": "--graphql",
-}
-
-#: kind=mcp 时按 protocol 决定来源开关与显式传输（Operator 2026-11-17 两字段拆分）。
-#: - stdio：走 `--mcp-stdio` 起本地子进程（引擎 `stdio_client`），无 --transport；
-#: - sse / streamable_http：走 `--mcp` 并显式 `--transport sse` / `streamable`——
-#:   该开关是 mcp2cli 主 parser 的全局选项，必须落在工具名之前；auto（不显式给）
-#:   是「先试 streamable、失败回落 SSE」，保留给**注册表未命中**的直连旧用法。
-_MCP_PROTOCOL_FLAGS: dict[str, str] = {
-    "stdio": "--mcp-stdio",
-    "sse": "--mcp",
-    "streamable_http": "--mcp",
-}
-_MCP_PROTOCOL_TRANSPORT: dict[str, str] = {
-    "sse": "sse",
-    "streamable_http": "streamable",
 }
 
 #: 回给模型的输出上限（字符）。超了截断并置 `truncated=True`。
@@ -226,30 +208,19 @@ def build_argv(
     日志、返回体、异常文案在输出前把凭证值替换为 `***`（`_mask_deep`）——
     旧的「先放引用、日志之后再解析」保护已随 #277 删除。
     """
-    if kind == "mcp" and protocol is not None:
-        flag = _MCP_PROTOCOL_FLAGS.get(protocol)
-        if flag is None:
-            raise McpCallError(
-                "mcp_invalid_protocol",
-                f"protocol 只支持 {' / '.join(_MCP_PROTOCOL_FLAGS)}，收到 {protocol!r}。",
-            )
-    else:
-        flag = _SOURCE_FLAGS.get(kind)
-        if flag is None:
-            raise McpCallError(
-                "mcp_invalid_kind",
-                f"kind 只支持 {' / '.join(_SOURCE_FLAGS)}，收到 {kind!r}。",
-            )
+    flag = _SOURCE_FLAGS.get(kind)
+    if flag is None:
+        raise McpCallError(
+            "mcp_invalid_kind",
+            f"kind 只支持 {' / '.join(_SOURCE_FLAGS)}，收到 {kind!r}（MCP 服务请走 console `mcp` 命令）。",
+        )
     if not target or not str(target).strip():
-        raise McpCallError("mcp_invalid_target", "target 不能为空（填 spec 路径 / MCP URL / GraphQL URL）。")
+        raise McpCallError("mcp_invalid_target", "target 不能为空（填 spec 路径或 GraphQL URL）。")
 
     normalized = (action or "list").strip().lower()
     # `--json` 属于全局段，必须排在工具名之前（理由同 extra）。固定带上它是因为
     # 只有 JSON 才能被本层解析成 `result`；它的代价见 `_SHADOWED_BY_JSON`。
-    argv: list[str] = [flag, str(target)]
-    if kind == "mcp" and protocol in _MCP_PROTOCOL_TRANSPORT:
-        argv.extend(["--transport", _MCP_PROTOCOL_TRANSPORT[protocol]])
-    argv.append("--json")
+    argv: list[str] = [flag, str(target), "--json"]
 
     # extra：全局开关，必须落在工具名之前（见 docstring）。
     known = _global_option_names()

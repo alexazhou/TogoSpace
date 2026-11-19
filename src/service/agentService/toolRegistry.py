@@ -24,8 +24,9 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "get_time": ToolCategory.BASIC,
     "web_search": ToolCategory.READ,
     "webfetch": ToolCategory.READ,
-    # mcp2cli 接入（#202）：会真去调外部 API（可能有副作用），归执行类。
-    "mcp_call": ToolCategory.EXECUTE,
+    # OpenAPI / GraphQL（mcp2cli，经 console `openapi`/`graphql` 转发）：归执行类。
+    "openapi_call": ToolCategory.EXECUTE,
+    "graphql_call": ToolCategory.EXECUTE,
     # MCP 注册表（#224→#273，#277 权限放宽）：写入类（save/delete/enable）归 WRITE——
     # Operator 20:21/20:22 明确「写入不再要求管理员权限」，普通成员即可 add/rm/enable。
     # list 只读归 BASIC（与 get_room_info 同层，否则没任何权限的 Agent 连看都看不到）。

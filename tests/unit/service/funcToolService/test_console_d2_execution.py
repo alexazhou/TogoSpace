@@ -34,19 +34,20 @@ from exception import ForwardToolCall
 from service.agentService import toolRegistry
 from service.funcToolService import consoleCommands as cc
 from service.funcToolService import core as func_tool_core
-from service.funcToolService import mcpConsole as mcp_console
+from service.funcToolService import consoleMcp as mcp_console
+from service.funcToolService import consoleSpec as spec_console
 from util import llmApiUtil
 
 
 #: 去重后的**全部**转发目标（含 #187 新接进来的 task 三工具、#203 的 container note）。
 #:
-#: #291 起 console 的转发面有两个来源：① 通用命令表的 `legacy_tool`；② `mcp` 子树的
-#: `mcpConsole.FORWARD_TOOL_NAMES`（它不走 spec 机制，T0 删掉 6 条 mcp spec 后仍然转发
-#: 那 5 个工具）。判据必须按「console 真实会转发谁」取值，否则漏掉一半。
+#: #291 起 console 的转发面有多个来源：① 通用命令表的 `legacy_tool`；② `mcpConsole.FORWARD_TOOL_NAMES`；
+#: ③ `specConsole.FORWARD_TOOL_NAMES`。
 FORWARD_TARGETS: tuple[str, ...] = tuple(
     sorted(
         {s.legacy_tool for s in cc.COMMAND_SPECS if s.legacy_tool}
         | set(mcp_console.FORWARD_TOOL_NAMES)
+        | set(spec_console.FORWARD_TOOL_NAMES)
     )
 )
 #: 全部带转发目标的命令 key（参数化用，与 COMMAND_SPECS 同源，不手抄）。
@@ -56,12 +57,11 @@ CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
     t for t in FORWARD_TARGETS if t in cc.LEGACY_CONVERGED_TOOLS
 )
 #: **基准可见性**就是 `CONSOLE_ONLY` 的转发目标（与 D2 开关无关）。
-#:
-#: `update_container_note`（#203）是第一批：容器工具组不在 `_func_tools` 里，
-#: `_declared_visibility` 对它不生效，基准可见性由
-#: `funcToolService.core._CONTAINER_TOOL_VISIBILITY` 显式声明。所以它**任何模式
-#: 下都不进模型暴露面** —— 与 D2 那种「开关决定是否隐藏」是两回事，判据不能混。
-CONSOLE_ONLY_FORWARD_TARGETS: tuple[str, ...] = ("update_container_note",)
+CONSOLE_ONLY_FORWARD_TARGETS: tuple[str, ...] = (
+    "update_container_note",
+    "openapi_call",
+    "graphql_call",
+)
 #: **不**在隐藏清单、也不在 `CONSOLE_ONLY` 基准里的转发目标（#187：task 三工具）。
 #: 隐藏模式下仍是 `BOTH`。
 NON_CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
@@ -157,24 +157,24 @@ def test_forward_targets_are_exactly_the_converged_set():
     # 不扩 `LEGACY_CONVERGED_TOOLS`（那份 16 项清单属 Operator 决策）。
     # #224→#273：MCP 注册表四工具同理入组（BOTH 可见面，未进收敛清单）。
     assert set(NON_CONVERGED_FORWARD_TARGETS) == {
-        "list_tasks", "get_task_detail", "update_task", "create_task", "mcp_call",
+        "list_tasks", "get_task_detail", "update_task", "create_task",
         "save_mcp_server", "delete_mcp_server", "list_mcp_servers",
         "set_mcp_server_enabled",
     }, f"未收敛的转发目标集合变了：{set(NON_CONVERGED_FORWARD_TARGETS)}"
-    assert set(CONSOLE_ONLY_FORWARD_TARGETS) == {"update_container_note"}, (
+    assert set(CONSOLE_ONLY_FORWARD_TARGETS) == {
+        "update_container_note", "openapi_call", "graphql_call",
+    }, (
         "基准 CONSOLE_ONLY 的转发目标集合变了："
-        f"{set(CONSOLE_ONLY_FORWARD_TARGETS)}（#203 只加 container note 一条）"
+        f"{set(CONSOLE_ONLY_FORWARD_TARGETS)}"
     )
 
 
 def test_forward_command_count():
     """报总数：全部命令、带转发目标的命令、去重目标数。"""
-    # #291：28 条 = 34 − 6（T0 删掉的 6 条 mcp spec：add / rm / enable / disable / ls / call）。
-    # 命令数少了 6，但**转发目标数不变**（26 = 22 + create_task + MCP 四工具 + mcp_call）：
-    # 那 5 个 mcp 工具仍由子树转发，只是转发的发起方从 spec 变成 `mcpConsole`。
+    # 27 = 26 - mcp_call + openapi_call + graphql_call
     assert len(cc.COMMAND_SPECS) == 28, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条）"
     assert len(FORWARD_COMMANDS) == 28
-    assert len(FORWARD_TARGETS) == 26
+    assert len(FORWARD_TARGETS) == 27
     assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "收敛清单必须仍是 16 项（#187 裁定②：本单不动）"
     assert cc.HELP_SPEC.legacy_tool == ""
 

@@ -145,7 +145,7 @@ class TestHelpShapeAnnotation:
 
     def test_object_param_line_carries_shape_note(self) -> None:
         """`mcp call` 的 `--args <object>` 行必须写明 JSON object 字面量与 --from payload。"""
-        lines = cs.describe_tool_params("mcp_call")
+        lines = cs.describe_tool_params("openapi_call")
         args_lines = [line for line in lines if line.startswith("--args")]
         assert args_lines, f"mcp call 参数清单里没有 args 行：{lines!r}"
         line = args_lines[0]

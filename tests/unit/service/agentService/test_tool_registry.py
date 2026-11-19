@@ -426,7 +426,8 @@ EXPECTED_TOOL_CATEGORIES = {
     "wake_up_agent": ToolCategory.BASIC,
     "web_search": ToolCategory.READ,
     # #191：webfetch 与 web_search 同属只读联网能力，归 READ。
-    "mcp_call": ToolCategory.EXECUTE,
+    "openapi_call": ToolCategory.EXECUTE,
+    "graphql_call": ToolCategory.EXECUTE,
     "webfetch": ToolCategory.READ,
     "write_file": ToolCategory.WRITE,
 }

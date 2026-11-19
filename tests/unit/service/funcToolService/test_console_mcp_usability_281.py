@@ -59,7 +59,7 @@ async def test_p1_unknown_option_gives_copyable_example_not_option_list():
     #291：判据对象从 spec 解析层换到 mcp 子树（`mcpConsole._reject_unknown_options`），
     三档不动：① 清单消失；② 有原因说明；③ 示例行 == 唯一常量 `mcpConsole.EX_CALL`。
     """
-    from service.funcToolService import mcpConsole as mcp_console
+    from service.funcToolService import consoleMcp as mcp_console
 
     body = await _mcp_error("mcp call ctx7.resolve-library-id --library-name React")
     assert body["error_code"] == "unknown_option", body
@@ -72,29 +72,23 @@ async def test_p1_unknown_option_gives_copyable_example_not_option_list():
 
 @pytest.mark.asyncio
 async def test_p2_target_option_is_legacy_form_and_conflict_still_ambiguous():
-    """P2 的改后形态：`--target` 不再是「不被接受的选项」，而是**既有直传形态的选项写法**。
-
-    原判据：`mcp call --target x` ⇒ `unknown_option`（复用 P1 段）。
-    现判据（前提变了，改判据不改结论方向）：
-    ① 只给 `--target`（无位置参数）⇒ 合法，转发 `mcp_call`（既有直传路径，A 类保留）；
-    ② 位置参数与 `--target` 同时给 ⇒ `ambiguous_input_source`（§3.6-5 的既有契约，码不变）。
-    """
+    """`openapi call --target` 仍可转发 `openapi_call`；位置参数与 `--target` 同时给 ⇒ `ambiguous_input_source`。"""
     from exception import ForwardToolCall
 
     with pytest.raises(ForwardToolCall) as caught:
-        await console("mcp call --target https://x/mcp --tool t")
+        await console("openapi call --target https://x/openapi.json --tool t")
     forward = caught.value
-    assert forward.tool_name == "mcp_call"
-    assert forward.tool_args["target"] == "https://x/mcp"
+    assert forward.tool_name == "openapi_call"
+    assert forward.tool_args["target"] == "https://x/openapi.json"
 
-    body = await _mcp_error("mcp call ctx7 --target https://x/mcp")
+    body = await _mcp_error("openapi call ctx7 --target https://x/openapi.json")
     assert body["error_code"] == "ambiguous_input_source", body
 
 
 @pytest.mark.asyncio
 async def test_p2_missing_target_keeps_explicit_code():
     """P2 的边界：完全没写 target ⇒ 明确报缺（`mcp_missing_target`），且给可抄示例。"""
-    body = await _mcp_error("mcp call --tool x")
+    body = await _mcp_error("mcp call")
     assert body["error_code"] == "mcp_missing_target", body
     assert body["example"], body
 
@@ -120,8 +114,8 @@ async def test_p1_example_declared_once_and_shared():
         if re.match(r"^EX_CALL\s*(?::|=)", line)
     ]
     # 只断言「哪一个文件、几条定义」，**不绑行号**：行号会随无关改动漂移
-    assert [entry.split(":")[0] for entry in definitions] == ["mcpConsole.py"], (
-        f"示例常量应只在 mcpConsole.py 定义一次，实得：{definitions}"
+    assert [entry.split(":")[0] for entry in definitions] == ["consoleMcp.py"], (
+        f"示例常量应只在 consoleMcp.py 定义一次，实得：{definitions}"
     )
 
     parsing_src = (
@@ -140,7 +134,7 @@ async def test_positional_target_never_shows_up_as_option():
     目标就是取消清单），所以改钉**解析结果**：`<server>.<tool>` 归位置参数，
     `--args/--tool/--kind/--extra` 归选项，且错误体里不出现 `--<位置参数名>` 形态的清单行。
     """
-    from service.funcToolService import mcpConsole as mcp_console
+    from service.funcToolService import consoleMcp as mcp_console
 
     positional, options, named = mcp_console.parse_tokens(
         ["call", "ctx7.get_issue", "--args", '{"id":"7"}', "--tool", "t"]
@@ -155,24 +149,17 @@ async def test_positional_target_never_shows_up_as_option():
 
 @pytest.mark.asyncio
 async def test_f1_kind_default_is_gone_and_direct_pass_requires_explicit_kind():
-    """F1 的改后形态：`--kind` 的**默认值标注**随 `MCP_KIND_HINT` 一起移除。
-
-    原问题（f16f0bf9 实测）：kind 默认 openapi，却把「（默认）」标在 `--kind mcp` 行，
-    同一个工具两套默认。改后（#291）不再有默认值语义：直传路径**必须显式写 --kind**，
-    MCP 路径按 `<server>.<tool>` 定位、根本不接受 --kind。
-    判据：① 空敲 `mcp call` 报缺目标且示例不含 --kind；② help 明写「必须显式写 --kind」；
-    ③ 任何给模型看的 mcp 文案里都不再出现「（默认）」的 kind 标注（防止旧歧义搬回来）。
-    """
-    from service.funcToolService import mcpConsole as mcp_console
+    """`mcp` 命令不再混合 openapi/graphql，也不再出现 `--kind` 歧义。"""
+    from service.funcToolService import consoleMcp as mcp_console
 
     body = await _mcp_error("mcp call")
     assert body["error_code"] == "mcp_missing_target", body
     assert "--kind" not in body["example"], body["example"]
 
     call_help = mcp_console.MCP_HELP_DETAIL["call"]
-    assert "必须显式写 --kind" in call_help, call_help
+    assert "openapi call" in call_help and "graphql call" in call_help, call_help
 
-    for text in (mcp_console.MCP_HELP_SUMMARY, call_help, mcp_console.MCP_HELP_DETAIL["ls"]):
+    for text in (mcp_console.MCP_HELP_SUMMARY, call_help):
         assert "（默认）" not in text, text
 
 
@@ -289,7 +276,7 @@ async def test_p4_url_openapi_failure_suggests_mcp_native_path(mcp_db, leader_ct
         return {"success": False, "error_code": "mcp2cli_error", "message": "原始错误：405"}
 
     monkeypatch.setattr(mcpTool, "call_mcp", _fail)
-    body = await tools.mcp_call(target="https://mcp.context7.com/mcp", tool="x")
+    body = await tools.openapi_call(target="https://mcp.context7.com/mcp", tool="x")
     assert body["success"] is False
     assert body["error_code"] == "mcp2cli_error", "P4 不许新增/改写错误码"
     assert body["message"].startswith("原始错误：405")
@@ -308,9 +295,9 @@ async def test_p4_no_suggestion_when_kind_explicit_or_not_url(mcp_db, leader_ctx
         return {"success": False, "error_code": "mcp2cli_error", "message": "boom"}
 
     monkeypatch.setattr(mcpTool, "call_mcp", _fail)
-    explicit = await tools.mcp_call(target="https://mcp.context7.com/mcp", tool="x", kind="mcp")
+    explicit = await tools.graphql_call(target="https://mcp.context7.com/graphql", tool="x")
     assert "若目标是 MCP server" not in explicit["message"]
-    local = await tools.mcp_call(target="./openapi.json", tool="x")
+    local = await tools.openapi_call(target="./openapi.json", tool="x")
     assert "若目标是 MCP server" not in local["message"]
 
 
@@ -350,7 +337,7 @@ def test_session_extra_rejected_with_reason(key: str):
 
     with pytest.raises(mcpTool.McpCallError) as caught:
         mcpTool.build_argv(
-            kind="mcp", target="https://x/mcp", action="list",
+            kind="openapi", target="https://x/openapi.json", action="list",
             tool=None, args=None, extra={key: True},
         )
     assert caught.value.error_code == "mcp_unsupported_extra"
@@ -363,41 +350,22 @@ def test_session_extra_false_or_none_is_ignored():
     from service.funcToolService import mcpTool
 
     argv = mcpTool.build_argv(
-        kind="mcp", target="https://x/mcp", action="list",
+        kind="openapi", target="https://x/openapi.json", action="list",
         tool=None, args=None, extra={"session": False, "session-start": None},
     )
     assert "--session" not in argv
 
 
 def test_session_unsupported_documented_in_help_and_tool_docstrings():
-    """「标明」硬要求：直传路径的 help 与工具 docstring 都要写明四个开关名 + 原因。
-
-    四处覆盖（#291 起 help 由 `mcpConsole.MCP_HELP_DETAIL` 提供，原 `consoleTool.HELP_DETAIL`
-    的 mcp 条目随 overlay 删除）：`MCP_HELP_DETAIL['call']` / `['ls']` /
-    `tools.mcp_call.__doc__` / `tools.list_mcp_servers.__doc__`。
-
-    同时钉住「不矛盾」：原生 `mcp session` 是**支持**的，直传路径的 mcp2cli 开关才不支持
-    —— 两个事实必须同时出现在各自的位置，否则使用者会把「session 有替代路径」读成
-    「session 不可用」。
-    """
-    from service.funcToolService import mcpConsole as mcp_console
+    """原生 `mcp session` 在 help 里明写支持；`list_mcp_servers` 标明不支持 mcp2cli session 开关。"""
+    from service.funcToolService import consoleMcp as mcp_console
     from service.funcToolService import tools
 
-    texts = {
-        "help call": mcp_console.MCP_HELP_DETAIL["call"],
-        "help ls": mcp_console.MCP_HELP_DETAIL["ls"],
-        "mcp_call docstring": tools.mcp_call.__doc__ or "",
-        "list_mcp_servers docstring": tools.list_mcp_servers.__doc__ or "",
-    }
-    for label, text in texts.items():
-        for flag in ("--session", "--session-start", "--session-stop", "--session-list"):
-            assert flag in text, f"{label} 未标明不支持 {flag}"
-    # 原因必须写出来（否则使用者只看到「不支持」会反复试）
-    assert "Python 解释器" in texts["help call"]
-    assert "Python 解释器" in texts["mcp_call docstring"]
+    list_doc = tools.list_mcp_servers.__doc__ or ""
+    for flag in ("--session", "--session-start", "--session-stop", "--session-list"):
+        assert flag in list_doc, f"list_mcp_servers docstring 未标明不支持 {flag}"
+    assert "Python 解释器" in list_doc
 
-    # 替代路径：原生 session 在 help 里明写支持（与「直传开关不支持」并存、不矛盾），
-    # 直传侧拒绝 session 开关的那句原因也要指到它。
     session_help = mcp_console.MCP_HELP_DETAIL["session"]
     assert "mcp session start" in session_help and "本项目扩展" in session_help, session_help
     assert "mcp session start" in mcpTool._SESSION_EXTRA_REASON, mcpTool._SESSION_EXTRA_REASON

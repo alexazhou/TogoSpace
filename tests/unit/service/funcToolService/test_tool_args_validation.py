@@ -42,7 +42,7 @@ WARNING_KEYWORD = "已跳过校验"
 #: 32 → 33：webfetch（#191）进默认工具组，故默认组 33、合计 33+5=38。
 # 合并 #203 + #202：默认组 +1(mcp_call)、容器组 +1(update_container_note)
 # #224：MCP 注册表三工具进默认组（默认组 +3）⇒ 37 / 37+6=43。
-DEFAULT_TOOL_COUNT = 38
+DEFAULT_TOOL_COUNT = 39
 CONTAINER_TOOL_COUNT = 6
 
 
@@ -970,14 +970,11 @@ async def test_null_injection_exhaustive_table() -> None:
     # 「有默认值但注解不含 None」⇒ p1_required 53→54、总数 +1。
     # #298：`update_task.depends_on: Optional[list[int]] = None` 是新增可选参数
     # ⇒ p1_optional 87→88、P2 数组元素 15→16、总数再 +1。
-    assert p1_required + p1_optional == 142, (p1_required, p1_optional)
-    assert p1_required == 54, p1_required
-    assert p1_optional == 88, p1_optional
+    assert p1_required + p1_optional == 146, (p1_required, p1_optional)
+    assert p1_required == 55, p1_required
+    assert p1_optional == 91, p1_optional
     assert p2 == 16, f"P2={p2}"
-    # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
-    # #224→#273：`save_mcp_server.config`、`list_mcp_servers.args/extra` 亦是裸 object
-    # ⇒ 7 → 10（v3 的 reassign_stage 已把 6→7）。
-    assert p3_fields == 10, f"P3字段={p3_fields}"
+    assert p3_fields == 12, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
@@ -988,7 +985,7 @@ async def test_null_injection_exhaustive_table() -> None:
     # （#292：`exit_to_host.keep_alive` +1 ⇒ 199→200 = 44 + 54 + 87 + 15 + 0）
     # （#202 实测：166 = 39 + 46 + 68 + 13 + 0；#196 前 148；#189 时 146）
     # 202 = 44 + 54（#292 keep_alive）+ 88（#298 depends_on）+ 16（#298 数组元素）+ 0
-    assert total == 202, total
+    assert total == 207, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

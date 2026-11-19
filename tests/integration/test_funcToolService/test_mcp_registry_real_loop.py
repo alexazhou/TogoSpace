@@ -31,7 +31,7 @@ from model.dbModel.base import bind_database, unbind_database
 from service import mcpSessionService as svc
 from service.agentService import toolRegistry
 from service.funcToolService import core as func_tool_core
-from service.funcToolService.tools import mcp_call
+from service.funcToolService.tools import openapi_call as mcp_call
 from service.ormService import AioSqliteDatabase
 from util import llmApiUtil
 
@@ -178,7 +178,7 @@ async def test_real_mcp2cli_closed_loop(mcp_db, leader_ctx, loaded_tools, served
 
     # ls 有参：对 name 列工具清单（真包，list）
     listed = await registry.execute_tool_call(
-        _console_call("rl_ls", "mcp ls local"), context=leader_ctx
+        _console_call("rl_ls", "openapi list local"), context=leader_ctx
     )
     body = listed.result
     assert body.get("success") is True, body
@@ -189,7 +189,7 @@ async def test_real_mcp2cli_closed_loop(mcp_db, leader_ctx, loaded_tools, served
     # call：name 解析 → 真包实调本地 HTTP（实际调用成功的判据落点）。
     # 注：`mcp call <name> --tool x`（无点形态）对 kind=openapi 的注册项仍是合法既有写法。
     called = await registry.execute_tool_call(
-        _console_call("rl_call", "mcp call local --tool get-thing"), context=leader_ctx
+        _console_call("rl_call", "openapi call local --tool get-thing"), context=leader_ctx
     )
     body = called.result
     assert body.get("success") is True, body

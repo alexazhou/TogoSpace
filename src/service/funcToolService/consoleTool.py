@@ -49,7 +49,8 @@ from toolResult import error_result
 
 from . import consoleCommands as cc
 from . import consoleParsing as cp
-from . import mcpConsole as mcp_console
+from . import consoleMcp as mcp_console
+from . import consoleSpec as spec_console
 from . import consoleSchema as cs
 from .consoleParsing import ConsoleError, ParsedCommand
 
@@ -96,7 +97,11 @@ def _build_help_summary(specs: Optional[Sequence[cc.CommandSpec]] = None) -> str
     # 摘要里给两行「一眼分得清」的路标，详见 `mcp --help`。
     lines.append(
         "mcp：MCP 服务用 mcp list / mcp call <server-name>.<tool-name> --args '{...}' / "
-        "mcp session start|status|stop；OpenAPI/GraphQL 直传仍用 mcp ls <spec-path-or-url>"
+        "mcp session start|status|stop"
+    )
+    lines.append(
+        "openapi / graphql：分别用 openapi list|call <spec-or-name> --tool <name> / "
+        "graphql list|call <url-or-name> --tool <name>"
     )
     lines.append("用法：<资源> <操作> [位置参数] [--选项 ...]")
     lines.append("create/update 的配置输入（可选）：'<json>' 或 --from payload（payload 字段传 JSON object），也可只用 --选项")
@@ -343,6 +348,9 @@ def _help_text(tokens: list[str]) -> dict[str, Any]:
     # 命令表里不再有 mcp spec（T0 删旧包装），所以这里必须显式委托，不能靠派生。
     if resource == "mcp":
         payload = mcp_console.help_payload(["mcp"] + tokens[2:])
+        return {"success": True, "help": _render_help(str(payload.get("text") or ""))}
+    if resource in ("openapi", "graphql"):
+        payload = spec_console.help_payload([resource] + tokens[2:])
         return {"success": True, "help": _render_help(str(payload.get("text") or ""))}
     key = f"{resource} {action}".strip()
     if key in visible_keys:
@@ -924,6 +932,8 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
     # 其余命令的解析路径一个字节都不经过这里。
     if tokens and tokens[0].lower() == "mcp":
         return await mcp_console.dispatch(command, tokens, _context)
+    if tokens and tokens[0].lower() in ("openapi", "graphql"):
+        return await spec_console.dispatch(command, tokens, _context)
 
     # 全局 `--help` / `-h`（D12）：任何位置命中即短路返回该命令的 help，不占选项白名单。
     if any(token in cp.HELP_FLAGS for token in tokens):

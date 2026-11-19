@@ -102,10 +102,8 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "list_task_events": ["task_id", "limit", "before_id"],
     "list_tasks": ["assignee", "reviewer", "scope", "status", "title_keyword", "open_only", "limit", "mine", "include_upcoming"],
     "load_skill": ["skill_name"],
-    # #202 mcp2cli 接入：`target` 必填在前（spec 路径 / MCP URL），其余按「动作 → 工具 →
-    # 参数 → 来源类型 → 透传」排列；`kind` 放在 tool/args 之后是因为绝大多数调用只改
-    # target，不动来源类型。
-    "mcp_call": ["target", "action", "tool", "args", "kind", "extra"],
+    "openapi_call": ["target", "action", "tool", "args", "extra"],
+    "graphql_call": ["target", "action", "tool", "args", "extra"],
     # #224→#273：`mcp add` 的登记参数按「name → 来源类型 → 连接描述 → 说明 → 凭证 → 覆盖」
     # 排列；`name` 必填在前。
     "save_mcp_server": ["name", "kind", "protocol", "target", "note", "config", "overwrite"],

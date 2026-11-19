@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from service.funcToolService import mcpConsole
+from service.funcToolService import consoleMcp as mcpConsole
 
 
 @pytest.fixture(autouse=True)

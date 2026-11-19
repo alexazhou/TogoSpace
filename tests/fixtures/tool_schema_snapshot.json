@@ -452,6 +452,53 @@
     },
     "required": []
   },
+  "graphql_call": {
+    "description": "调用 GraphQL 服务（`console` `graphql` 命令的底层转发目标，CONSOLE_ONLY）。",
+    "parameters": {
+      "action": {
+        "description": "`list` 只列操作，`call` 执行一次调用。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "args": {
+        "description": "action=call 时的参数对象。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "extra": {
+        "description": "透传 mcp2cli 全局开关（不支持 session 开关）。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "target": {
+        "description": "GraphQL endpoint URL 或已登记名称。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tool": {
+        "description": "action=call 时的操作名。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "required": [
+      "target"
+    ]
+  },
   "list_containers": {
     "description": "查看你自己创建的容器列表、它们的实时状态，以及当前所处的执行环境。",
     "parameters": {},
@@ -664,59 +711,6 @@
       "skill_name"
     ]
   },
-  "mcp_call": {
-    "description": "调用任意外部 MCP server / OpenAPI spec / GraphQL 服务（mcp2cli 运行时转换）。",
-    "parameters": {
-      "action": {
-        "description": "`list` 只列工具，`call` 真调一次。",
-        "schema": {
-          "type": "string"
-        }
-      },
-      "args": {
-        "description": "action=call 时的参数对象，键名与 list 里该工具的参数名一致。",
-        "schema": {
-          "type": [
-            "object",
-            "null"
-          ]
-        }
-      },
-      "extra": {
-        "description": "透传 **mcp2cli 全局开关**，如 `{\"transport\": \"sse\", \"search\": \"关键词\"}`。 `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql` 生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）； `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。 不支持 session 开关**：`--session` / `--session-start` / `--session-stop` / `--session-list` 一律不可用——它们依赖 mcp2cli 起会话 daemon（`sys.executable -c`）， 而打包产物里没有 Python 解释器 ⇒ 会话起不来；传了直接给 `mcp_unsupported_extra`， 不要重试。每次 `mcp call` 直连即可，调用功能不受影响。",
-        "schema": {
-          "type": [
-            "object",
-            "null"
-          ]
-        }
-      },
-      "kind": {
-        "description": "来源类型：`openapi` / `mcp` / `graphql`，默认 `openapi`。 name 命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。",
-        "schema": {
-          "type": "string"
-        }
-      },
-      "target": {
-        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint； 也可以是注册表 name（`mcp config add` 登记的名字，如 `ctx7`）。",
-        "schema": {
-          "type": "string"
-        }
-      },
-      "tool": {
-        "description": "action=call 时的工具名（从 list 结果里取）。",
-        "schema": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
-    },
-    "required": [
-      "target"
-    ]
-  },
   "memory_create": {
     "description": "新建一条长期记忆槽位（一个槽位一个独立主题）。",
     "parameters": {
@@ -878,6 +872,53 @@
     },
     "required": [
       "memory_id"
+    ]
+  },
+  "openapi_call": {
+    "description": "调用 OpenAPI 服务（`console` `openapi` 命令的底层转发目标，CONSOLE_ONLY）。",
+    "parameters": {
+      "action": {
+        "description": "`list` 只列接口，`call` 执行一次调用。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "args": {
+        "description": "action=call 时的参数对象。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "extra": {
+        "description": "透传 mcp2cli 全局开关（不支持 session 开关）。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "target": {
+        "description": "OpenAPI spec 文件路径、URL 或已登记名称。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tool": {
+        "description": "action=call 时的操作名。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "required": [
+      "target"
     ]
   },
   "reload_team": {

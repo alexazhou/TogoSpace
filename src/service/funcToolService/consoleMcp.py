@@ -74,7 +74,6 @@ EX_LEGACY_OPENAPI = "mcp ls <spec-path-or-url>   /   mcp call --kind openapi <sp
 #: 所以子树的转发目标必须与 spec 一样被显式声明，两处合起来才是「console 的全部转发面」。
 FORWARD_TOOL_NAMES = frozenset(
     {
-        "mcp_call",
         "list_mcp_servers",
         "save_mcp_server",
         "delete_mcp_server",
@@ -323,6 +322,20 @@ async def _with_connection(
         await lease.release()
 
 
+def _is_http_url(target: str) -> bool:
+    """`http://` / `https://` 前缀即视为 URL（与 `sessions.resolve_ref` 的判定口径一致）。"""
+    return str(target or "").strip().lower().startswith(("http://", "https://"))
+
+
+def _is_registry_name(text: str) -> bool:
+    """是否可能是一个注册表 server 名（复用 `mcpRegistryService` 的唯一 name 规则）。"""
+    try:
+        registry.validate_name(text)
+    except TogoException:
+        return False
+    return True
+
+
 def _split_server_tool(target: str) -> tuple[str, str]:
     """`<server-name>.<tool-name>` ⇒ `(server, tool)`；按**第一个点**切。
 
@@ -375,6 +388,14 @@ async def _cmd_list(positional: list[str], options: dict[str, Any], context: Any
             post_process=None if mode == "json" else _render_list_overview,
         )
 
+    # 临时 HTTP 来源（未注册）：**必须先于点式分派判断**。
+    # 真实 URL 一定含点（`https://host/path`），若先判 `"." in target` 就会被
+    # `<server-name>.<tool-name>` 分支吃掉，导致 help 里承诺的
+    # `mcp list <server-url> --brief` 永远走不到下面的 `resolve_ref`（URL 分支成死代码）。
+    if _is_http_url(target):
+        ref = await sessions.resolve_ref(target, protocol=options.get("protocol"))
+        return await _list_from_ref(ref, options, mode, context)
+
     # `<server-name>.<tool-name> --schema` ⇒ 单工具 schema（产品 §2.2）
     if "." in target:
         return await _list_one_tool_schema(target, options, mode, context)
@@ -389,10 +410,20 @@ async def _list_one_tool_schema(
     name, tool_name = _split_server_tool(target)
     if not options.get("schema"):
         # 方案 A（产品 §2.2 只定义了点式 + `--schema` 的形态）：不猜，直接指路。
+        # 指路必须指向**真实可用**的形态：只有点前那段确实是注册表名时才给
+        # `mcp list <name>`；否则（典型是 URL 被误当点式）改给两选一指引 ——
+        # 指错路的文案比不指路更坏。
+        if _is_registry_name(name):
+            hint = f"看该 server 的全部工具请用 `mcp list {name}`。"
+        else:
+            hint = (
+                "若这是 URL，看它的全部工具请用 `mcp list <server-url> --brief`；"
+                "若是单工具 schema，请写成 `<server-name>.<tool-name> --schema`。"
+            )
         raise ConsoleError(
             _ERROR_MISSING_SCHEMA_FLAG,
             f"查看单个工具的 schema 需要 --schema：收到 {target!r} 但未带 --schema。"
-            f"看该 server 的全部工具请用 `mcp list {name}`。正确调用：\n  {EX_LIST_SCHEMA}",
+            f"{hint}正确调用：\n  {EX_LIST_SCHEMA}",
             example=EX_LIST_SCHEMA,
         )
     ref = await sessions.resolve_ref(name)
@@ -441,43 +472,6 @@ async def _list_from_ref(
         full=bool(options.get("all-parameters")),
     )
     return body
-
-
-async def _cmd_ls(positional: list[str], options: dict[str, Any], context: Any) -> dict[str, Any]:
-    """`mcp ls …`：**既有 openapi / graphql 直传路径**（Q1=A 保留，A 类不变量）。
-
-    转发给 `tools.list_mcp_servers`：不换错误码、不改字段、不动文案，也不绕开第二跳
-    鉴权。`--target` 与位置参数同时给时报 `ambiguous_input_source` —— 与改前同码
-    （改前由通用解析器的「同参数两处来源」规则给出）。
-    """
-    example = EX_LEGACY_OPENAPI
-    _reject_unknown_options(options, frozenset({"tool", "args", "kind", "extra", "target"}), example)
-    target = options.get("target")
-    if target is not None and positional:
-        raise ConsoleError(
-            "ambiguous_input_source",
-            f"target 同时出现在位置参数（{positional[0]!r}）与 --target 里，无法判断用哪个。"
-            f"正确调用：\n  {example}",
-            example=example,
-        )
-    name_or_target = positional[0] if positional else target
-    if len(positional) > 1:
-        raise ConsoleError(
-            "invalid_argument_count",
-            f"`mcp ls` 最多接受一个位置参数（spec 路径 / URL / 名称），收到 {len(positional)} 个。"
-            f"正确调用：\n  {example}",
-            example=example,
-        )
-    return _forward(
-        "list_mcp_servers",
-        {
-            "name_or_target": name_or_target,
-            "tool": options.get("tool"),
-            "args": _maybe_json_object(options.get("args"), "--args"),
-            "kind": options.get("kind"),
-            "extra": _maybe_json_object(options.get("extra"), "--extra"),
-        },
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -531,65 +525,11 @@ def _coerce_by_schema(value: str, spec: Any) -> Any:
 async def _cmd_call(positional: list[str], options: dict[str, Any], context: Any) -> dict[str, Any]:
     _reject_unknown_options(
         options,
-        frozenset({"args", "output", "kind", "extra", "tool", "protocol", "config", "target"}),
+        frozenset({"args", "output", "protocol", "config"}),
         EX_CALL,
     )
     mode = _output_mode(options)
-    kind = options.get("kind")
-
-    # 旧形态的 target 也可以走选项：`mcp call --target <x> --tool t`。位置参数与
-    # `--target` 同时给 ⇒ `ambiguous_input_source`（与改前同码，见 `_cmd_ls`）。
-    if options.get("target") is not None and positional:
-        raise ConsoleError(
-            "ambiguous_input_source",
-            f"target 同时出现在位置参数（{positional[0]!r}）与 --target 里，无法判断用哪个。"
-            f"正确调用：\n  {EX_LEGACY_OPENAPI}",
-            example=EX_LEGACY_OPENAPI,
-        )
-    legacy_target = positional[0] if positional else options.get("target")
-
-    # 既有 openapi / graphql 直传（A 类不变量）：转发回 `tools.mcp_call`（第二跳鉴权）
-    if kind in ("openapi", "graphql"):
-        if not legacy_target:
-            raise ConsoleError(
-                _ERROR_MISSING_TARGET,
-                f"`mcp call --kind {kind}` 需要 target。正确调用：\n  {EX_LEGACY_OPENAPI}",
-                example=EX_LEGACY_OPENAPI,
-            )
-        return _forward(
-            "mcp_call",
-            {
-                "target": legacy_target,
-                "action": "call",
-                "tool": options.get("tool"),
-                "args": _maybe_json_object(options.get("args"), "--args"),
-                "kind": str(kind),
-                "extra": _maybe_json_object(options.get("extra"), "--extra"),
-            },
-        )
-
-    if kind is not None and kind != "mcp":
-        raise ConsoleError(
-            _ERROR_UNKNOWN_OPTION,
-            f"--kind 只支持 openapi / graphql（MCP 走 `<server-name>.<tool-name>` 点式定位，"
-            f"不需要 --kind），收到 {kind!r}。",
-            example=EX_CALL,
-        )
     if not positional:
-        # 旧选项形态 `mcp call --target <x> --tool t`（kind 缺省 = openapi）同样保留：
-        # 它一直是既有直传路径的合法写法，改后仍转发回同一个工具。
-        if legacy_target:
-            return _forward(
-                "mcp_call",
-                {
-                    "target": legacy_target,
-                    "action": "call",
-                    "tool": options.get("tool"),
-                    "args": _maybe_json_object(options.get("args"), "--args"),
-                    "kind": str(kind) if kind is not None else None,
-                    "extra": _maybe_json_object(options.get("extra"), "--extra"),
-                },
-            )
         raise ConsoleError(
             _ERROR_MISSING_TARGET,
             f"`mcp call` 缺少工具定位。正确调用：\n  {EX_CALL}",
@@ -597,42 +537,11 @@ async def _cmd_call(positional: list[str], options: dict[str, Any], context: Any
         )
 
     target = positional[0]
-    if "/" in target or "://" in target:
-        # 路径 / URL 一定不是 `<server-name>.<tool-name>`（registry name 不含 `/`、`:`），
-        # 而 spec 文件名里几乎必然带点 ⇒ 先拦这一支，否则会被点式切分吃成
-        # 「server=…/openapi，tool=json」再抛一个与用户意图无关的 not_found。
-        # 旧写法（省略 `--kind`，靠工具默认 openapi）随 T0 移除，统一指路。
-        raise ConsoleError(
-            _ERROR_LEGACY_SYNTAX,
-            f"`mcp call` 的工具定位必须写成 `<server-name>.<tool-name>`（MCP 原生路径）；"
-            f"{target!r} 看起来是 spec 路径 / URL ⇒ 那是既有直传路径，必须显式给 "
-            f"--kind openapi|graphql。正确调用：\n  {EX_LEGACY_OPENAPI}",
-            example=EX_LEGACY_OPENAPI,
-        )
-    if "." not in target:
-        # 无点形态有两种合法来源，必须分开判（A 类不变量 vs B 类已删语法）：
-        # ① target 命中注册表且登记 kind 是 openapi / graphql ⇒ **既有能力**，原样委托
-        #    `tools.mcp_call`（注册表解析 + kind 继承 + `mcp_name_kind_conflict` 等校验
-        #    全在它里面，一个字节都不该在这里重写）；
-        # ② 其余（MCP kind 的注册项、未命中、URL 直传）⇒ 旧 `mcp call <名称> --tool`
-        #    语法已随 T0 移除，给 `mcp_legacy_syntax_removed` + 新示例指路。
-        entry = await registry.resolve_name(target)
-        if entry is not None and entry.kind in ("openapi", "graphql"):
-            return _forward(
-                "mcp_call",
-                {
-                    "target": target,
-                    "action": "call",
-                    "tool": options.get("tool"),
-                    "args": _maybe_json_object(options.get("args"), "--args"),
-                    "kind": str(kind or entry.kind),
-                    "extra": _maybe_json_object(options.get("extra"), "--extra"),
-                },
-            )
+    if "/" in target or "://" in target or "." not in target:
         raise ConsoleError(
             _ERROR_LEGACY_SYNTAX,
             f"`mcp call` 的工具定位必须写成 `<server-name>.<tool-name>`，收到 {target!r}；"
-            f"旧写法（`mcp call <名称> --tool <工具名> --args …`）已移除。正确调用：\n  {EX_CALL}",
+            f"OpenAPI / GraphQL 服务请分别使用 `openapi call` / `graphql call`。正确调用：\n  {EX_CALL}",
             example=EX_CALL,
         )
     server_name, tool_name = _split_server_tool(target)
@@ -800,7 +709,7 @@ async def _cmd_config(positional: list[str], options: dict[str, Any], context: A
     if action == "add":
         _reject_unknown_options(
             options,
-            frozenset({"protocol", "note", "config", "overwrite", "output", "kind"}),
+            frozenset({"protocol", "note", "config", "overwrite", "output"}),
             EX_CONFIG_ADD,
         )
         if len(rest) < 2:
@@ -810,8 +719,6 @@ async def _cmd_config(positional: list[str], options: dict[str, Any], context: A
                 example=EX_CONFIG_ADD,
             )
         if len(rest) > 2:
-            # 多给的位置参数一律不静默丢弃：改前 `mcp add` 由通用层的 arity 拦住，
-            # 新子树是两个位置参数，缺这条就会把 `a b c` 里的 c 悄悄吃掉。
             raise ConsoleError(
                 "invalid_argument_count",
                 f"`mcp config add` 只接受名称与 target 两个位置参数，收到 {len(rest)} 个：{rest!r}。"
@@ -819,15 +726,9 @@ async def _cmd_config(positional: list[str], options: dict[str, Any], context: A
                 example=EX_CONFIG_ADD,
             )
         name, target = rest[0], rest[1]
-        kind = str(options["kind"]) if options.get("kind") is not None else "mcp"
-        if kind not in ("mcp", "openapi", "graphql"):
-            raise ConsoleError(
-                _ERROR_INVALID_ARGS,
-                f"--kind 只支持 mcp / openapi / graphql，收到 {kind!r}。正确调用：\n  {EX_CONFIG_ADD}",
-                example=EX_CONFIG_ADD,
-            )
+        kind = "mcp"
         protocol = str(options["protocol"]) if options.get("protocol") is not None else None
-        if protocol is None and kind == "mcp":
+        if protocol is None:
             # 产品 §4.1：HTTP/SSE 按 URL 探测（缺省 streamable_http），stdio 命令则 stdio。
             protocol = "stdio" if not target.lower().startswith(("http://", "https://")) else None
         # 写注册表转发回 `save_mcp_server`：Write 权限、`admin_denied` 提示、全局唯一
@@ -959,7 +860,8 @@ async def _cmd_session(positional: list[str], options: dict[str, Any], context: 
         status = await sessions.start_session(team_id, agent_id)
         status["message"] = (
             "session 已开启（未访问 server 时连接数为 0）；之后 mcp list / call / resource 命中"
-            "的 server 连接会保留，`mcp session stop` 统一关闭。"
+            "的 server 连接会跨调用保留（适合连续操作浏览器等有状态服务）。"
+            f"示例：{EX_CALL}；结束后执行 `mcp session stop` 关闭。"
         )
         return status
     if action == "status":
@@ -1021,11 +923,9 @@ MCP_HELP_SUMMARY = "\n".join(
         "  mcp call <server-name>.<tool-name> --args '{\"key\":\"value\"}'          调用工具（也可 name=value）",
         "  mcp config list | get <n> | add <n> <target> | remove <n>               管理已保存的服务定义",
         "  mcp resource <server-name> [<resource-uri>]        列资源 / 读资源",
-        "  mcp session start | status | stop                  开启 / 查看 / 关闭当前 Agent 的会话",
-        "  ── 以下为既有能力，语义未变 ──",
-        "  mcp ls <spec-path-or-url>                          OpenAPI / GraphQL 直传（mcp2cli 路径）",
-        "  mcp call --kind openapi|graphql <target> --tool <name> --args '{...}'   同上",
-        "  mcp enable <n> / mcp disable <n>                   启用 / 禁用已保存的服务（既有注册表能力）",
+        "  mcp session start | status | stop                  开启 / 查看 / 关闭当前 Agent 的会话（连续操作浏览器等有状态 server 前先 start，连接跨调用保留）",
+        "  mcp enable <n> / mcp disable <n>                   启用 / 禁用已保存的服务",
+        "  （OpenAPI / GraphQL 服务请分别使用独立的 `openapi` / `graphql` 命令）",
         "示例：" + EX_CALL,
         "详情：mcp <子命令> --help；示例占位符需替换为实际值（尖括号本身不是参数）。",
     ]
@@ -1034,14 +934,13 @@ MCP_HELP_SUMMARY = "\n".join(
 MCP_HELP_DETAIL: dict[str, str] = {
     "list": "\n".join(
         [
-            "mcp list — 发现服务与工具（MCP 原生路径，SDK 直连，不是 mcp2cli）",
+            "mcp list — 发现服务与工具（MCP 原生路径，SDK 直连）",
             f"  {EX_LIST}                       列该 server 的工具",
             f"  {EX_LIST_SCHEMA}  看单工具 schema（缺 --schema 会报错指路）",
             f"  {EX_LIST_STDIO}   临时 stdio 来源",
             "  mcp list <server-url> --brief     临时 HTTP 来源（未注册）",
             "  --brief 只列工具名；--all-parameters 连参数表一起列；--output json 给完整 JSON",
-            "注意：`mcp list` 是 MCP 服务；OpenAPI / GraphQL 直传用 `mcp ls <spec-path-or-url>`（旧路径，语义不变）。",
-            "      直传侧的老限制照旧：spec 里没有 servers 时 base path 会丢，运行时无提示（补 servers 即可）。",
+            "注意：OpenAPI / GraphQL 服务请分别使用 `openapi list` / `graphql list`。",
         ]
     ),
     "call": "\n".join(
@@ -1051,25 +950,19 @@ MCP_HELP_DETAIL: dict[str, str] = {
             f"  {EX_CALL_NAMED}  参数类型按工具 inputSchema 转换（string 保留原文）",
             "  同一参数同时写在 --args 与 name=value 里会报 ambiguous_input_source（不静默取一个）",
             "  --output json 输出完整结构化结果；默认 text 只给内容文本",
-            "  OpenAPI / GraphQL 直传（既有能力）：mcp call --kind openapi|graphql <target> --tool <name>",
-            "  直传路径必须显式写 --kind；省略旧写法已移除。",
-            "  直传路径不支持 session 开关（--session / --session-start / --session-stop /",
-            "  --session-list）：依赖 mcp2cli 的会话 daemon，打包产物里没有 Python 解释器。",
-            "  要跨调用保留连接请用 `mcp session start`（原生路径）。",
-            "  注意（既有能力的老限制）：OpenAPI spec 里若没有 servers，base path 会丢，",
-            "  运行时不会报错——需要补 servers 或改用完整 target（本条与改前同一份实现）。",
+            "  连续操作浏览器等有状态 server 时，先执行 `mcp session start` 跨调用保留连接。",
+            "  OpenAPI / GraphQL 服务请分别使用 `openapi call` / `graphql call`。",
         ]
     ),
     "config": "\n".join(
         [
-            "mcp config — 管理已保存的服务定义（登记到 team 级注册表，**非创建业务实体**）",
+            "mcp config — 管理已保存的 MCP 服务定义（登记到 team 级注册表，**非创建业务实体**）",
             f"  {EX_CONFIG_LIST}",
             "  mcp config get <server-name>",
             f"  {EX_CONFIG_ADD}   [--protocol stdio|sse|streamable_http] [--note …] [--config '{...}']",
             "  mcp config remove <server-name>",
             "  mcp config enable|disable <server-name>   启用/禁用（同 mcp enable|disable）",
-            "kind 默认 mcp；登记 OpenAPI / GraphQL 来源加 --kind openapi|graphql"
-            "（既有能力，`mcp call <name> --tool <工具名>` 仍按注册项 kind 解析）。",
+            "kind 默认 mcp（仅登记 MCP 服务；OpenAPI / GraphQL 请用 `openapi config` / `graphql config`）。",
             "配置管理不建立 MCP 连接；凭证在返回体里一律打码。",
         ]
     ),
@@ -1089,18 +982,6 @@ MCP_HELP_DETAIL: dict[str, str] = {
             "  mcp session stop      关闭全部连接并结束 session；未开启时也算成功",
             "三条命令都不接受 session 名称或 server 参数；每个 Agent 同时最多一个 session；",
             "会话与连接按 Agent 隔离，其他 Agent 的操作互不影响；turn 结束/跨房间/正常休眠不自动关闭。",
-        ]
-    ),
-    "ls": "\n".join(
-        [
-            "mcp ls — OpenAPI / GraphQL 直传发现（既有能力，mcp2cli 路径，本次语义未变）",
-            "  mcp ls <spec-path-or-url> [--tool <name>] [--kind openapi|graphql]",
-            "注意：MCP 服务请用 `mcp list`（SDK 直连、支持 session keepalive）；",
-            "      `mcp ls` 走 mcp2cli，不参与 session keepalive。",
-            "注意（既有能力的老限制）：spec 里若没有 servers，base path 会丢，运行时不会报错",
-            "      —— 需要补 servers 或改用完整 target（本条与改前同一份实现）。",
-            "注意：本路径不支持 session 开关（--session / --session-start / --session-stop /",
-            "      --session-list），原因同 mcp call（mcp2cli 会话 daemon 需要 Python 解释器）。",
         ]
     ),
     "enable": "mcp enable <server-name> — 启用（既有注册表能力）。禁用≠删除：`mcp config list` 仍列出。",
@@ -1156,8 +1037,6 @@ async def dispatch(command: str, tokens: list[str], context: Any) -> dict[str, A
             )
         if sub == "list":
             return await _cmd_list(rest, options, context)
-        if sub == "ls":
-            return await _cmd_ls(rest, options, context)
         if sub == "call":
             if named:
                 # 具名参数回到位置参数序列，交给 `_cmd_call` 统一校验/转换
@@ -1173,7 +1052,7 @@ async def dispatch(command: str, tokens: list[str], context: Any) -> dict[str, A
             return await _cmd_enable(rest, options, context, sub == "enable")
         raise ConsoleError(
             _ERROR_UNKNOWN_SUB,
-            "未知的 mcp 子命令：" + sub + "。可用：list / call / config / resource / session / ls / enable / disable。",
+            "未知的 mcp 子命令：" + sub + "。可用：list / call / config / resource / session / enable / disable（OpenAPI / GraphQL 请用 `openapi` / `graphql` 命令）。",
             example=EX_LIST,
         )
     except ConsoleError as exc:

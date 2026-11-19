@@ -118,7 +118,7 @@ async def webfetch(url: str, _context: ToolCallContext = None) -> dict:
         return _tool_error_result(exc)
 
 
-async def mcp_call(
+async def _call_spec(
     target: str,
     action: str = "list",
     tool: Optional[str] = None,
@@ -126,59 +126,16 @@ async def mcp_call(
     kind: str = "openapi",
     extra: Optional[dict] = None,
     _context: ToolCallContext = None,
+    *,
+    allow_default_kind_override: bool = False,
 ) -> dict:
-    """调用任意外部 MCP server / OpenAPI spec / GraphQL 服务（mcp2cli 运行时转换）。
-
-    先用 `action=list` 拿到该目标的可调用工具清单（含参数说明），再用 `action=call`
-    调其中一个。这样外部服务的几十上百个工具只占「一次 list」的 token，不必每个都
-    预先塞成独立工具。`kind` 决定 target 怎么解释：`openapi` 填 spec 文件路径或 URL，
-    `mcp` 填 MCP server 的地址（引擎 auto：先试 Streamable HTTP、失败回落 SSE），
-    `graphql` 填 GraphQL endpoint。返回成功时 `result` 是 mcp2cli 的 JSON 输出
-    （list 为命令数组，call 为结果 envelope），`result_type` 标出它是 object / array /
-    string 等（远端返回纯文本时 `result_type="string"`，不是调用失败）；`truncated=True`
-    时**不下发 `result`**，只给 `raw_excerpt` + `original_chars`，需缩小查询范围后重试。
-    失败时 `error_code` 取 `mcp_invalid_kind` / `mcp_invalid_target` / `mcp_missing_tool` /
-    `mcp_invalid_action` / `mcp_invalid_extra` / `mcp_unsupported_extra` /
-    `mcp_call_timeout` / `mcp2cli_exit` / `mcp2cli_error` / `mcp2cli_empty_output`，
-    其中 `mcp2cli_exit` 说明参数或目标有误（附 `stderr`），可直接按提示改参数重试。
-    （`mcp2cli_bad_json` 自 #282 起**不再产生**：非 JSON 输出按退出码判成败；#284 已从
-    本列举中移除，勿再据此写用例。）
-
-    **注册表解析（#273，全局注册表）**：target 若命中全局 MCP 注册表的 name
-    （`mcp config add` 登记），则自动替换为注册项的 target/kind，并注入其凭证值
-    （#277 起原样存值、明文注入；日志与返回体由 mcpTool 出口打码）；未命中按完整
-    target 原样透传（既有用法一字不改）。返回体恒带 `resolved_from_registry`（命中
-    true、未命中 false）；命中时另带 `name` 字段。命中且显式 kind 与注册项不同时报
-    `mcp_name_kind_conflict`；命中的注册项**已禁用**（enable=0）时报
-    `mcp_server_disabled`（不是「不存在」）。
-
-    Args:
-        target: spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint；
-            也可以是注册表 name（`mcp config add` 登记的名字，如 `ctx7`）。
-        action: `list` 只列工具，`call` 真调一次。
-        tool: action=call 时的工具名（从 list 结果里取）。
-        args: action=call 时的参数对象，键名与 list 里该工具的参数名一致。
-        kind: 来源类型：`openapi` / `mcp` / `graphql`，默认 `openapi`。
-            name 命中时 kind 以注册项为准；显式给了不同的 kind 会被拒。
-        extra: 透传 **mcp2cli 全局开关**，如 `{"transport": "sse", "search": "关键词"}`。
-            `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql`
-            生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）；
-            `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。
-            **不支持 session 开关**：`--session` / `--session-start` / `--session-stop` /
-            `--session-list` 一律不可用——它们依赖 mcp2cli 起会话 daemon（`sys.executable -c`），
-            而打包产物里没有 Python 解释器 ⇒ 会话起不来；传了直接给 `mcp_unsupported_extra`，
-            不要重试。每次 `mcp call` 直连即可，调用功能不受影响。
-    """
-    # ---- 注册表解析（#273：唯一插入点；`mcp ls <name>` 与本工具共同复用本入口）----
+    """内部共享实现：解析全局注册表并调用 mcp2cli（仅支持 openapi / graphql）。"""
     registry_name: str | None = None
     resolved_from_registry = False
     config: dict | None = None
     protocol: str | None = None
     name = str(target or "").strip()
     if name:
-        # 注册表是**增量能力**：未绑库（无库环境直调第 2 跳）时按未命中透传，
-        # 既有调用行为回到注册表之前——新增能力不得打死旧用法。全局注册表
-        # 不再需要 team 上下文（#273：去 team_id）。
         from model.dbModel.base import database_bound
 
         if database_bound():
@@ -188,24 +145,18 @@ async def mcp_call(
             if entry is not None:
                 registry_name = entry.name
                 resolved_from_registry = True
-                # kind 冲突（沿 1331 批准口径，纯值比较）：显式 kind 与注册项不同 ⇒ 拒；
-                # 相同或缺省 ⇒ 放行并取注册值。缺省与显式同值在签名层不可区分
-                # （core.py func(**args)），所以 kind=="openapi"（签名默认）一律视为
-                # 缺省——永不生效分支，此处是它的落法。
-                if kind != entry.kind and kind != _MCP_CALL_DEFAULT_KIND:
+                if kind != entry.kind and not (allow_default_kind_override and kind == _MCP_CALL_DEFAULT_KIND):
                     return {
                         "success": False,
                         "error_code": "mcp_name_kind_conflict",
                         "resolved_from_registry": True,
                         "name": registry_name,
                         "message": (
-                            f"name {registry_name!r} 登记的 kind 是 {entry.kind!r}，与显式传入的 "
-                            f"{kind!r} 不一致。name 命中后 target/kind 以注册项为准；"
-                            "如确需其他 kind，请去掉 --kind 直接调用，或让 leader 重新登记。"
+                            f"name {registry_name!r} 登记的 kind 是 {entry.kind!r}，与当前调用类型 "
+                            f"{kind!r} 不一致。请使用对应的 `{entry.kind}` 命令调用。"
                         ),
                     }
                 if not entry.enable:
-                    # 禁用 ≠ 不存在：明确报「已禁用」并指路（#273 enable 语义）。
                     return {
                         "success": False,
                         "error_code": "mcp_server_disabled",
@@ -213,16 +164,13 @@ async def mcp_call(
                         "name": registry_name,
                         "message": (
                             f"server {registry_name!r} 已禁用（enable=0），不能调用。"
-                            "让 leader 执行 `mcp enable " + registry_name + "` 重新启用；"
-                            "`mcp config list` 仍能看到该条目。"
+                            f"让 leader 执行 `{entry.kind} enable {registry_name}` 重新启用；"
+                            f"`{entry.kind} config list` 仍能看到该条目。"
                         ),
                     }
                 kind = entry.kind
-                # 两字段拆分：传输方式随注册项注入（stdio/sse/streamable_http；
-                # 非 mcp kind 的 protocol 为 NULL，不影响其它 kind 的来源开关）。
                 protocol = entry.protocol
                 target = entry.target
-                # #277：凭证原样存值，注入直接用字面值（明文）；出口打码在 mcpTool。
                 config = mcpRegistryService.config_of(entry)
 
     result = await mcpTool.call_mcp(
@@ -235,10 +183,6 @@ async def mcp_call(
         config=config,
         protocol=protocol,
     )
-    # #281 P4：按默认 `openapi` 解析 http(s) URL 失败时，提示「若目标是 MCP server，
-    # 请加 --kind mcp」。只在**确实可能踩默认值差异**时加：未命中注册表（命中则 kind
-    # 取自注册项、不会踩）、kind 仍是默认 openapi、target 是 http(s) URL、且已失败。
-    # 不新增错误码、不改原 message，只追加一段固定示例。
     if (
         not result.get("success")
         and not resolved_from_registry
@@ -247,11 +191,66 @@ async def mcp_call(
     ):
         base = str(result.get("message") or "").rstrip()
         result["message"] = f"{base}{MCP_KIND_SUGGESTION}" if base else MCP_KIND_SUGGESTION.lstrip("\n")
-    # 恒出现（沿 1337 附加判据 3）：命中 true + name 字段，未命中恒 false；不做条件字段。
     result["resolved_from_registry"] = resolved_from_registry
     if registry_name is not None:
         result["name"] = registry_name
     return result
+
+
+async def openapi_call(
+    target: str,
+    action: str = "list",
+    tool: Optional[str] = None,
+    args: Optional[dict] = None,
+    extra: Optional[dict] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """调用 OpenAPI 服务（`console` `openapi` 命令的底层转发目标，CONSOLE_ONLY）。
+
+    Args:
+        target: OpenAPI spec 文件路径、URL 或已登记名称。
+        action: `list` 只列接口，`call` 执行一次调用。
+        tool: action=call 时的操作名。
+        args: action=call 时的参数对象。
+        extra: 透传 mcp2cli 全局开关（不支持 session 开关）。
+    """
+    return await _call_spec(
+        target=target,
+        action=action,
+        tool=tool,
+        args=args,
+        kind="openapi",
+        extra=extra,
+        _context=_context,
+    )
+
+
+async def graphql_call(
+    target: str,
+    action: str = "list",
+    tool: Optional[str] = None,
+    args: Optional[dict] = None,
+    extra: Optional[dict] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """调用 GraphQL 服务（`console` `graphql` 命令的底层转发目标，CONSOLE_ONLY）。
+
+    Args:
+        target: GraphQL endpoint URL 或已登记名称。
+        action: `list` 只列操作，`call` 执行一次调用。
+        tool: action=call 时的操作名。
+        args: action=call 时的参数对象。
+        extra: 透传 mcp2cli 全局开关（不支持 session 开关）。
+    """
+    return await _call_spec(
+        target=target,
+        action=action,
+        tool=tool,
+        args=args,
+        kind="graphql",
+        extra=extra,
+        _context=_context,
+    )
 
 
 def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:
@@ -449,7 +448,7 @@ async def list_mcp_servers(
 
     # 有参分支**必须真委托 mcp_call**：--tool/--args/--extra 若「接受但忽略」属静默
     # 无效（比报错更坏）；name 解析也因此天然复用同一条 resolve_name。
-    body = await mcp_call(
+    body = await _call_spec(
         target=name,
         action="list",
         tool=tool,
@@ -457,6 +456,7 @@ async def list_mcp_servers(
         kind=kind,
         extra=extra,
         _context=_context,
+        allow_default_kind_override=True,
     )
     # #281 P5：工具清单拿到了，但「下一步怎么调」原本要靠猜（`--tool` 取哪个字段、
     # `--args` 键名从哪抄）。成功时补一行固定模板；失败时不动（失败已有自己的指路）。

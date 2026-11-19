@@ -166,7 +166,7 @@ class TestMcpEmptyTargetHint:
 
     @pytest.mark.parametrize("command", ["mcp call", "mcp config add", "mcp config remove"])
     def test_empty_target_gives_copyable_example(self, command: str) -> None:
-        from service.funcToolService import mcpConsole as mcp_console
+        from service.funcToolService import consoleMcp as mcp_console
 
         result = _run(command)
 
@@ -185,7 +185,7 @@ class TestMcpEmptyTargetHint:
         判据：错误体里的 example 与 `mcpConsole.EX_CALL` **逐字节相同**，且该常量
         出现在 `MCP_HELP_SUMMARY` 里 —— 两处文案漂移会让任一条变红。
         """
-        from service.funcToolService import mcpConsole as mcp_console
+        from service.funcToolService import consoleMcp as mcp_console
 
         body = _run("mcp call")
         assert body["example"] == mcp_console.EX_CALL
@@ -193,7 +193,7 @@ class TestMcpEmptyTargetHint:
 
     def test_other_arity_errors_keep_old_code(self) -> None:
         """对照组：**给多了**参数仍报 `invalid_argument_count`（A4 只改「缺」这一支）。"""
-        result = _run("mcp ls a b")
+        result = _run("openapi list a b")
         assert result["error_code"] == "invalid_argument_count", result
 
     def test_session_rejects_name_or_server(self) -> None:
@@ -247,7 +247,7 @@ class TestMcpBasePathNote:
     提到 `servers`、提到 `base path`、给一条可执行的出路（补 servers / 用完整 target）。
     """
 
-    @pytest.mark.parametrize("command", ["help mcp ls", "help mcp call", "help mcp list"])
+    @pytest.mark.parametrize("command", ["help openapi", "help openapi call", "help openapi list"])
     def test_help_mentions_missing_servers_limitation(self, command: str) -> None:
         help_text = _run(command)["help"]
         assert "servers" in help_text, help_text
