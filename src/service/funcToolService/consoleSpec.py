@@ -46,7 +46,18 @@ def _forward(
     *,
     post_process: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
 ) -> dict[str, Any]:
-    raise ForwardToolCall(tool_name, tool_args, post_process=post_process)
+    """转发出 `openapi` / `graphql` 子树。
+
+    **`None` 值不传** —— 与 `consoleMcp._forward` 同一口径：选项未给时保持工具默认值。
+    不剥 None 会踩到 `save_mcp_server(overwrite: bool = False)` 这类非 Optional 形参：
+    `openapi config add <name> <target>`（不带 `--overwrite`）会把 `overwrite=None` 传下去，
+    被参数校验判成 `invalid_tool_args`（「应为 boolean，实际收到 None」）⇒ 命令直接不可用。
+    """
+    raise ForwardToolCall(
+        tool_name,
+        {key: value for key, value in tool_args.items() if value is not None},
+        post_process=post_process,
+    )
 
 
 def _reject_unknown_options(options: dict[str, Any], allowed: frozenset[str], example: str) -> None:

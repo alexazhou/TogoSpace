@@ -2,12 +2,14 @@
 
 两条闭环，各钉一条路径：
 
-1. `test_real_mcp2cli_closed_loop`（**既有能力**，A 类）：`mcp config add --kind openapi`
-   登记 spec → `mcp ls <name>` 列工具 → `mcp call <name> --tool <工具名>` 实调 →
+1. `test_real_mcp2cli_closed_loop`（**既有能力**，A 类）：`openapi config add`
+   登记 spec → `openapi list <name>` 列工具 → `openapi call <name> --tool <工具名>` 实调 →
    `mcp config remove` 清理。call 步用**真 mcp2cli** 对本地 HTTP 服务实调（不出网）。
    本测试只在 mcp2cli 可导入的环境跑（缺失即 skip，与基线红同源）。
-   #291 变更只有入口写法：`mcp add --name X --kind openapi --target Y`
-   → `mcp config add X Y --kind openapi`；`mcp rm X` → `mcp config remove X`。
+   入口写法演进：#291 `mcp add --name X --kind openapi --target Y` → `mcp config add X Y --kind openapi`；
+   按协议拆分后 `mcp` 子树**只登记 MCP 服务**（不再接受 `--kind`），OpenAPI / GraphQL 分别走
+   `openapi config add <name> <target>` / `graphql config add <name> <target>`；
+   `mcp rm X` → `mcp config remove X`。
 
 2. `test_console_real_sdk_stdio_closed_loop`（**MCP 原生路径**，C 类新增）：console 面
    走 `mcp config add`（stdio server）→ `mcp session start` → `mcp list <name>` →
@@ -169,9 +171,9 @@ async def test_real_mcp2cli_closed_loop(mcp_db, leader_ctx, loaded_tools, served
         ["Category:Basic", "Category:Read", "Category:Write", "Category:Execute", "Category:Admin"]
     )
 
-    # add：登记 kind=openapi 的 spec 文件（既有能力：注册表本来就能存三类 kind）
+    # add：登记 openapi 的 spec 文件（按协议拆分后走 `openapi config add`，kind 由子命令固定）
     added = await registry.execute_tool_call(
-        _console_call("rl_add", f"mcp config add local {spec_path} --kind openapi"),
+        _console_call("rl_add", f"openapi config add local {spec_path}"),
         context=leader_ctx,
     )
     assert added.result.get("success") is True, added.result
@@ -187,7 +189,7 @@ async def test_real_mcp2cli_closed_loop(mcp_db, leader_ctx, loaded_tools, served
     assert [cmd["name"] for cmd in body["result"]] == ["get-thing"]
 
     # call：name 解析 → 真包实调本地 HTTP（实际调用成功的判据落点）。
-    # 注：`mcp call <name> --tool x`（无点形态）对 kind=openapi 的注册项仍是合法既有写法。
+    # 注：`openapi call <name> --tool x`（无点形态）按注册表 name 解析，不要求点式写法。
     called = await registry.execute_tool_call(
         _console_call("rl_call", "openapi call local --tool get-thing"), context=leader_ctx
     )
