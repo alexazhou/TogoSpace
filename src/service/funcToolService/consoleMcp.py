@@ -923,7 +923,7 @@ MCP_HELP_SUMMARY = "\n".join(
         "  mcp call <server-name>.<tool-name> --args '{\"key\":\"value\"}'          调用工具（也可 name=value）",
         "  mcp config list | get <n> | add <n> <target> | remove <n>               管理已保存的服务定义",
         "  mcp resource <server-name> [<resource-uri>]        列资源 / 读资源",
-        "  mcp session start | status | stop                  开启 / 查看 / 关闭当前 Agent 的会话（连续操作浏览器等有状态 server 前先 start，连接跨调用保留）",
+        "  mcp session start | status | stop                  开启 / 查看 / 关闭当前 Agent 的持久化会话（连续操作浏览器等有状态 server 前先 start，连接跨调用保留）",
         "  mcp enable <n> / mcp disable <n>                   启用 / 禁用已保存的服务",
         "  （OpenAPI / GraphQL 服务请分别使用独立的 `openapi` / `graphql` 命令）",
         "示例：" + EX_CALL,
@@ -950,7 +950,9 @@ MCP_HELP_DETAIL: dict[str, str] = {
             f"  {EX_CALL_NAMED}  参数类型按工具 inputSchema 转换（string 保留原文）",
             "  同一参数同时写在 --args 与 name=value 里会报 ambiguous_input_source（不静默取一个）",
             "  --output json 输出完整结构化结果；默认 text 只给内容文本",
-            "  连续操作浏览器等有状态 server 时，先执行 `mcp session start` 跨调用保留连接。",
+            "  默认是单次调用：每次 `mcp call` 都现建连接、调用完即关闭该 server 连接，服务不常驻。",
+            "  需要该 MCP 服务持续存在（连续操作浏览器等有状态 server）时，先执行 "
+            "`mcp session start`，连接才跨调用保留。",
             "  OpenAPI / GraphQL 服务请分别使用 `openapi call` / `graphql call`。",
         ]
     ),
