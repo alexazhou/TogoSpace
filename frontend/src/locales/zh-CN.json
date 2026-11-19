@@ -721,7 +721,7 @@
       "mcpServersProtocolStdio": "标准输入输出（stdio）",
       "mcpServersTarget": "连接目标",
       "mcpServersTargetHintMcpHttp": "填 MCP Server 的 URL（Streamable HTTP / SSE 端点），如 https://example.com/mcp",
-      "mcpServersTargetHintMcpStdio": "填启动本地服务的命令，后端以 stdio 方式拉起子进程，如 npx -y @modelcontextprotocol/server-filesystem /tmp",
+      "mcpServersTargetHintMcpStdio": "填启动本地服务的命令，后端以 stdio 方式拉起子进程，如 npx -y {'@'}modelcontextprotocol/server-filesystem /tmp",
       "mcpServersTargetHintOpenapi": "填 OpenAPI 规范的本地路径或 URL，如 ./specs/petstore.json 或 https://example.com/openapi.json",
       "mcpServersTargetHintGraphql": "填 GraphQL endpoint，如 https://example.com/graphql",
       "mcpServersNoteLabel": "备注",

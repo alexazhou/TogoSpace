@@ -721,7 +721,7 @@
       "mcpServersProtocolStdio": "Standard I/O (stdio)",
       "mcpServersTarget": "Target",
       "mcpServersTargetHintMcpHttp": "MCP server URL (Streamable HTTP / SSE endpoint), e.g. https://example.com/mcp",
-      "mcpServersTargetHintMcpStdio": "Command to launch the local server; the backend runs it as a stdio subprocess, e.g. npx -y @modelcontextprotocol/server-filesystem /tmp",
+      "mcpServersTargetHintMcpStdio": "Command to launch the local server; the backend runs it as a stdio subprocess, e.g. npx -y {'@'}modelcontextprotocol/server-filesystem /tmp",
       "mcpServersTargetHintOpenapi": "Local path or URL of the OpenAPI spec, e.g. ./specs/petstore.json or https://example.com/openapi.json",
       "mcpServersTargetHintGraphql": "GraphQL endpoint, e.g. https://example.com/graphql",
       "mcpServersNoteLabel": "Note",
