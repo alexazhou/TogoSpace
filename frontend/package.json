@@ -1,6 +1,6 @@
 {
   "name": "team-agent-frontend",
-  "version": "0.5.2-beta4",
+  "version": "0.5.2-beta5",
   "private": true,
   "type": "module",
   "scripts": {
