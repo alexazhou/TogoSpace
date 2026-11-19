@@ -24,7 +24,10 @@ import pytest
 
 from service.funcToolService import mcpTool
 
-_ARGV = ["--mcp", "https://example.invalid/mcp", "--json", "--list"]
+#: 一条**形态合法**的 argv（`_run_argv_sync` 只把它原样交给 mcp2cli，不带 kind 校验；
+#: 这里用 `--spec` 是因为 `--mcp` 随 console 协议拆分已不再是 `mcpTool` 的来源开关，
+#: 见 `mcpTool._SOURCE_FLAGS`）。
+_ARGV = ["--spec", "https://example.invalid/openapi.json", "--json", "--list"]
 
 
 def _install_stub(monkeypatch, *, text: str, exit_code: int | None = None) -> None:
@@ -103,13 +106,21 @@ def test_empty_output_still_reports_empty(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_call_mcp_keeps_text_result_through_masking(monkeypatch):
-    """经 `call_mcp` 全链：文本结果的 `result_type` / `success` 不被打码与 argv 附加破坏。"""
+    """经 `call_mcp` 全链：文本结果的 `result_type` / `success` 不被打码与 argv 附加破坏。
+
+    走 `kind="openapi"` 而不是 `kind="mcp"`：console 按协议拆分后 `mcp_call` 不再接受
+    `kind="mcp"`（`mcp_invalid_kind`，MCP 服务统一走 console `mcp` 命令），而 MCP 原生
+    链路走 SDK 直连、**不经过** `_run_argv_sync` —— 换到那条链路就钉不住本文件的主角
+    （#282 修的「非 JSON 文本输出按退出码判成败」在 `_run_argv_sync` 里）。openapi 与
+    graphql 是本层仅存的两个入口，取 openapi 即可，判据的三件事一字未变：`success`、
+    `result` 原文、`result_type`，外加「argv 被附加进返回体且未被改写」。
+    """
     text = "Session 'context7' stopped.\n"
     _install_stub(monkeypatch, text=text)
     result = await mcpTool.call_mcp(
-        kind="mcp", target="https://example.invalid/mcp", action="list"
+        kind="openapi", target="https://example.invalid/openapi.json", action="list"
     )
     assert result["success"] is True, result
     assert result["result"] == text
     assert result["result_type"] == "string"
-    assert result["argv"][0] == "--mcp"
+    assert result["argv"][0] == "--spec"

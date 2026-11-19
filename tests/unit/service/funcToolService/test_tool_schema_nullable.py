@@ -162,9 +162,17 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("list_tasks", "title_keyword"),
     # #202：`mcp_call` 的 3 个 `Optional[...] = None` 参数（`action` 有默认值但注解
     # 不含 None，属另一张表）。
-    ("mcp_call", "args"),
-    ("mcp_call", "extra"),
-    ("mcp_call", "tool"),
+    #
+    # #314：console 按协议拆分后 `mcp_call` 被 `openapi_call` / `graphql_call` 顶掉
+    # （两个工具的签名**逐字相同**：`target` + `action` + 3 个 Optional），所以原来那 3 条
+    # 换成 6 条 —— 这不是新增覆盖，是把同一批字段挪到拆分后的真实签名上，否则 63 组会
+    # 拿一个已不存在的工具去问 null 合法性（报「未注册」）。
+    ("graphql_call", "args"),
+    ("graphql_call", "extra"),
+    ("graphql_call", "tool"),
+    ("openapi_call", "args"),
+    ("openapi_call", "extra"),
+    ("openapi_call", "tool"),
     ("memory_create", "tags"),
     ("memory_update", "content"),
     ("memory_update", "star_level"),
@@ -540,7 +548,9 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 26
-    assert len(OPTIONAL_WITH_DEFAULT) == 88  # #298：update_task.depends_on +1
+    # #314：88 - 3（`mcp_call` 的 args/extra/tool）+ 6（`openapi_call` / `graphql_call`
+    # 各 3 个同名字段）= 91。
+    assert len(OPTIONAL_WITH_DEFAULT) == 91
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -807,7 +817,16 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 其中 142 = 141（#292 keep_alive）+ 1（#298 update_task.depends_on））。
 #: 注：本值是在 #298 之后叠加 #291 文案改动重新计算的，不是 #291 分支上的 `6b5f912a…`
 #: （那个是在 #298 之前算的），两者不可混用。
-BASELINE_TEXT_DIGEST = "9369c9ff23def10b5e712bd89c6d68bc8461c060bc128fd5674bc7b60c533f67"
+#:
+#: #314 重算（`9369c9ff…` → `8359d5ea…`）：console 按协议拆分，**删 1 增 2** ——
+#: `mcp_call`（`target`/`action`/`tool`/`args`/`extra`/`kind` 共 6 个参数）整个移除，
+#: 换成 `openapi_call` 与 `graphql_call`（签名逐字相同：`target` + `action` +
+#: `tool`/`args`/`extra` 三个 Optional，各 5 个参数）。工具数 44 → 45
+#: （44 − 1 + 2），参数数 142 → 146（142 − 6 + 5 + 5）。
+#: 其余 43 个工具的 description / required / 参数说明**逐字未动**——复核方式：
+#: 在拆分前基线上跑 `_text_digest` 的同一段代码（或把本常量换回 `9369c9ff…` 跑本用例），
+#: 结构化 diff 只应出现 `[mcp_call]` 消失 + `[openapi_call]` / `[graphql_call]` 两项。
+BASELINE_TEXT_DIGEST = "8359d5ea450e932761ba9187492cc69fded9b401e0c401ad7956f8c859a0fc51"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -854,8 +873,11 @@ def test_descriptions_and_required_do_not_drift() -> None:
     # 写的调用语法从已删除的 `mcp add/rm/ls` 换成 `mcp config add/remove/list`
     # 与 `mcp call <server-name>.<工具名>`。不动文案的代价是模型看到指向不存在命令的
     # 说明，所以这是「模型接口说明确实该变」的有意变更。
-    assert tools == 44, tools
-    assert params == 142, params  # #292 keep_alive +1、#298 depends_on +1
+    # #314：44 → 45 / 142 → 146 —— console 按协议拆分，`mcp_call`（6 参）删除、
+    # `openapi_call` / `graphql_call`（各 5 参）新增 ⇒ 工具数 44 − 1 + 2、参数数
+    # 142 − 6 + 5 + 5。来历见 `BASELINE_TEXT_DIGEST` 上方注释。
+    assert tools == 45, tools
+    assert params == 146, params  # #292 keep_alive +1、#298 depends_on +1、#314 拆分 +4
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "
