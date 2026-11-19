@@ -303,7 +303,9 @@ def _build_request(
         temperature=model_config.temperature,
         extra_params=model_config.extra_params,
     )
-    return apply_llm_request_rules(request)
+    return apply_llm_request_rules(
+        request, thinking_default=model_config.thinking_default,
+    )
 
 
 def _build_extra_headers(

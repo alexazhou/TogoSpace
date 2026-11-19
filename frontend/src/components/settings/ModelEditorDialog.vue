@@ -18,6 +18,11 @@ const { t } = useI18n();
 
 const visible = ref(false);
 const mode = ref<EditorMode>('create');
+// 正在编辑的原对象：表单只覆盖它暴露的字段，其余字段原样带回去。
+// 保存走的是「父组件整体替换」（`ModelsSettingsSection.handleModelSave` 里
+// `models[idx] = model`），所以这里丢掉任何字段都等于把它从配置里抹掉——
+// `enabled` / `temperature` 这类表单不暴露的字段曾在一次「编辑→确认」后被静默改写。
+const editingModel = ref<LlmModelConfig | null>(null);
 
 const INPUT_OPTIONS = [
   { value: 'text', label: 'Text (T)' },
@@ -88,6 +93,7 @@ function closeDialog(): void {
 
 function openCreate(): void {
   mode.value = 'create';
+  editingModel.value = null;
   form.value = {
     name: '',
     protocol: 'openai',
@@ -105,6 +111,7 @@ function openCreate(): void {
 
 function openEdit(model: LlmModelConfig): void {
   mode.value = 'edit';
+  editingModel.value = model;
   form.value = {
     name: model.name,
     protocol: model.protocol || 'openai',
@@ -148,6 +155,9 @@ function handleSave(): void {
 
   try {
     const model: LlmModelConfig = {
+      // 先铺开编辑前的对象：保留表单没暴露的字段（enabled / temperature /
+      // thinking_default ……）。下面的表单字段随后覆盖，保证「表单说了算」。
+      ...(editingModel.value ?? {}),
       name: form.value.name.trim(),
       protocol: form.value.protocol.trim(),
       input: Array.from(new Set([...form.value.input, 'text'])),

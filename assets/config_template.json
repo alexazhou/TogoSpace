@@ -22,6 +22,7 @@
           "protocol": "openai",
           "enabled": true,
           "input": ["text", "image"],
+          "thinking_default": true,
           "context_config": {
             "context_window_tokens": 524288
           }

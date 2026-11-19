@@ -153,6 +153,11 @@ class LlmModelConfig(BaseModel):
     extra_params: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     context_config: Optional[LlmContextConfig] = None
+    # 「这个模型在上游缺省参数下就跑在思考模式」——只影响本地请求护栏，不发给上游。
+    # None = 未声明：退回代码里的已知名单（现网语义不变）；
+    # True = 声明开启（新模型在配置里写一行即可，不用改代码名单）；
+    # False = 显式关闭（可覆盖名单默认）。
+    thinking_default: Optional[bool] = None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler: Any) -> dict[str, Any]:
@@ -163,6 +168,9 @@ class LlmModelConfig(BaseModel):
         cc = data.get("context_config")
         if cc is None or cc == {} or cc == LlmContextConfig().model_dump(mode="json"):
             data.pop("context_config", None)
+        # 未声明时不落盘，避免给存量配置写上无意义的 null
+        if data.get("thinking_default") is None:
+            data.pop("thinking_default", None)
         return data
 
     @field_validator("extra_params")
