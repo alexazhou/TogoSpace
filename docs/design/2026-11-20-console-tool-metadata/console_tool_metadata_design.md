@@ -63,22 +63,32 @@ flowchart LR
 >    - 当 `1 个 Python 函数拆成 2 条子命令`（如 `save_dept` 拆成 `dept create` 和 `dept update`）需要靠某个固定参数区分分支时，用 `bind={"overwrite": True}` 表达「这条命令入口绑定传给 Python 方法的固定参数」。
 
 ```python
-ArgSlot = str | tuple[str, ...]                 # 单参数槽 "task_id" / "agent_name"，或多候选槽 ("dept_id", "name")
+@dataclass(frozen=True)
+class Arg:
+    """位置参数槽位定义（取代嵌套 tuple `(("dept_id", "name"),)`）。
+
+    - 单参数位置槽：`Arg("task_id")`、`Arg("agent_name")`（也可直接简写为字符串 `"task_id"`）；
+    - 多候选定位槽：`Arg("dept_id", "name")`（1 个位置参数可按类型/前缀映射到 `dept_id` 或 `name`）。
+    """
+    params: tuple[str, ...]
+
+    def __init__(self, *params: str) -> None:
+        object.__setattr__(self, "params", params)
 
 @dataclass(frozen=True)
 class ConsoleCommand:
     """工具挂到 console 上的一条子命令：只定义命令入口与参数映射。
 
     - `path`：命令入口（如 `"dept get"`、`"dept update"`、`"reload"`）。
-    - `args`：位置参数 → Python 方法参数名映射：
-      - 单参数：如 `args=("task_id",)`、`args=("container_id", "note")`，按顺序映射到 Python 参数，类型从函数签名读取；
-      - 多候选：如 `args=(("dept_id", "name"),)`，第 1 项（`int`）接数字 ID，其余项接 `name:研发部`（及非数字名称）。
+    - `args`：位置参数 → Python 方法参数名映射（元素为 `Arg(...)` 或单参数 `str`）：
+      - 单参数：如 `args=(Arg("task_id"),)`（或 `args=("task_id",)`）、`args=(Arg("container_id"), Arg("note"))`，按顺序映射到 Python 参数，类型从函数签名读取；
+      - 多候选定位（1 个位置槽位对应多个候选参数）：如 `args=(Arg("dept_id", "name"),)`，第 1 项（`int`）接数字 ID，其余项接 `name:研发部`（及非数字名称）。
     - `options`：CLI `--选项` 短别名 → Python 方法参数名映射（默认所有非位置参数均自动按 `--kebab-case` 暴露；此处只写额外别名如 `{"kw": "title_keyword"}`）。
-    - `bind`：1 函数多命令时绑定给 Python 方法的固定入参（仅 `dept/agent/room/role update` 绑定 `{"overwrite": True}`，用来告诉 `save_*` 走更新分支）。
+    - `bind`：1 函数多命令时绑定给 Python 方法的固定入参（仅 `dept/agent/room/role update` 绑定 `{"overwrite": True}`，用来告诉 `save_*` 走更新分支；采用 `setdefault` 语义，允许显式 `--overwrite=false` 覆盖）。
     - `help`：可选的命令级补充说明（只进 `console help`，不进模型 tool schema）。
     """
     path: str                                   # 命令入口："dept get" / "task ls" / "reload"
-    args: tuple[ArgSlot, ...] = ()              # 位置参数映射：("task_id",) 或 (("dept_id", "name"),)
+    args: tuple[Arg | str, ...] = ()            # 位置参数映射：(Arg("dept_id", "name"),) 或 ("task_id",)
     options: Mapping[str, str] = {}             # 选项别名映射：{"kw": "title_keyword"}
     bind: Mapping[str, Any] = {}                # 绑定给 Python 方法的固定参数（如 update 绑定 {"overwrite": True}）
     help: tuple[str, ...] = ()                  # 可选的命令级 help 补充
@@ -129,7 +139,7 @@ def tool(**kwargs) -> Callable[[F], F]:
         "有子部门且未加 --recursive 时由服务层以 DEPT_HAS_CHILDREN 拒绝，不会部分删除。",
         "加 --dry-run 只预演（跑完全部校验，不写库），返回体里是 would_delete。",
     ),
-    console=(ConsoleCommand("dept rm", args=(("dept_id", "name"),)),),
+    console=(ConsoleCommand("dept rm", args=(Arg("dept_id", "name"),)),),
 )
 async def delete_dept(name=None, dept_id=None, recursive=False, dry_run=False, _context=None) -> dict: ...
 
@@ -137,7 +147,7 @@ async def delete_dept(name=None, dept_id=None, recursive=False, dry_run=False, _
     visibility=ToolVisibility.BOTH, converged=True,
     console=(
         ConsoleCommand("dept create"),
-        ConsoleCommand("dept update", args=(("dept_id", "name"),), bind={"overwrite": True}),
+        ConsoleCommand("dept update", args=(Arg("dept_id", "name"),), bind={"overwrite": True}),
     ),
 )
 async def save_dept(...): ...
@@ -147,16 +157,16 @@ async def save_dept(...): ...
 async def list_tasks(...): ...
 
 @tool(visibility=ToolVisibility.BOTH,
-      console=(ConsoleCommand("task get", args=("task_id",)),))
+      console=(ConsoleCommand("task get", args=(Arg("task_id"),)),))
 async def get_task_detail(task_id: int, event_limit: int = 3, _context=None) -> dict: ...
 
 @tool(visibility=ToolVisibility.BOTH,
-      console=(ConsoleCommand("task update", args=("task_id",),
+      console=(ConsoleCommand("task update", args=(Arg("task_id"),),
                               options={"status": "new_status", "remove_field": "clear_fields", "action": "workflow_action"}),))
 async def update_task(task_id: int, ...): ...
 
 @tool(visibility=ToolVisibility.BOTH, converged=True,
-      console=(ConsoleCommand("agent wake", args=("agent_name",)),))
+      console=(ConsoleCommand("agent wake", args=(Arg("agent_name"),)),))
 async def wake_up_agent(agent_name: str, _context=None) -> dict: ...
 
 @tool(visibility=ToolVisibility.BOTH, converged=True,
@@ -164,7 +174,7 @@ async def wake_up_agent(agent_name: str, _context=None) -> dict: ...
 async def reload_team(_context=None) -> dict: ...
 
 @tool(visibility=ToolVisibility.CONSOLE_ONLY, group="container",
-      console=(ConsoleCommand("container note", args=("container_id", "note")),))
+      console=(ConsoleCommand("container note", args=(Arg("container_id"), Arg("note"))),))
 async def update_container_note(...): ...
 ```
 
