@@ -65,34 +65,39 @@ flowchart LR
 ```python
 @dataclass(frozen=True)
 class Arg:
-    """参考成熟 CLI 库（Click / Typer / Clap / argparse）的单参数声明模型：每个参数一个 Arg 对象。
+    """参考成熟 CLI 库（Click / Typer / Clap / argparse）的单参数声明模型：
+    - 位置参数（`positional=True`）严格按声明顺序从前往后排列（第 1 个 positional Arg 对应位置 0，第 2 个对应位置 1……**绝不存在两个 Arg 共享同一个位置槽位**）。
+    - **一个位置参数允许多种类型和写法，直接在同一个 `Arg` 对象中表达**（例如位置 0 默认是 `int` 型的 `dept_id`，同时允许传 `str` 型或 `name:xxx` 前缀映射到 Python 方法的 `name` 参数）。
 
-    - `name`：对应的 Python 方法参数名（类型、描述与默认值直接从 Python 函数签名反射，不重复写）。
+    字段说明：
+    - `name`：默认映射的 Python 方法参数名（如 `"dept_id"`、`"task_id"`、`"container_id"`；类型从 Python 函数签名反射）。
     - `required`：在该 CLI 命令下是否为**必选参数**（`True` = 必选，`False` = 可选；`None` = 跟随 Python 函数签名是否有默认值）。
-      - 典型场景：同一个 `save_dept` 函数所有参数在 Python 签名里都是 `= None`，但在 `dept create` 命令下 `--name / --responsibility` 是 `required=True`；在 `dept get` 下 `dept_id / name` 是位置必选。
-    - `positional`：`True` = 位置参数（Positional Argument，如 `<dept_id>`），`False` = `--选项`（Option Flag，如 `--name`）。
-    - `alias`：CLI 短别名（如 `alias="kw"` 表示 `--kw` 映射到 `title_keyword`）。
+    - `positional`：`True` = 位置参数（按从前往后顺序依次占位置 0, 1, 2...），`False` = `--选项`。
+    - `alias`：CLI `--选项` 短别名（如 `alias="kw"` 表示 `--kw` 映射到 `title_keyword`）。
+    - `alt`：同一个位置参数允许的**其他类型 / `key:value` 前缀写法 → Python 方法参数名**映射（如 `alt={"name": "name"}` 或 `alt=(("str", "name"), ("name:", "name"))`，表示该位置参数除了传 `int` 落到 `name="dept_id"` 外，传 `name:研发部` 或非数字字符串时落到 Python 方法的 `name` 参数）。
     """
-    name: str                                   # Python 方法参数名："dept_id" / "name" / "task_id"
+    name: str                                   # 主映射的 Python 方法参数名："dept_id" / "task_id"
     required: bool | None = None                # True=必选，False=可选，None=跟随函数签名默认值
-    positional: bool = False                    # True=位置参数 (Argument)，False=--选项 (Option)
-    alias: str | None = None                    # 可选：CLI 选项别名（如 "kw" → "title_keyword"）
+    positional: bool = False                    # True=位置参数（严格从前往后排列），False=--选项
+    alias: str | None = None                    # 可选：--选项短别名（如 "kw" → "title_keyword"）
+    alt: Mapping[str, str] = {}                 # 可选：该位置参数允许的其他类型/前缀写法 → Python 参数名（如 {"name": "name"}）
 
 @dataclass(frozen=True)
 class ConsoleCommand:
     """工具挂到 console 上的一条子命令：像 Click / Typer 一样，只声明命令路径 + 参数列表。
 
     - `path`：命令入口（如 `"dept get"`、`"dept create"`、`"dept update"`、`"reload"`）。
-    - `args`：该命令的参数声明列表（每个参数一个 `Arg` 对象；未显式列出的函数参数默认作为 `positional=False, required=跟随签名` 的可选 `--选项` 自动暴露）：
-      - 位置必选参数：`Arg("task_id", positional=True, required=True)`；
-      - 位置可选参数：`Arg("name", positional=True, required=False)`；
+    - `args`：该命令的参数声明列表（位置参数严格从前往后排列，1 个位置 = 1 个 `Arg` 对象；未列出的函数参数默认作为可选 `--选项` 自动暴露）：
+      - 单一类型位置必选参数：`Arg("task_id", positional=True, required=True)`；
+      - 多个顺序位置参数（从前往后占位置 0、位置 1）：`Arg("container_id", positional=True, required=True), Arg("note", positional=True, required=True)`；
+      - **支持多种类型和写法的单个位置参数**（只占位置 0 这 1 个槽位）：`Arg("dept_id", positional=True, required=True, alt={"name": "name"})`（传数字 `7` 或 `dept_id:7` 落 `dept_id`；传 `name:研发部` 或字符串 `"研发部"` 落 `name`）；
       - 选项必选参数（覆盖函数签名的 `= None`）：如 `dept create` 下的 `Arg("name", required=True)`、`Arg("responsibility", required=True)`；
-      - 选项带别名：`Arg("title_keyword", alias="kw")`（默认 `positional=False, required=False`）。
+      - 选项带别名：`Arg("title_keyword", alias="kw")`。
     - `bind`：1 函数拆多命令时绑定给 Python 方法的固定入参（如 `dept update` 绑定 `{"overwrite": True}`）。
     - `help`：可选的命令级补充说明（只进 `console help`，不进模型 tool schema）。
     """
     path: str                                   # 命令入口："dept get" / "task ls" / "reload"
-    args: tuple[Arg, ...] = ()                  # 每个参数一个 Arg 对象
+    args: tuple[Arg, ...] = ()                  # 参数列表（positional=True 的 Arg 严格从前往后排列，不共享位置）
     bind: Mapping[str, Any] = {}                # 绑定给 Python 方法的固定参数（如 update 绑定 {"overwrite": True}）
     help: tuple[str, ...] = ()                  # 可选的命令级 help 补充
 
@@ -144,8 +149,8 @@ def tool(**kwargs) -> Callable[[F], F]:
     ),
     console=(
         ConsoleCommand("dept rm", args=(
-            Arg("dept_id", positional=True, required=False),
-            Arg("name", positional=True, required=False),
+            # 第 1 个位置参数（必选）：默认 int 映射到 dept_id，也允许 name:<名称>（或字符串名称）映射到 name
+            Arg("dept_id", positional=True, required=True, alt={"name": "name"}),
         )),
     ),
 )
@@ -159,8 +164,8 @@ async def delete_dept(name=None, dept_id=None, recursive=False, dry_run=False, _
             Arg("responsibility", required=True),
         )),
         ConsoleCommand("dept update", args=(
-            Arg("dept_id", positional=True, required=False),
-            Arg("name", positional=True, required=False),
+            # 第 1 个位置参数（必选）：单个 Arg 对象表达多种类型/写法
+            Arg("dept_id", positional=True, required=True, alt={"name": "name"}),
         ), bind={"overwrite": True}),
     ),
 )
@@ -208,6 +213,7 @@ async def reload_team(_context=None) -> dict: ...
 @tool(visibility=ToolVisibility.CONSOLE_ONLY, group="container",
       console=(
           ConsoleCommand("container note", args=(
+              # 两个位置参数严格从前往后排列：第 1 个是 container_id，第 2 个是 note
               Arg("container_id", positional=True, required=True),
               Arg("note", positional=True, required=True),
           )),
@@ -327,18 +333,19 @@ class ConsoleExtension(Protocol):
 1. **命令路由与分词**：
    - `shlex.split(command)` 分词；匹配 `CommandTable.by_path`（2 词子命令如 `"dept update"`，或 1 词顶层命令如 `"reload"`）或 `ConsoleExtension`（`mcp / openapi / graphql`）。
    - 切出命令名之后的 token 序列，分为：**位置参数序列 `pos_tokens`** 与 **`--选项` 键值对 `opt_tokens`**。
-2. **位置参数解析（`pos_tokens` → `pos_args`）**：
-   - 从命令声明中取出 `positional_args = [a for a in cmd.args if a.positional]`：
-     - **情况 A（单目标多候选定位：如 `dept/agent/room` 的 `get/rm/update`，声明了 `Arg("dept_id", positional=True), Arg("name", positional=True)`，一个 `int` 型 ID + 一个 `str` 型名称，共享第 1 个位置槽位）**：
-       - **显式前缀 `<key>:<value>`**（当 `<key>` 命中候选参数名，如 `name:研发部` 或 `dept_id:7`）：直接映射到对应参数（`name="研发部"` 或 `dept_id=7`，`int` 型参数做正整数校验）；
-       - **裸值 `<token>`**（无 `:`，或 `:` 前缀不在候选参数名内，如名字本身含冒号 `a:b`）：
-         - 若 `<token>` 为纯数字（`token.isdigit()`）：映射到 `int` 型候选参数（如 `dept_id = int(token)`，须 `>= 1`，否则报 `invalid_target`）；
-         - 若 `<token>` 为非数字（如 `研发部`）：映射到 `str` 型候选参数（`name = "研发部"`）。
-       - *注：如果某部门名字恰好是纯数字（如 `"123"`），敲 `dept update 123` 会按 ID=123 找；想要按名字找就敲 `dept update name:123`——彻底消解纯数字名字歧义。*
-     - **情况 B（单参数/多顺序位置参数：如 `task get <task_id>` 或 `container note <container_id> <note>`）**：
-       - 按 `positional_args` 声明顺序一一对应赋给 `pos_args[arg.name]`，并根据该参数在 Python 函数签名中的 schema 类型做校验与转换（`integer` ⇒ 正整数校验，`string` ⇒ 原样字符串）。
-     - **情况 C（末尾内联 JSON 位置参数，如 `dept create '{"name":"研发部"}'` 或 `dept update 7 '{"responsibility":"..."}'`）**：
-       - 若位置参数末尾带有 JSON 对象字符串（或传入了 `--from payload`），解析为字典 `payload_args`，其键必须在工具 schema 参数名（或 `alias`）内。
+2. **位置参数解析（`pos_tokens` → `pos_args`，严格从前往后按顺序一对一匹配，不共享位置）**：
+   - 从命令声明中取出 `positional_args = [a for a in cmd.args if a.positional]`：**第 `i` 个位置 token `pos_tokens[i]` 严格对应第 `i` 个位置参数定义 `arg = positional_args[i]`**（不存在两个 `Arg` 共享同一个位置槽位的情况）。
+   - 对每个位置参数 `arg = positional_args[i]` 和对应的输入 `token = pos_tokens[i]`：
+     - **当该 `arg` 只允许单一类型/写法（`arg.alt` 为空，如 `Arg("task_id", positional=True, required=True)` 或 `container note` 的第 0 个 `Arg("container_id", ...)`、第 1 个 `Arg("note", ...)`）**：
+       - 直接按 `arg.name` 在 Python 函数签名中的 schema 类型做校验与转换（`integer` ⇒ 正整数校验，`string` ⇒ 原样字符串），写入 `pos_args[arg.name]`。
+     - **当该 `arg` 声明了允许多种类型和写法（`arg.alt` 非空，如 `Arg("dept_id", positional=True, required=True, alt={"name": "name"})`）**：
+       - **写法 1（显式前缀 `<prefix>:<value>`，且 `<prefix>` 在 `arg.alt` 或等于 `arg.name`，如 `name:研发部`、`name:123`、`dept_id:7`）**：直接映射到对应的目标 Python 参数名（`arg.alt[prefix]` 或 `arg.name`），并按该目标参数的 schema 类型转换；
+       - **写法 2（裸值 `<token>`，无已声明前缀）**：
+         - 先尝试匹配主参数 `arg.name` 的 schema 类型（如 `dept_id` 是 `int`：当 `token.isdigit()` 为纯数字时，映射到 `pos_args["dept_id"] = int(token)`，须 `>= 1`）；
+         - 若不匹配主参数类型（如 `token="研发部"` 非数字），则匹配 `arg.alt` 中类型吻合的备用参数（如 `name` 是 `str`，映射到 `pos_args["name"] = "研发部"`）。
+       - *注：如果某部门名字恰好是纯数字（如 `"123"`），敲 `dept update 123` 会按主类型 `int` 落到 `dept_id=123`；想要按名字找就用显式前缀写法 `dept update name:123`——完全在单个 `Arg` 对象内闭环。*
+   - **末尾内联 JSON 载荷**（如 `dept create '{"name":"研发部"}'` 或 `dept update 7 '{"responsibility":"..."}'`）：
+     - 若位置参数末尾带有 JSON 对象字符串（或传入了 `--from payload`），解析为字典 `payload_args`，其键必须在工具 schema 参数名（或 `alias`）内。
 3. **`--选项` 解析与类型转换（`opt_tokens` → `opt_args`）**：
    - 将 `--kebab-case` / `--snake_case` / `Arg.alias` 统一归一为 Python 方法的真实参数名 `canonical_name`（未知选项报 `unknown_option`）；
    - 按工具函数 schema 的参数类型（`boolean / integer / array / object / string`）转换选项值；
