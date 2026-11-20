@@ -65,34 +65,34 @@ flowchart LR
 ```python
 @dataclass(frozen=True)
 class Arg:
-    """单个参数映射定义：每个参数一个 Arg 对象（而不是多个参数共用一个 Arg）。
+    """参考成熟 CLI 库（Click / Typer / Clap / argparse）的单参数声明模型：每个参数一个 Arg 对象。
 
-    - `name`：对应的 Python 方法参数名（如 `"dept_id"`、`"name"`、`"title_keyword"`）。
-    - `positional`：是否作为命令位置参数（如 `dept rm` 的 `Arg("dept_id"), Arg("name")`）。
-    - `alias`：CLI 短别名（如 `Arg("title_keyword", alias="kw")`），彻底取代独立 `options` 字典。
+    - `name`：对应的 Python 方法参数名（类型、描述与默认值直接从 Python 函数签名反射，不重复写）。
+    - `required`：在该 CLI 命令下是否为**必选参数**（`True` = 必选，`False` = 可选；`None` = 跟随 Python 函数签名是否有默认值）。
+      - 典型场景：同一个 `save_dept` 函数所有参数在 Python 签名里都是 `= None`，但在 `dept create` 命令下 `--name / --responsibility` 是 `required=True`；在 `dept get` 下 `dept_id / name` 是位置必选。
+    - `positional`：`True` = 位置参数（Positional Argument，如 `<dept_id>`），`False` = `--选项`（Option Flag，如 `--name`）。
+    - `alias`：CLI 短别名（如 `alias="kw"` 表示 `--kw` 映射到 `title_keyword`）。
     """
     name: str                                   # Python 方法参数名："dept_id" / "name" / "task_id"
+    required: bool | None = None                # True=必选，False=可选，None=跟随函数签名默认值
+    positional: bool = False                    # True=位置参数 (Argument)，False=--选项 (Option)
     alias: str | None = None                    # 可选：CLI 选项别名（如 "kw" → "title_keyword"）
-    positional: bool = True                     # True=位置参数；若仅定义选项别名可设 positional=False（或用 Opt 简写）
-
-def Opt(name: str, alias: str) -> Arg:
-    """仅给 `--选项` 起别名、不占位置参数槽位的语法糖。"""
-    return Arg(name=name, alias=alias, positional=False)
 
 @dataclass(frozen=True)
 class ConsoleCommand:
-    """工具挂到 console 上的一条子命令：只定义命令入口与参数列表。
+    """工具挂到 console 上的一条子命令：像 Click / Typer 一样，只声明命令路径 + 参数列表。
 
-    - `path`：命令入口（如 `"dept get"`、`"dept update"`、`"reload"`）。
-    - `args`：参数列表，**每个参数一个 `Arg` 对象**：
-      - 单位置参数：`args=(Arg("task_id"),)`；
-      - 同一位置支持按 ID 或按名称定位（每个参数各自一个 `Arg`）：`args=(Arg("dept_id"), Arg("name"))`（解析器看函数签名类型：`dept_id: int` 接数字 ID，`name: str` 接 `name:研发部` 或名称）；
-      - 仅声明选项别名：`args=(Opt("title_keyword", "kw"),)`（或 `Arg("title_keyword", alias="kw", positional=False)`）。
-    - `bind`：1 函数多命令时绑定给 Python 方法的固定入参（仅 `dept/agent/room/role update` 绑定 `{"overwrite": True}`，用来告诉 `save_*` 走更新分支；采用 `setdefault` 语义，允许显式 `--overwrite=false` 覆盖）。
+    - `path`：命令入口（如 `"dept get"`、`"dept create"`、`"dept update"`、`"reload"`）。
+    - `args`：该命令的参数声明列表（每个参数一个 `Arg` 对象；未显式列出的函数参数默认作为 `positional=False, required=跟随签名` 的可选 `--选项` 自动暴露）：
+      - 位置必选参数：`Arg("task_id", positional=True, required=True)`；
+      - 位置可选参数：`Arg("name", positional=True, required=False)`；
+      - 选项必选参数（覆盖函数签名的 `= None`）：如 `dept create` 下的 `Arg("name", required=True)`、`Arg("responsibility", required=True)`；
+      - 选项带别名：`Arg("title_keyword", alias="kw")`（默认 `positional=False, required=False`）。
+    - `bind`：1 函数拆多命令时绑定给 Python 方法的固定入参（如 `dept update` 绑定 `{"overwrite": True}`）。
     - `help`：可选的命令级补充说明（只进 `console help`，不进模型 tool schema）。
     """
     path: str                                   # 命令入口："dept get" / "task ls" / "reload"
-    args: tuple[Arg, ...] = ()                  # 每个参数一个 Arg 对象：(Arg("dept_id"), Arg("name"))
+    args: tuple[Arg, ...] = ()                  # 每个参数一个 Arg 对象
     bind: Mapping[str, Any] = {}                # 绑定给 Python 方法的固定参数（如 update 绑定 {"overwrite": True}）
     help: tuple[str, ...] = ()                  # 可选的命令级 help 补充
 
@@ -142,37 +142,63 @@ def tool(**kwargs) -> Callable[[F], F]:
         "有子部门且未加 --recursive 时由服务层以 DEPT_HAS_CHILDREN 拒绝，不会部分删除。",
         "加 --dry-run 只预演（跑完全部校验，不写库），返回体里是 would_delete。",
     ),
-    console=(ConsoleCommand("dept rm", args=(Arg("dept_id"), Arg("name"))),),
+    console=(
+        ConsoleCommand("dept rm", args=(
+            Arg("dept_id", positional=True, required=False),
+            Arg("name", positional=True, required=False),
+        )),
+    ),
 )
 async def delete_dept(name=None, dept_id=None, recursive=False, dry_run=False, _context=None) -> dict: ...
 
 @tool(
     visibility=ToolVisibility.BOTH, converged=True,
     console=(
-        ConsoleCommand("dept create"),
-        ConsoleCommand("dept update", args=(Arg("dept_id"), Arg("name")), bind={"overwrite": True}),
+        ConsoleCommand("dept create", args=(
+            Arg("name", required=True),
+            Arg("responsibility", required=True),
+        )),
+        ConsoleCommand("dept update", args=(
+            Arg("dept_id", positional=True, required=False),
+            Arg("name", positional=True, required=False),
+        ), bind={"overwrite": True}),
     ),
 )
 async def save_dept(...): ...
 
 @tool(visibility=ToolVisibility.BOTH,
-      console=(ConsoleCommand("task ls", args=(Opt("title_keyword", "kw"),)),))
+      console=(
+          ConsoleCommand("task ls", args=(
+              Arg("title_keyword", alias="kw", required=False),
+          )),
+      ))
 async def list_tasks(...): ...
 
 @tool(visibility=ToolVisibility.BOTH,
-      console=(ConsoleCommand("task get", args=(Arg("task_id"),)),))
+      console=(
+          ConsoleCommand("task get", args=(
+              Arg("task_id", positional=True, required=True),
+          )),
+      ))
 async def get_task_detail(task_id: int, event_limit: int = 3, _context=None) -> dict: ...
 
 @tool(visibility=ToolVisibility.BOTH,
-      console=(ConsoleCommand("task update",
-                              args=(Arg("task_id"),
-                                    Opt("new_status", "status"),
-                                    Opt("clear_fields", "remove_field"),
-                                    Opt("workflow_action", "action"))),))
+      console=(
+          ConsoleCommand("task update", args=(
+              Arg("task_id", positional=True, required=True),
+              Arg("new_status", alias="status", required=False),
+              Arg("clear_fields", alias="remove_field", required=False),
+              Arg("workflow_action", alias="action", required=False),
+          )),
+      ))
 async def update_task(task_id: int, ...): ...
 
 @tool(visibility=ToolVisibility.BOTH, converged=True,
-      console=(ConsoleCommand("agent wake", args=(Arg("agent_name"),)),))
+      console=(
+          ConsoleCommand("agent wake", args=(
+              Arg("agent_name", positional=True, required=True),
+          )),
+      ))
 async def wake_up_agent(agent_name: str, _context=None) -> dict: ...
 
 @tool(visibility=ToolVisibility.BOTH, converged=True,
@@ -180,7 +206,12 @@ async def wake_up_agent(agent_name: str, _context=None) -> dict: ...
 async def reload_team(_context=None) -> dict: ...
 
 @tool(visibility=ToolVisibility.CONSOLE_ONLY, group="container",
-      console=(ConsoleCommand("container note", args=(Arg("container_id"), Arg("note"))),))
+      console=(
+          ConsoleCommand("container note", args=(
+              Arg("container_id", positional=True, required=True),
+              Arg("note", positional=True, required=True),
+          )),
+      ))
 async def update_container_note(...): ...
 ```
 
