@@ -64,23 +64,40 @@ flowchart LR
 
 ```python
 @dataclass(frozen=True)
+class Query:
+    """位置参数的 query 形态类型（即 `attr:value` 语法，如 `name:研发部`）。
+    注明该位置参数允许哪些 `attr`（属性名，直接对应底层 Python 方法的参数名）。
+    """
+    attrs: tuple[str, ...]
+
+    def __init__(self, *attrs: str) -> None:
+        object.__setattr__(self, "attrs", attrs)
+
+ArgType = type[int] | type[str] | Query         # 允许的基本类型 int / str，或 Query("name")
+
+@dataclass(frozen=True)
 class Arg:
     """参考成熟 CLI 库（Click / Typer / Clap / argparse）的单参数声明模型：
     - 位置参数（`positional=True`）严格按声明顺序从前往后排列（第 1 个 positional Arg 对应位置 0，第 2 个对应位置 1……**绝不存在两个 Arg 共享同一个位置槽位**）。
-    - **一个位置参数允许多种类型和写法，直接在同一个 `Arg` 对象中表达**（例如位置 0 默认是 `int` 型的 `dept_id`，同时允许传 `str` 型或 `name:xxx` 前缀映射到 Python 方法的 `name` 参数）。
+    - **通过 `type` 表达这个 `Arg` 允许什么参数形态**：例如允许 `int`、允许 `str`、允许 `Query("name")`（即 `attr:value` 形态并注明允许哪些 `attr`）。
 
     字段说明：
-    - `name`：默认映射的 Python 方法参数名（如 `"dept_id"`、`"task_id"`、`"container_id"`；类型从 Python 函数签名反射）。
+    - `name`：默认映射的 Python 方法参数名（如 `"dept_id"`、`"task_id"`、`"container_id"`）。
+    - `type`：该参数允许的类型/形态（单个 `ArgType` 或元组 `tuple[ArgType, ...]`；`None` = 直接跟随 Python 函数签名类型）：
+      - `type=int`：只允许整数，映射到 `arg.name`（如 `task_id`）；
+      - `type=str`：只允许字符串，映射到 `arg.name`（如 `role_name`、`container_id`、`note`）；
+      - `type=(int, Query("name"))`（或兼容裸名期 `type=(int, str, Query("name"))`）：
+        - 传 `int`（如 `dept update 7`）→ 映射到主参数 `arg.name`（`dept_id=7`）；
+        - 传 `Query("name")` 允许的 `attr:value`（如 `dept update name:研发部`）→ 映射到对应的 `attr` 参数（`name="研发部"`）。
     - `required`：在该 CLI 命令下是否为**必选参数**（`True` = 必选，`False` = 可选；`None` = 跟随 Python 函数签名是否有默认值）。
     - `positional`：`True` = 位置参数（按从前往后顺序依次占位置 0, 1, 2...），`False` = `--选项`。
     - `alias`：CLI `--选项` 短别名（如 `alias="kw"` 表示 `--kw` 映射到 `title_keyword`）。
-    - `alt`：同一个位置参数允许的**其他类型 / `key:value` 前缀写法 → Python 方法参数名**映射（如 `alt={"name": "name"}` 或 `alt=(("str", "name"), ("name:", "name"))`，表示该位置参数除了传 `int` 落到 `name="dept_id"` 外，传 `name:研发部` 或非数字字符串时落到 Python 方法的 `name` 参数）。
     """
     name: str                                   # 主映射的 Python 方法参数名："dept_id" / "task_id"
+    type: ArgType | tuple[ArgType, ...] | None = None  # 允许的参数类型/形态：int / str / Query("name") 或组合元组
     required: bool | None = None                # True=必选，False=可选，None=跟随函数签名默认值
     positional: bool = False                    # True=位置参数（严格从前往后排列），False=--选项
     alias: str | None = None                    # 可选：--选项短别名（如 "kw" → "title_keyword"）
-    alt: Mapping[str, str] = {}                 # 可选：该位置参数允许的其他类型/前缀写法 → Python 参数名（如 {"name": "name"}）
 
 @dataclass(frozen=True)
 class ConsoleCommand:
@@ -88,9 +105,9 @@ class ConsoleCommand:
 
     - `path`：命令入口（如 `"dept get"`、`"dept create"`、`"dept update"`、`"reload"`）。
     - `args`：该命令的参数声明列表（位置参数严格从前往后排列，1 个位置 = 1 个 `Arg` 对象；未列出的函数参数默认作为可选 `--选项` 自动暴露）：
-      - 单一类型位置必选参数：`Arg("task_id", positional=True, required=True)`；
-      - 多个顺序位置参数（从前往后占位置 0、位置 1）：`Arg("container_id", positional=True, required=True), Arg("note", positional=True, required=True)`；
-      - **支持多种类型和写法的单个位置参数**（只占位置 0 这 1 个槽位）：`Arg("dept_id", positional=True, required=True, alt={"name": "name"})`（传数字 `7` 或 `dept_id:7` 落 `dept_id`；传 `name:研发部` 或字符串 `"研发部"` 落 `name`）；
+      - 仅允许 `int` 的位置参数：`Arg("task_id", type=int, positional=True, required=True)`；
+      - 允许 `int` 或 `Query("name")`（`name:<值>`）的位置参数：`Arg("dept_id", type=(int, Query("name")), positional=True, required=True)`；
+      - 多个顺序位置参数（从前往后占位置 0、位置 1）：`Arg("container_id", type=str, positional=True, required=True), Arg("note", type=str, positional=True, required=True)`；
       - 选项必选参数（覆盖函数签名的 `= None`）：如 `dept create` 下的 `Arg("name", required=True)`、`Arg("responsibility", required=True)`；
       - 选项带别名：`Arg("title_keyword", alias="kw")`。
     - `bind`：1 函数拆多命令时绑定给 Python 方法的固定入参（如 `dept update` 绑定 `{"overwrite": True}`）。
@@ -149,8 +166,8 @@ def tool(**kwargs) -> Callable[[F], F]:
     ),
     console=(
         ConsoleCommand("dept rm", args=(
-            # 第 1 个位置参数（必选）：默认 int 映射到 dept_id，也允许 name:<名称>（或字符串名称）映射到 name
-            Arg("dept_id", positional=True, required=True, alt={"name": "name"}),
+            # 第 1 个位置参数（必选）：type 声明允许 int（映射到 dept_id）或 Query("name")（即 name:<值> 映射到 name）
+            Arg("dept_id", type=(int, Query("name")), positional=True, required=True),
         )),
     ),
 )
@@ -164,8 +181,8 @@ async def delete_dept(name=None, dept_id=None, recursive=False, dry_run=False, _
             Arg("responsibility", required=True),
         )),
         ConsoleCommand("dept update", args=(
-            # 第 1 个位置参数（必选）：单个 Arg 对象表达多种类型/写法
-            Arg("dept_id", positional=True, required=True, alt={"name": "name"}),
+            # 第 1 个位置参数（必选）：type=(int, Query("name"))
+            Arg("dept_id", type=(int, Query("name")), positional=True, required=True),
         ), bind={"overwrite": True}),
     ),
 )
@@ -182,7 +199,7 @@ async def list_tasks(...): ...
 @tool(visibility=ToolVisibility.BOTH,
       console=(
           ConsoleCommand("task get", args=(
-              Arg("task_id", positional=True, required=True),
+              Arg("task_id", type=int, positional=True, required=True),
           )),
       ))
 async def get_task_detail(task_id: int, event_limit: int = 3, _context=None) -> dict: ...
@@ -190,7 +207,7 @@ async def get_task_detail(task_id: int, event_limit: int = 3, _context=None) -> 
 @tool(visibility=ToolVisibility.BOTH,
       console=(
           ConsoleCommand("task update", args=(
-              Arg("task_id", positional=True, required=True),
+              Arg("task_id", type=int, positional=True, required=True),
               Arg("new_status", alias="status", required=False),
               Arg("clear_fields", alias="remove_field", required=False),
               Arg("workflow_action", alias="action", required=False),
@@ -201,7 +218,7 @@ async def update_task(task_id: int, ...): ...
 @tool(visibility=ToolVisibility.BOTH, converged=True,
       console=(
           ConsoleCommand("agent wake", args=(
-              Arg("agent_name", positional=True, required=True),
+              Arg("agent_name", type=str, positional=True, required=True),
           )),
       ))
 async def wake_up_agent(agent_name: str, _context=None) -> dict: ...
@@ -213,9 +230,9 @@ async def reload_team(_context=None) -> dict: ...
 @tool(visibility=ToolVisibility.CONSOLE_ONLY, group="container",
       console=(
           ConsoleCommand("container note", args=(
-              # 两个位置参数严格从前往后排列：第 1 个是 container_id，第 2 个是 note
-              Arg("container_id", positional=True, required=True),
-              Arg("note", positional=True, required=True),
+              # 两个位置参数严格从前往后排列：第 1 个是 container_id (str)，第 2 个是 note (str)
+              Arg("container_id", type=str, positional=True, required=True),
+              Arg("note", type=str, positional=True, required=True),
           )),
       ))
 async def update_container_note(...): ...
@@ -333,17 +350,17 @@ class ConsoleExtension(Protocol):
 1. **命令路由与分词**：
    - `shlex.split(command)` 分词；匹配 `CommandTable.by_path`（2 词子命令如 `"dept update"`，或 1 词顶层命令如 `"reload"`）或 `ConsoleExtension`（`mcp / openapi / graphql`）。
    - 切出命令名之后的 token 序列，分为：**位置参数序列 `pos_tokens`** 与 **`--选项` 键值对 `opt_tokens`**。
-2. **位置参数解析（`pos_tokens` → `pos_args`，严格从前往后按顺序一对一匹配，不共享位置）**：
+2. **位置参数解析（`pos_tokens` → `pos_args`，严格从前往后按顺序一对一匹配，按 `arg.type` 决定允许的类型与 `Query` 形态）**：
    - 从命令声明中取出 `positional_args = [a for a in cmd.args if a.positional]`：**第 `i` 个位置 token `pos_tokens[i]` 严格对应第 `i` 个位置参数定义 `arg = positional_args[i]`**（不存在两个 `Arg` 共享同一个位置槽位的情况）。
-   - 对每个位置参数 `arg = positional_args[i]` 和对应的输入 `token = pos_tokens[i]`：
-     - **当该 `arg` 只允许单一类型/写法（`arg.alt` 为空，如 `Arg("task_id", positional=True, required=True)` 或 `container note` 的第 0 个 `Arg("container_id", ...)`、第 1 个 `Arg("note", ...)`）**：
-       - 直接按 `arg.name` 在 Python 函数签名中的 schema 类型做校验与转换（`integer` ⇒ 正整数校验，`string` ⇒ 原样字符串），写入 `pos_args[arg.name]`。
-     - **当该 `arg` 声明了允许多种类型和写法（`arg.alt` 非空，如 `Arg("dept_id", positional=True, required=True, alt={"name": "name"})`）**：
-       - **写法 1（显式前缀 `<prefix>:<value>`，且 `<prefix>` 在 `arg.alt` 或等于 `arg.name`，如 `name:研发部`、`name:123`、`dept_id:7`）**：直接映射到对应的目标 Python 参数名（`arg.alt[prefix]` 或 `arg.name`），并按该目标参数的 schema 类型转换；
-       - **写法 2（裸值 `<token>`，无已声明前缀）**：
-         - 先尝试匹配主参数 `arg.name` 的 schema 类型（如 `dept_id` 是 `int`：当 `token.isdigit()` 为纯数字时，映射到 `pos_args["dept_id"] = int(token)`，须 `>= 1`）；
-         - 若不匹配主参数类型（如 `token="研发部"` 非数字），则匹配 `arg.alt` 中类型吻合的备用参数（如 `name` 是 `str`，映射到 `pos_args["name"] = "研发部"`）。
-       - *注：如果某部门名字恰好是纯数字（如 `"123"`），敲 `dept update 123` 会按主类型 `int` 落到 `dept_id=123`；想要按名字找就用显式前缀写法 `dept update name:123`——完全在单个 `Arg` 对象内闭环。*
+   - 对每个位置参数 `arg = positional_args[i]` 和对应的输入 `token = pos_tokens[i]`，按 `arg.type`（未显式指定时取 Python 函数签名中的参数类型）依次匹配：
+     - **当 `arg.type` 包含 `Query(*attrs)`（如 `type=(int, Query("name"))`）且 `token` 形如 `<attr>:<value>`**：
+       - 若 `<attr>` 在 `Query.attrs` 允许的属性列表中（如 `name:研发部`、`name:123`）：直接映射到对应的 Python 方法参数 `pos_args[attr] = value`（并按该参数在函数签名中的类型转换）；
+       - 若 `<attr>` 不在 `Query.attrs` 中：不作为 query 拆分，继续按普通类型匹配或报错。
+     - **当 `arg.type` 允许 `int` 且 `token` 为合法正整数（如 `7`）**：
+       - 转换为整数写入主参数 `pos_args[arg.name] = int(token)`（须 `>= 1`，否则报 `invalid_target`）。
+     - **当 `arg.type` 允许 `str`**：
+       - 写入对应的字符串参数（若 `arg.name` 本身在函数签名中是 `str`，如 `role_name / container_id / note`，直接写入 `pos_args[arg.name] = token`；兼容期若主参数为 `int` 且 `type` 同时允许 `str` 与 `Query("name")`，裸字符串回落到 `Query` 的首个 `str` 属性 `name`）。
+     - **均不匹配 `arg.type` 允许的类型/形态时**：报 `invalid_target`（并提示该位置参数允许的类型与 `attr:value` 写法，如 `<id>` 或 `name:<名称>`）。
    - **末尾内联 JSON 载荷**（如 `dept create '{"name":"研发部"}'` 或 `dept update 7 '{"responsibility":"..."}'`）：
      - 若位置参数末尾带有 JSON 对象字符串（或传入了 `--from payload`），解析为字典 `payload_args`，其键必须在工具 schema 参数名（或 `alias`）内。
 3. **`--选项` 解析与类型转换（`opt_tokens` → `opt_args`）**：
