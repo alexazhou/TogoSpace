@@ -316,9 +316,67 @@ class ConsoleExtension(Protocol):
 - `openapi` 与 `graphql` 共用一个 `SpecConsoleExtension(resources=("openapi", "graphql"), summary="openapi / graphql：...")`，摘要迭代去重后的 `extensions`，保持 `_build_help_summary` 现有的两行扩展摘要格式不变。
 - 转发目标的可见性由各工具自己的 `@tool` 声明（`openapi_call / graphql_call` 写 `CONSOLE_ONLY`），extension 不再需要导出 `FORWARD_TOOL_NAMES`。
 
-## 5. 保留在 console 里的东西（不属于「工具信息」）
+## 5. Console 参数解析与处理逻辑（CLI 引擎流水线）
 
-`consoleParsing`（分词、选项解析、`--from payload` / 内联 JSON 通用展开）、`consoleSchema` 的类型 → 命令行形态翻译、**单一通用参数映射与合并器**（按 `args` 映射位置参数 + `--选项`/JSON 展开 + `bind` 固定参数注入，彻底删掉 5 个 verb 分支处理器）、`ForwardToolCall` 转发、错误格式、全局用法文案。这些是「CLI 引擎」，与具体工具无关。
+`console` 自身只保留与具体工具无关的**通用 CLI 参数解析与转发流水线**（`consoleParsing` + `consoleSchema` + `consoleTool` 统一分发），彻底取代原来的 5 个 `verb` 分支处理器：
+
+### 5.1 统一五步参数解析与合并流水线
+
+当收到 `console(command="...", payload=...)` 时，按以下 5 步执行：
+
+1. **命令路由与分词**：
+   - `shlex.split(command)` 分词；匹配 `CommandTable.by_path`（2 词子命令如 `"dept update"`，或 1 词顶层命令如 `"reload"`）或 `ConsoleExtension`（`mcp / openapi / graphql`）。
+   - 切出命令名之后的 token 序列，分为：**位置参数序列 `pos_tokens`** 与 **`--选项` 键值对 `opt_tokens`**。
+2. **位置参数解析（`pos_tokens` → `pos_args`）**：
+   - 从命令声明中取出 `positional_args = [a for a in cmd.args if a.positional]`：
+     - **情况 A（单目标多候选定位：如 `dept/agent/room` 的 `get/rm/update`，声明了 `Arg("dept_id", positional=True), Arg("name", positional=True)`，一个 `int` 型 ID + 一个 `str` 型名称，共享第 1 个位置槽位）**：
+       - **显式前缀 `<key>:<value>`**（当 `<key>` 命中候选参数名，如 `name:研发部` 或 `dept_id:7`）：直接映射到对应参数（`name="研发部"` 或 `dept_id=7`，`int` 型参数做正整数校验）；
+       - **裸值 `<token>`**（无 `:`，或 `:` 前缀不在候选参数名内，如名字本身含冒号 `a:b`）：
+         - 若 `<token>` 为纯数字（`token.isdigit()`）：映射到 `int` 型候选参数（如 `dept_id = int(token)`，须 `>= 1`，否则报 `invalid_target`）；
+         - 若 `<token>` 为非数字（如 `研发部`）：映射到 `str` 型候选参数（`name = "研发部"`）。
+       - *注：如果某部门名字恰好是纯数字（如 `"123"`），敲 `dept update 123` 会按 ID=123 找；想要按名字找就敲 `dept update name:123`——彻底消解纯数字名字歧义。*
+     - **情况 B（单参数/多顺序位置参数：如 `task get <task_id>` 或 `container note <container_id> <note>`）**：
+       - 按 `positional_args` 声明顺序一一对应赋给 `pos_args[arg.name]`，并根据该参数在 Python 函数签名中的 schema 类型做校验与转换（`integer` ⇒ 正整数校验，`string` ⇒ 原样字符串）。
+     - **情况 C（末尾内联 JSON 位置参数，如 `dept create '{"name":"研发部"}'` 或 `dept update 7 '{"responsibility":"..."}'`）**：
+       - 若位置参数末尾带有 JSON 对象字符串（或传入了 `--from payload`），解析为字典 `payload_args`，其键必须在工具 schema 参数名（或 `alias`）内。
+3. **`--选项` 解析与类型转换（`opt_tokens` → `opt_args`）**：
+   - 将 `--kebab-case` / `--snake_case` / `Arg.alias` 统一归一为 Python 方法的真实参数名 `canonical_name`（未知选项报 `unknown_option`）；
+   - 按工具函数 schema 的参数类型（`boolean / integer / array / object / string`）转换选项值；
+   - 若同一参数同时在 `--选项` 和 `payload_args` 中出现，报 `ambiguous_input_source`（防多来源覆写）。
+4. **位置定位参数与 `--选项` 的冲突与重命名处理（核心：`update` 指定 ID vs 指定名字）**：
+   - **场景 1：`update` 指定的是 ID（如 `dept update 7 --name 产品部 --responsibility 负责产品`）**：
+     - 位置参数命中了 `dept_id=7`（`pos_args = {"dept_id": 7}`）；
+     - 此时 `--name 产品部`（或 JSON `{"name": "产品部"}`）落在 `opt_args["name"]`，**两者键名不同（`dept_id` vs `name`），无冲突**！
+     - 合并后传给 Python 方法：`save_dept(dept_id=7, name="产品部", responsibility="负责产品", overwrite=True)` —— `save_dept` 按 `dept_id=7` 查出原部门，并将其重命名为 `"产品部"`。
+     - 若此时用户又传了 `--dept-id 8`（与已命中的 `pos_args["dept_id"]` 同键冲突），报 `ambiguous_input_source`。
+   - **场景 2：`update` 指定的是名字，且修改其他属性（如 `dept update 研发部 --responsibility 负责研发` 或 `dept update name:研发部 --manager-name 张三`）**：
+     - 位置参数命中了 `name="研发部"`（`pos_args = {"name": "研发部"}`）；
+     - 选项修改的是 `responsibility` / `manager_name`，不碰 `name` 也不碰 `dept_id`；
+     - 合并后传给 Python 方法：`save_dept(name="研发部", responsibility="负责研发", overwrite=True)` —— `save_dept` 按 `name="研发部"` 查出原部门并更新属性。
+   - **场景 3：`update` 指定的是名字，同时又传了 `--dept-id 1`（如 `dept update 研发部 --dept-id 1`）**：
+     - 位置参数已用 `name="研发部"` 定位目标，选项又传了另一个定位键 `dept_id=1`（双重定位来源冲突），报 `ambiguous_input_source`（保持现网 `test_cc6_locator_in_options_is_ambiguous` 护栏通过）。
+   - **场景 4：`update` 指定的是名字，同时又传了 `--name 产品部` 想改名（如 `dept update 研发部 --name 产品部` 或 `dept update name:研发部 --name 产品部`）**：
+     - 位置参数解析出 `pos_args["name"] = "研发部"`，而 `--name` 选项解析出 `opt_args["name"] = "产品部"` —— **两个值争抢底层 Python 函数 `save_dept` 的同一个 `name` 参数（同键双值冲突）**！
+     - **处理策略**：
+       - **在当前工具签名不变的前提下**：CLI 合并器检测到 `name` 同时出现在 `pos_args` 和 `opt_args/payload_args` 中，直接报 `ambiguous_input_source`，并在错误提示中明确引导：**「按名称定位时无法同时用 `--name` 重命名；如需重命名，请先用 `dept get 研发部` 查出 ID，再用 `dept update <id> --name 产品部`」**。
+       - *（可选扩展：如果未来希望直接支持 `dept update 研发部 --name 产品部`，只需在 `save_dept` 等工具层或转发层发现「位置参数是 `name` 且选项也给了 `--name`」时，先按旧 `name` 查出 `dept_id` 填入，再把新 `--name` 作为重命名值传给 `save_dept(dept_id=查出的id, name=新名字)`；或者在 `save_*` 工具签名增加 `new_name` 参数。）*
+5. **合并 `bind`、校验必填项并转发调用**：
+   - 将 `pos_args`、`payload_args`、`opt_args` 合并为最终字典 `call_args`；
+   - 按 `setdefault` 语义注入 `cmd.bind`（如 `dept update` 在用户未显式传 `--overwrite` 时补入 `overwrite=True`）；
+   - 校验所有 `Arg(required=True)`（或 `required=None` 且函数签名无默认值）的参数均已提供（缺失报 `missing_required_option` / `missing_target`）；
+   - 生成 `ForwardToolCall(tool_name=tool.name, arguments=call_args)` 转发给底层 Python 工具函数执行。
+
+### 5.2 `update` 指定 ID vs 指定名字处理对照表
+
+| 命令行写法 | 位置参数落点 (`pos_args`) | 选项落点 (`opt_args`) | 处理结果 |
+| --- | --- | --- | --- |
+| `dept update 7 --responsibility 研发` | `dept_id=7` | `responsibility="研发"` | ✅ 按 ID=7 定位，更新职责 |
+| `dept update 7 --name 产品部` | `dept_id=7` | `name="产品部"` | ✅ 按 ID=7 定位，**重命名为「产品部」** |
+| `dept update 研发部 --responsibility 研发` | `name="研发部"` | `responsibility="研发"` | ✅ 按名称「研发部」定位，更新职责 |
+| `dept update name:123 --responsibility 研发` | `name="123"` | `responsibility="研发"` | ✅ 显式按名称 `"123"` 定位（不被当成 ID=123） |
+| `dept update 7 --dept-id 8` | `dept_id=7` | `dept_id=8` | ❌ `ambiguous_input_source`（`dept_id` 重复提供） |
+| `dept update 研发部 --dept-id 1` | `name="研发部"` | `dept_id=1` | ❌ `ambiguous_input_source`（名称与 ID 双重定位冲突） |
+| `dept update 研发部 --name 产品部` | `name="研发部"` | `name="产品部"` | ❌ `ambiguous_input_source`（同键 `name` 冲突，提示改用 `dept update <id> --name 产品部`；或由转发层先按旧名解析为 ID 后重命名） |
 
 ## 6. 迁移计划
 
