@@ -65,31 +65,34 @@ flowchart LR
 ```python
 @dataclass(frozen=True)
 class Arg:
-    """位置参数槽位定义（取代嵌套 tuple `(("dept_id", "name"),)`）。
+    """单个参数映射定义：每个参数一个 Arg 对象（而不是多个参数共用一个 Arg）。
 
-    - 单参数位置槽：`Arg("task_id")`、`Arg("agent_name")`（也可直接简写为字符串 `"task_id"`）；
-    - 多候选定位槽：`Arg("dept_id", "name")`（1 个位置参数可按类型/前缀映射到 `dept_id` 或 `name`）。
+    - `name`：对应的 Python 方法参数名（如 `"dept_id"`、`"name"`、`"title_keyword"`）。
+    - `positional`：是否作为命令位置参数（如 `dept rm` 的 `Arg("dept_id"), Arg("name")`）。
+    - `alias`：CLI 短别名（如 `Arg("title_keyword", alias="kw")`），彻底取代独立 `options` 字典。
     """
-    params: tuple[str, ...]
+    name: str                                   # Python 方法参数名："dept_id" / "name" / "task_id"
+    alias: str | None = None                    # 可选：CLI 选项别名（如 "kw" → "title_keyword"）
+    positional: bool = True                     # True=位置参数；若仅定义选项别名可设 positional=False（或用 Opt 简写）
 
-    def __init__(self, *params: str) -> None:
-        object.__setattr__(self, "params", params)
+def Opt(name: str, alias: str) -> Arg:
+    """仅给 `--选项` 起别名、不占位置参数槽位的语法糖。"""
+    return Arg(name=name, alias=alias, positional=False)
 
 @dataclass(frozen=True)
 class ConsoleCommand:
-    """工具挂到 console 上的一条子命令：只定义命令入口与参数映射。
+    """工具挂到 console 上的一条子命令：只定义命令入口与参数列表。
 
     - `path`：命令入口（如 `"dept get"`、`"dept update"`、`"reload"`）。
-    - `args`：位置参数 → Python 方法参数名映射（元素为 `Arg(...)` 或单参数 `str`）：
-      - 单参数：如 `args=(Arg("task_id"),)`（或 `args=("task_id",)`）、`args=(Arg("container_id"), Arg("note"))`，按顺序映射到 Python 参数，类型从函数签名读取；
-      - 多候选定位（1 个位置槽位对应多个候选参数）：如 `args=(Arg("dept_id", "name"),)`，第 1 项（`int`）接数字 ID，其余项接 `name:研发部`（及非数字名称）。
-    - `options`：CLI `--选项` 短别名 → Python 方法参数名映射（默认所有非位置参数均自动按 `--kebab-case` 暴露；此处只写额外别名如 `{"kw": "title_keyword"}`）。
+    - `args`：参数列表，**每个参数一个 `Arg` 对象**：
+      - 单位置参数：`args=(Arg("task_id"),)`；
+      - 同一位置支持按 ID 或按名称定位（每个参数各自一个 `Arg`）：`args=(Arg("dept_id"), Arg("name"))`（解析器看函数签名类型：`dept_id: int` 接数字 ID，`name: str` 接 `name:研发部` 或名称）；
+      - 仅声明选项别名：`args=(Opt("title_keyword", "kw"),)`（或 `Arg("title_keyword", alias="kw", positional=False)`）。
     - `bind`：1 函数多命令时绑定给 Python 方法的固定入参（仅 `dept/agent/room/role update` 绑定 `{"overwrite": True}`，用来告诉 `save_*` 走更新分支；采用 `setdefault` 语义，允许显式 `--overwrite=false` 覆盖）。
     - `help`：可选的命令级补充说明（只进 `console help`，不进模型 tool schema）。
     """
     path: str                                   # 命令入口："dept get" / "task ls" / "reload"
-    args: tuple[Arg | str, ...] = ()            # 位置参数映射：(Arg("dept_id", "name"),) 或 ("task_id",)
-    options: Mapping[str, str] = {}             # 选项别名映射：{"kw": "title_keyword"}
+    args: tuple[Arg, ...] = ()                  # 每个参数一个 Arg 对象：(Arg("dept_id"), Arg("name"))
     bind: Mapping[str, Any] = {}                # 绑定给 Python 方法的固定参数（如 update 绑定 {"overwrite": True}）
     help: tuple[str, ...] = ()                  # 可选的命令级 help 补充
 
@@ -139,7 +142,7 @@ def tool(**kwargs) -> Callable[[F], F]:
         "有子部门且未加 --recursive 时由服务层以 DEPT_HAS_CHILDREN 拒绝，不会部分删除。",
         "加 --dry-run 只预演（跑完全部校验，不写库），返回体里是 would_delete。",
     ),
-    console=(ConsoleCommand("dept rm", args=(Arg("dept_id", "name"),)),),
+    console=(ConsoleCommand("dept rm", args=(Arg("dept_id"), Arg("name"))),),
 )
 async def delete_dept(name=None, dept_id=None, recursive=False, dry_run=False, _context=None) -> dict: ...
 
@@ -147,13 +150,13 @@ async def delete_dept(name=None, dept_id=None, recursive=False, dry_run=False, _
     visibility=ToolVisibility.BOTH, converged=True,
     console=(
         ConsoleCommand("dept create"),
-        ConsoleCommand("dept update", args=(Arg("dept_id", "name"),), bind={"overwrite": True}),
+        ConsoleCommand("dept update", args=(Arg("dept_id"), Arg("name")), bind={"overwrite": True}),
     ),
 )
 async def save_dept(...): ...
 
 @tool(visibility=ToolVisibility.BOTH,
-      console=(ConsoleCommand("task ls", options={"kw": "title_keyword"}),))
+      console=(ConsoleCommand("task ls", args=(Opt("title_keyword", "kw"),)),))
 async def list_tasks(...): ...
 
 @tool(visibility=ToolVisibility.BOTH,
@@ -161,8 +164,11 @@ async def list_tasks(...): ...
 async def get_task_detail(task_id: int, event_limit: int = 3, _context=None) -> dict: ...
 
 @tool(visibility=ToolVisibility.BOTH,
-      console=(ConsoleCommand("task update", args=(Arg("task_id"),),
-                              options={"status": "new_status", "remove_field": "clear_fields", "action": "workflow_action"}),))
+      console=(ConsoleCommand("task update",
+                              args=(Arg("task_id"),
+                                    Opt("new_status", "status"),
+                                    Opt("clear_fields", "remove_field"),
+                                    Opt("workflow_action", "action"))),))
 async def update_task(task_id: int, ...): ...
 
 @tool(visibility=ToolVisibility.BOTH, converged=True,
