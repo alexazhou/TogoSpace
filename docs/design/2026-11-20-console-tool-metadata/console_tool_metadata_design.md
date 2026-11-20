@@ -279,9 +279,10 @@ def get_table() -> CommandTable
 
 `build()` 时直接 `raise`（`tool=None` 的 `HELP_SPEC` 豁免工具 schema 校验）：
 
-- 两个工具声明了同一 `key`；同一命令下别名撞真名 / kebab 撞键（现有 `_register` 逻辑）；
-- `args`（展开全部槽位候选参数名）、`options` 的目标、`bind` 的键不在该工具 schema 里，或同一多候选槽位内有重复参数名；
-- 多位置参数顺序校验：当 `len(args) > 1` 时，`tuple(param_names[:len(args)]) == args`（防止工具参数调换顺序后位置参数静默塞错位）；
+- 两个工具声明了同一 `key`；同一命令下 `Arg.alias` 撞真名 / kebab 撞键（现有 `_register` 逻辑）；
+- `Arg.name`、`Query.attrs`、`bind` 的键不在该工具 schema 里；
+- `Arg.type` 类型与工具 schema 一致性：`type` 元素仅允许 `int` / `str` / `Query`；声明含 `int` 时 `param_kinds(arg.name) == "integer"`，仅 `str` 时 `param_kinds(arg.name) == "string"`，`Query(*attrs)` 的每个 `attr` 在工具 schema 中存在；
+- 多位置参数顺序校验：当 `positional=True` 的 `Arg` 个数 `> 1` 时，顺序与函数签名参数顺序一致；`...`（若存在）只能作为 `args` 的最后一项（表示该命令接受内联 JSON / `--from payload` 整份配置输入）；
 - 挂了 console 命令的工具，静态 `visibility` 不是 `console_visible`；
 - `converged=True` 但 `visibility != BOTH`；
 - `CONSOLE_ONLY` 工具既无命令、也没被任何 extension 用作转发目标（死工具，告警/报错）。
@@ -351,18 +352,18 @@ class ConsoleExtension(Protocol):
    - `shlex.split(command)` 分词；匹配 `CommandTable.by_path`（2 词子命令如 `"dept update"`，或 1 词顶层命令如 `"reload"`）或 `ConsoleExtension`（`mcp / openapi / graphql`）。
    - 切出命令名之后的 token 序列，分为：**位置参数序列 `pos_tokens`** 与 **`--选项` 键值对 `opt_tokens`**。
 2. **位置参数解析（`pos_tokens` → `pos_args`，严格从前往后按顺序一对一匹配，按 `arg.type` 决定允许的类型与 `Query` 形态）**：
-   - 从命令声明中取出 `positional_args = [a for a in cmd.args if a.positional]`：**第 `i` 个位置 token `pos_tokens[i]` 严格对应第 `i` 个位置参数定义 `arg = positional_args[i]`**（不存在两个 `Arg` 共享同一个位置槽位的情况）。
+   - 从命令声明中取出 `positional_args = [a for a in cmd.args if isinstance(a, Arg) and a.positional]`：**第 `i` 个位置 token `pos_tokens[i]` 严格对应第 `i` 个位置参数定义 `arg = positional_args[i]`**（不存在两个 `Arg` 共享同一个位置槽位的情况）。
    - 对每个位置参数 `arg = positional_args[i]` 和对应的输入 `token = pos_tokens[i]`，按 `arg.type`（未显式指定时取 Python 函数签名中的参数类型）依次匹配：
-     - **当 `arg.type` 包含 `Query(*attrs)`（如 `type=(int, Query("name"))`）且 `token` 形如 `<attr>:<value>`**：
-       - 若 `<attr>` 在 `Query.attrs` 允许的属性列表中（如 `name:研发部`、`name:123`）：直接映射到对应的 Python 方法参数 `pos_args[attr] = value`（并按该参数在函数签名中的类型转换）；
-       - 若 `<attr>` 不在 `Query.attrs` 中：不作为 query 拆分，继续按普通类型匹配或报错。
-     - **当 `arg.type` 允许 `int` 且 `token` 为合法正整数（如 `7`）**：
-       - 转换为整数写入主参数 `pos_args[arg.name] = int(token)`（须 `>= 1`，否则报 `invalid_target`）。
-     - **当 `arg.type` 允许 `str`**：
-       - 写入对应的字符串参数（若 `arg.name` 本身在函数签名中是 `str`，如 `role_name / container_id / note`，直接写入 `pos_args[arg.name] = token`；兼容期若主参数为 `int` 且 `type` 同时允许 `str` 与 `Query("name")`，裸字符串回落到 `Query` 的首个 `str` 属性 `name`）。
-     - **均不匹配 `arg.type` 允许的类型/形态时**：报 `invalid_target`（并提示该位置参数允许的类型与 `attr:value` 写法，如 `<id>` 或 `name:<名称>`）。
-   - **末尾内联 JSON 载荷**（如 `dept create '{"name":"研发部"}'` 或 `dept update 7 '{"responsibility":"..."}'`）：
-     - 若位置参数末尾带有 JSON 对象字符串（或传入了 `--from payload`），解析为字典 `payload_args`，其键必须在工具 schema 参数名（或 `alias`）内。
+     - **当 `arg.type` 包含 `Query(*attrs)`（如 `type=(int, Query("name"))` 或 `type=Query("role_name")`）**：
+       - **前缀写法 `<attr>:<value>`**（当 `<attr>` 在 `Query.attrs` 中，如 `name:研发部`、`name:123`）：直接映射到对应的 Python 方法参数 `pos_args[attr] = value`；
+       - **数字写法**（当 `arg.type` 同时含 `int` 且 `token.isdigit()` 为纯数字，如 `7`）：转换为正整数写入主参数 `pos_args[arg.name] = int(token)`（须 `>= 1`，否则报 `invalid_target`）；
+       - **裸字符串回退**（当 `token` 非纯数字，或前缀不在 `Query.attrs` 中，如 `dept get root`、`dept rm 研发部`、`dept get a:b`）：回退映射到 `Query.attrs[0]`（如 `pos_args["name"] = token`），100% 兼容存量裸名写法。
+     - **当 `arg.type` 仅允许 `int`（如 `task get` 的 `Arg("task_id", type=int, positional=True)`）**：
+       - `token.isdigit()` 且 `int(token) >= 1` 时写入 `pos_args[arg.name] = int(token)`，否则报 `invalid_target`。
+     - **当 `arg.type` 仅允许 `str`（直通位置参数，如 `agent wake` 的 `Arg("agent_name", type=str, positional=True)`、`container note` 的 2 个 `str` 位置参数）**：
+       - 原样写入 `pos_args[arg.name] = token`（且该参数保留在 `display_options` 选项面，不标「不接受选项写法」；而 `type` 含 `int` 或 `Query` 的定位参数从 `display_options` 剔除并按 `int+Query ⇒ <id|名称>`、`Query ⇒ <名称>`、`int ⇒ <id>` 渲染用法行）。
+   - **末尾内联 JSON 载荷与 `--from payload` 准入（由 `args` 末尾是否含 `...` 决定）**：
+     - 仅当 `... in cmd.args`（10 条 `create / update` 命令，如 `args=(Arg(...), ...)` 或 `args=(...,)`）时，允许额外传 1 个内联 JSON 对象位置参数或 `--from payload`，解析为字典 `payload_args`；不含 `...` 的命令（如 `dept ls / dept get / dept rm / time get`）传内联 JSON 或 `payload` 一律按原错误码拒绝。
 3. **`--选项` 解析与类型转换（`opt_tokens` → `opt_args`）**：
    - 将 `--kebab-case` / `--snake_case` / `Arg.alias` 统一归一为 Python 方法的真实参数名 `canonical_name`（未知选项报 `unknown_option`）；
    - 按工具函数 schema 的参数类型（`boolean / integer / array / object / string`）转换选项值；
