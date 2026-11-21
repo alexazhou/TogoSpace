@@ -179,7 +179,6 @@ def tool(**kwargs) -> Callable[[F], F]:
                     Target("name", type=str),                  # ③ 兜底裸串    → tool.name
                 ),
                 positional=True,
-                required=True,
             ),
         )),
     ),
@@ -202,7 +201,7 @@ async def create_dept(
     visibility=ToolVisibility.BOTH,
     console=(
         ConsoleCommand("dept", "update", payload=True, args=(
-            Arg(Target("dept_id", type=int), positional=True, required=True),
+            Arg(Target("dept_id", type=int), positional=True),
         )),
     ),
 )
@@ -219,7 +218,7 @@ async def update_dept(
     visibility=ToolVisibility.BOTH,
     console=(
         ConsoleCommand("task", "update", payload=True, args=(
-            Arg(Target("task_id", type=int), positional=True, required=True),
+            Arg(Target("task_id", type=int), positional=True),
             Arg(Target("new_status"), alias="status"),
             Arg(Target("clear_fields"), alias="remove-field"),
             Arg(Target("workflow_action"), alias="action"),
@@ -239,8 +238,8 @@ async def reload_team(_context=None) -> dict: ...
     group="container",
     console=(
         ConsoleCommand("container", "note", args=(
-            Arg(Target("container_id", type=str), positional=True, required=True),
-            Arg(Target("note", type=str), positional=True, required=True),
+            Arg(Target("container_id", type=str), positional=True),
+            Arg(Target("note", type=str), positional=True),
         )),
     ),
 )
@@ -273,7 +272,7 @@ def get_table() -> CommandTable
 
 - **分组隔离不变**：`FuncTool` 新增 `spec: ToolSpec` 字段（同时支持 `async def` 与同步 `def` 如 `get_time`）。`core.py` 仍将 `_func_tools`（`group="default"`）与 `_container_func_tools`（`group="container"`）物理分离，保证 `get_tools()` 默认不带容器工具（Native / Claude SDK 暴露面零变化）。
 - **规范排序与别名消费边界**：`by_path` 索引主名 + 所有 `action` 别名（如 `dept rm` 与 `dept remove` 均可路由）；而 `by_resource`、`HELP_SUMMARY` 与 `ACTIONS_BY_RESOURCE`（报错候选）**只收录 `primary_action` 主名**，按预设资源顺序及 `ls / get / create / update / rm / 其余` 排序，避免摘要重复或顺序随 `tools.py` 抖动。
-- **选项面同源**：`param_names / option_kinds / boolean_options / command_options_map / display_options / positional_param_names` 逻辑保留，schema 来源从 `getattr(tools, name)` 改为 `resolved.tool`；`HELP_SPEC` 以 `tool=None` 保留在 `CommandTable` 中。
+- **选项面同源与 `positional_param_names` / `display_options` 派生公式**：`param_names / option_kinds / boolean_options / command_options_map` 的 schema 来源从 `getattr(tools, name)` 改为 `resolved.tool`；定位参数集合 `positional_param_names`（从 `display_options` 剔除并在 help 参数清单标「位置参数，不接受选项写法」）定义为 **`{t.name for a in positional_args for t in a.targets if t.prefix is not None or effective_type(t) == "int"}`**（使得 `dept/agent/room/role/task` 的定位参数被剔除，而 `agent wake` / `agent dm` / `container note` 这类无 `prefix` 纯 `str` 直通位置参数返回 `()`、继续保留在 `display_options` 中，与现网 `HELP_DETAIL` 口径 100% 一致）；`HELP_SPEC` 以 `tool=None` 保留在 `CommandTable` 中。
 - **惰性自举与防循环 import 三条硬约束（C-a / C-b / C-c）**：
   1. **构建不依赖 `core` + 收集列表防污染（C-b）**：`keep_legacy_admin_tools()` 与 `resolve_effective_visibility(declared)` 下沉到 `toolSpec` / `consoleRegistry`，由 `core` 反向 import；`@tool(...)` 装饰器将函数登记到 `toolSpec` 收集列表（对外只读快照 Tuple）。`consoleRegistry.get_table()` 只需确保 `tools` 与 `consoleTool` 已完整导入并按收集列表构造 `FuncTool`（涵盖普通 + 容器两组，共 49 个工具）+ extensions，**绝不反向调用 `core`**；`build(func_tools)` 保持纯函数（单测构造假工具一律直接调 `build` 不写全局列表），`consoleRegistry` 暴露 `clear_cache()` 供测试重置。
   2. **`HELP_SUMMARY` 与 `HELP_DETAIL` 同走 PEP 562 惰性属性（C-a / C-c）**：`consoleTool.py` 删掉模块顶层的 `HELP_SUMMARY = _build_help_summary()` 立即求值，与 `HELP_DETAIL` 一起通过 `__getattr__` 在首次访问时生成。
@@ -397,7 +396,7 @@ class ConsoleExtension(Protocol):
 
 | 阶段 | 内容 | 验收护栏 |
 | --- | --- | --- |
-| **P0** | ① `tools.py` 中 4 个 `save_*` 拆分为 4 对 `create_* / update_*`（总工具数从 45 变为 **49**：43 普通 + 6 容器；`dept/agent/room` 更新仅支持必填 `*_id: int`，删 `overwrite`；`create_*` 必填项进签名并在 docstring `Args` 写清语义）；默认值与提示归位（`create_dept.member_names=[]`、`list_tasks` 含 `mine` 无过滤默认 `scope="self"` + `auto_filled_filters`、`create_task` 返回 `hint`）；同步更新 `toolRegistry.CATEGORY_CONFIG` 与 `system_prompt.j2`；<br/>② 新增 `toolSpec.py` + `consoleRegistry.py`，全部 49 个工具（含同步 `get_time`）挂 `@tool(...)`；<br/>③ 切换 `consoleTool.py` 到 `consoleRegistry.get_table()` 与四步流水线 | ① **import 冒烟**：`python -c "import service.funcToolService.consoleCommands"` 零异常、无半初始化重入；新模块顶层零 `core / tools` import；<br/>② **独立基线可见性校验（49 个工具 × D2 开/关 = 98 个断言）**：用独立期望表逐个比对——除 4 对新拆工具及「废止 #187 裁定②的 8 个 `BOTH` 工具（`task` 四工具 + `mcp` 四工具在 D2 关闭时从 `BOTH` 变为 `CONSOLE_ONLY`）」外与现网 100% 全等；加 smoke 断言 D2 关闭时 `get_tools()` 不含这 8 个工具但 `console("task ...")` / `console("mcp ...")` 仍可用；硬断言 `update_container_note == CONSOLE_ONLY` 且 `group == "container"` 精确等于原 6 项；<br/>③ **有意行为变化清单与 schema 重定基线**：明确登记 4 项有意变化并更新对应单测与 schema 快照（`test_tool_schema_nullable.py`、`test_tool_schema_snapshot.py`）：<br/>  a) `save_*` 拆为 `create_*/update_*`（45 → 49 工具，必填项由第 2 跳 schema 校验拦截）；<br/>  b) `dept/agent/room update` 仅接受正整数 ID（传名称报 `invalid_target` 并提示先 `get` 查 ID）；<br/>  c) `dept/room rm 0` 在位置解析层即以 `invalid_target` 拦截（不再下穿服务层报不存在）；<br/>  d) D2 关闭时 `task` 与 `mcp` 共 8 个工具统一收敛为 `CONSOLE_ONLY` |
+| **P0** | ① `tools.py` 中 4 个 `save_*` 拆分为 4 对 `create_* / update_*`（总工具数从 45 变为 **49**：43 普通 + 6 容器；`dept/agent/room` 更新仅支持必填 `*_id: int`，删 `overwrite`；`create_*` 必填项进签名并在 docstring `Args` 写清语义）；默认值与提示归位（`create_dept.member_names=[]`、`list_tasks` 含 `mine` 无过滤默认 `scope="self"` + `auto_filled_filters`、`create_task` 返回 `hint`）；同步更新 `toolRegistry.CATEGORY_CONFIG` 与 `system_prompt.j2`；<br/>② 新增 `toolSpec.py` + `consoleRegistry.py`，全部 49 个工具（含同步 `get_time`）挂 `@tool(...)`；<br/>③ 切换 `consoleTool.py` 到 `consoleRegistry.get_table()` 与四步流水线 | ① **import 冒烟**：`python -c "import service.funcToolService.consoleCommands"` 零异常、无半初始化重入；新模块顶层零 `core / tools` import；<br/>② **独立基线可见性校验（49 个工具 × D2 开/关 = 98 个断言）**：用独立期望表逐个比对——除 4 对新拆工具及「废止 #187 裁定②的 8 个 `BOTH` 工具（`task` 四工具 + `mcp` 四工具在 D2 关闭时从 `BOTH` 变为 `CONSOLE_ONLY`）」外与现网 100% 全等；加 smoke 断言 D2 关闭时 `get_tools()` 不含这 8 个工具但 `console("task ...")` / `console("mcp ...")` 仍可用；硬断言 `update_container_note == CONSOLE_ONLY` 且 `group == "container"` 精确等于原 6 项；<br/>③ **有意行为变化清单与 schema 重定基线**：明确登记 5 项有意变化并更新对应单测与 schema 快照（`test_tool_schema_nullable.py`、`test_tool_schema_snapshot.py`）：<br/>  a) `save_*` 拆为 `create_*/update_*`（45 → 49 工具，必填项由第 2 跳 schema 校验拦截）；<br/>  b) `dept/agent/room update` 仅接受正整数 ID（传名称报 `invalid_target` 并提示先 `get` 查 ID）；<br/>  c) `dept/room rm 0` 在位置解析层即以 `invalid_target` 拦截（不再下穿服务层报不存在）；<br/>  d) D2 关闭时 `task` 与 `mcp` 共 8 个工具统一收敛为 `CONSOLE_ONLY`；<br/>  e) `Target.prefix`（如 `name:<值>`）显式前缀定位自 P0 启用（原整串当名称变为剥除前缀后按名称定位，解决纯数字名称如 `name:123` 的定位问题） |
 | **P1** | 清理旧实现：删 `COMMAND_SPECS`、`_OPTION_ALIASES`、`LEGACY_CONVERGED_TOOLS`、`_declared_visibility` 一族、两个 `FORWARD_TOOL_NAMES`、`CONTAINER_TOOL_NAMES`；driver 自中断改读 `FuncTool.spec` | 全量 console 单测与集成测试通过 |
 | **P2** | help 收拢与去重：`_HELP_OVERLAY` 按 §5.3 收归 `@tool` / `ConsoleCommand`，删冗余手写条目 | 人工审 help diff；更新 help 体积基线（#154 CC6） |
 | **P3** | `ConsoleExtension` 协议接入 `mcp / openapi / graphql` | 现有 mcp / spec 测试全绿 |
