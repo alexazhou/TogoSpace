@@ -100,19 +100,20 @@ flowchart LR
 class Target:
     """单个值匹配与映射目标：console token（prefix + type）→ tool 参数 `name`。"""
     name: str                                   # 映射到的 Python 工具参数名
-    type: type[int] | type[str] | None = None   # 期望类型（None = 跟随工具函数签名）
+    type: type[int] | type[str] | None = None   # 期望类型（None = 从工具 schema 派生 integer→int / string→str；派生不出则 build 报错）
     prefix: str | None = None                   # 可选前缀（如 "name:"），命中后剥除再按 type 转换
 
 @dataclass(frozen=True)
 class Arg:
     """CLI 参数槽位（参考 Click / Typer / Clap）：
     - `target`：单个 `Target`，或有序元组 `tuple[Target, ...]`（从上往下依次尝试匹配，首个命中即落盘）；
-    - 位置参数（`positional=True`）严格按声明顺序占槽位 0, 1, 2...；
+    - 位置参数（`positional=True`）严格按声明顺序占槽位 0, 1, 2...，必填性由位置槽个数决定（恒必填）；
+    - `required` 仅对 `positional=False` 的 `--选项` 生效（True=必选，False=可选，None=跟随函数签名默认值）；
     - 槽位属性（`positional / required / alias`）只定义在 `Arg` 上，与 `Target` 彻底分离。
     """
     target: Target | tuple[Target, ...]
-    required: bool | None = None                # True=必选，False=可选，None=跟随函数签名默认值
-    positional: bool = False                    # True=位置参数，False=--选项
+    required: bool | None = None                # 仅用于非位置选项：True=必选，False=可选，None=跟随函数签名默认值（positional=True 恒必填）
+    positional: bool = False                    # True=位置参数（恒必填），False=--选项
     alias: str | None = None                    # 可选：--选项短别名（如 "kw" → "title_keyword"）
 
     @property
@@ -270,23 +271,24 @@ def build(func_tools: Iterable[FuncTool], extensions: Iterable[ConsoleExtension]
 def get_table() -> CommandTable
 ```
 
-- **分组隔离不变**：`FuncTool` 新增 `spec: ToolSpec` 字段。`core.py` 仍将 `_func_tools`（`group="default"`）与 `_container_func_tools`（`group="container"`）物理分离，保证 `get_tools()` 默认不带容器工具（Native / Claude SDK 暴露面零变化）。
-- **规范排序**：`by_resource` 按预设资源顺序输出（未知资源追加在末尾），同资源内按 `ls / get / create / update / rm / 其余` 排序，避免 `HELP_SUMMARY` 随 `tools.py` 定义顺序乱序。
+- **分组隔离不变**：`FuncTool` 新增 `spec: ToolSpec` 字段（同时支持 `async def` 与同步 `def` 如 `get_time`）。`core.py` 仍将 `_func_tools`（`group="default"`）与 `_container_func_tools`（`group="container"`）物理分离，保证 `get_tools()` 默认不带容器工具（Native / Claude SDK 暴露面零变化）。
+- **规范排序与别名消费边界**：`by_path` 索引主名 + 所有 `action` 别名（如 `dept rm` 与 `dept remove` 均可路由）；而 `by_resource`、`HELP_SUMMARY` 与 `ACTIONS_BY_RESOURCE`（报错候选）**只收录 `primary_action` 主名**，按预设资源顺序及 `ls / get / create / update / rm / 其余` 排序，避免摘要重复或顺序随 `tools.py` 抖动。
 - **选项面同源**：`param_names / option_kinds / boolean_options / command_options_map / display_options / positional_param_names` 逻辑保留，schema 来源从 `getattr(tools, name)` 改为 `resolved.tool`；`HELP_SPEC` 以 `tool=None` 保留在 `CommandTable` 中。
 - **惰性自举与防循环 import 三条硬约束（C-a / C-b / C-c）**：
-  1. **构建不依赖 `core`（C-b）**：`keep_legacy_admin_tools()` 与 `resolve_effective_visibility(declared)` 下沉到 `toolSpec` / `consoleRegistry`，由 `core` 反向 import；`@tool(...)` 装饰器将函数登记到 `toolSpec` 收集列表（`core` 与 `consoleRegistry` 共享同一事实源）。`consoleRegistry.get_table()` 只需确保 `tools` 与 `consoleTool` 已导入并按收集列表构造 `FuncTool`（涵盖普通 + 容器两组）+ extensions，**绝不反向调用 `core`**，避免 `import core` 半初始化重入。
+  1. **构建不依赖 `core` + 收集列表防污染（C-b）**：`keep_legacy_admin_tools()` 与 `resolve_effective_visibility(declared)` 下沉到 `toolSpec` / `consoleRegistry`，由 `core` 反向 import；`@tool(...)` 装饰器将函数登记到 `toolSpec` 收集列表（对外只读快照 Tuple）。`consoleRegistry.get_table()` 只需确保 `tools` 与 `consoleTool` 已完整导入并按收集列表构造 `FuncTool`（涵盖普通 + 容器两组，共 49 个工具）+ extensions，**绝不反向调用 `core`**；`build(func_tools)` 保持纯函数（单测构造假工具一律直接调 `build` 不写全局列表），`consoleRegistry` 暴露 `clear_cache()` 供测试重置。
   2. **`HELP_SUMMARY` 与 `HELP_DETAIL` 同走 PEP 562 惰性属性（C-a / C-c）**：`consoleTool.py` 删掉模块顶层的 `HELP_SUMMARY = _build_help_summary()` 立即求值，与 `HELP_DETAIL` 一起通过 `__getattr__` 在首次访问时生成。
   3. **新模块顶层零 `core / tools` import**：`toolSpec.py`、`consoleRegistry.py`、`consoleCommands.py` 顶层不 import `core` 或 `tools`，对外符号通过函数内延迟 import 或 PEP 562 `__getattr__` 转发给 `get_table()`。
 
 ### 4.2 构建期一致性校验（fail-fast）
 
 `build()` 时直接 `raise`（`tool=None` 的 `HELP_SPEC` 豁免工具 schema 校验）：
-- 命令冲突：所有 `cmd.keys`（含 action 别名）全局唯一，不允许冲突；`action` 为元组时不能为空；顶层命令（`action == ""`，如 `"reload"`）不能与两段命令的 `resource` 或 `extension.resources` 冲突；同一命令下 `Arg.alias` 撞真名 / kebab 撞键；
-- 参数与类型一致性：`arg.targets` 非空；每个 `Target.name` 都在该工具 schema 里，`Target.type` 仅允许 `int` / `str` / `None` 且与 schema 一致（`int` ↔ `integer`，`str` ↔ `string`）；
-- 多目标与别名约束：多 `Target` 元组仅允许用于 `positional=True`，且无 `prefix` 的 `str` 兜底项只能排在最后一位（防后续分支不可达）；`Arg.alias` 仅允许用于单 `Target` 的非位置选项；
-- 位置参数顺序：不允许在 `positional=True, required=False` 之后再声明 `positional=True, required=True`；多位置参数顺序与函数签名顺序一致；
-- `payload=True` 约束：工具至少存在 1 个非位置参数；
-- 可见性一致性：挂了 console 命令的工具静态 `visibility` 须为 `console_visible`。
+- **自举完整性校验**（仅默认 `get_table()` 全量构建时校验）：收集列表必须包含 `console` 自身，且 `group == "container"` 的工具数恰好为 6 个（防止模块半初始化时抢跑建表漏工具）；
+- **命令冲突与别名边界**：所有 `cmd.keys`（含 action 别名）全局唯一，不允许冲突；`action` 为元组时不能为空；顶层命令（`action == ""`，如 `"reload"`）不能与两段命令的 `resource` 或 `extension.resources` 冲突；`by_resource` 与 `ACTIONS_BY_RESOURCE` 只含 `primary_action` 主名；同一命令下 `Arg.alias` 撞真名 / kebab 撞键；
+- **参数与类型一致性**：`arg.targets` 非空；每个 `Target.name` 都在该工具 schema 里，`Target.type` 仅允许 `int` / `str` / `None`（`None` 从工具 schema 派生 `integer → int`、`string → str`，派生不出直接报错）且与 schema 一致；
+- **多目标与别名约束**：多 `Target` 元组仅允许用于 `positional=True`，且无 `prefix` 的 `str` 兜底项只能排在最后一位（防后续分支不可达）；`Arg.alias` 仅允许用于单 `Target` 的非位置选项；
+- **位置参数约束**：`positional=True` 的 `Arg` 恒为必填（不允许设 `required=False`），多位置参数顺序与函数签名顺序一致；
+- **`payload=True` 约束**：工具至少存在 1 个非位置参数；
+- **可见性一致性**：挂了 console 命令的工具静态 `visibility` 须为 `console_visible`。
 
 ### 4.3 可见性与自中断
 
@@ -299,7 +301,7 @@ def resolve_effective_visibility(declared: ToolVisibility) -> ToolVisibility:
     return declared
 ```
 
-- D2 开启时：`BOTH` 保持 `BOTH`；D2 关闭时：所有 `BOTH` 工具（含 `task` 与 MCP 注册表工具）统一降为 `CONSOLE_ONLY`，不再保留按工具名特例豁免。
+- D2 开启时：`BOTH` 保持 `BOTH`；D2 关闭时：所有 `BOTH` 工具（含 `task` 四工具与 MCP 注册表四工具）统一降为 `CONSOLE_ONLY`，不再保留按工具名特例豁免。
 - 解析逻辑是纯函数（不查注册表、不维护 `LEGACY_CONVERGED_TOOLS`），`toolRegistry.RegisteredTool.effective_visibility` 直接传 `self.visibility` 即可。
 - 命令是否可用 = 其工具的 `effective_visibility(tool).console_visible`（运行时判定，支持 D2 进程内切换）。
 - 自中断由 `FuncTool.spec` 统一提供：三个 driver 注册工具时读 `spec.self_interrupt` 与 `spec.self_interrupt_predicate`，删除 `"reload_team"` 与 `"console"` 硬编码。
@@ -330,15 +332,17 @@ class ConsoleExtension(Protocol):
 收到 `console(command="...", payload=...)` 后按 4 步执行（取代原 5 个 verb 处理器）：
 
 1. **命令路由与分词**：
-   - `shlex.split(command)` 分词；优先匹配 `ConsoleExtension`（`mcp / openapi / graphql`），再匹配 `CommandTable.by_path`（2 词子命令或 1 词顶层命令如 `"reload"`）。
+   - `shlex.split(command)` 分词；
+   - **`help` 路由**：若 `tokens[0] == "help"`（或任意命令带 `--help / -h`），直接走内置 `HELP_SPEC` 处理器（支持 `help`、`help <resource>`、`help <resource> <action>` 三段解析；若 `<resource>` 属于 `ConsoleExtension` 则转交 `ext.help_payload([resource] + tokens[2:])`）；
+   - **扩展与子命令路由**：优先匹配 `ConsoleExtension`（`mcp / openapi / graphql`），再匹配 `CommandTable.by_path`（2 词子命令含 action 别名，或 1 词顶层命令如 `"reload"`）。
    - 切出命令名之后的 token，拆为位置参数序列 `pos_tokens` 与 `--选项` 键值对 `opt_tokens`。
 2. **位置参数解析（`pos_tokens` → `pos_args` + 可选 `inline_payload_token`）**：
-   - 取 `positional_args = [a for a in cmd.args if a.positional]`，记必填数为 `min_pos`、总数为 `max_pos`。
-   - `cmd.payload` 为 `True` 时允许在位置参数后多带 **1 个** token 作为 `inline_payload_token`（允许数 `min_pos .. max_pos + 1`）；数量越界报 `invalid_argument_count`（定位参数被写成 `--dept-id` 等选项时附 `_locator_rewrite_hint` 改写提示）。
-   - 前 `min(len(pos_tokens), max_pos)` 个 token 严格按位置 `i` 一对一匹配 `arg = positional_args[i]`，对其 `arg.targets` **从上往下依次尝试匹配**，首个命中即写入 `pos_args[target.name] = parsed_value`（全部不命中报 `invalid_target`）：
-     - 若 `target.prefix` 非空：仅当 `token.startswith(target.prefix)` 时命中，剥除前缀得到 `raw`（`raw` 为空报 `invalid_target`），再按 `target.type` 转换；
-     - 若 `target.type is int`：`raw.isdigit()` 且 `int(raw) >= 1` 时命中并转为 `int`；
-     - 若 `target.type is str`（或 `None` 跟随 `string`）：命中并原样返回 `raw`。
+   - 取 `positional_args = [a for a in cmd.args if a.positional]`（位置参数恒必填，记槽位数为 `num_pos`）。
+   - `cmd.payload` 为 `True` 时允许在位置参数后多带 **1 个** token 作为 `inline_payload_token`（允许数 `num_pos .. num_pos + 1`，无 `payload` 命令允许数固定为 `num_pos`）；数量越界报 `invalid_argument_count`（定位参数被写成 `--dept-id` 等选项时附 `_locator_rewrite_hint` 改写提示）。
+   - 前 `num_pos` 个 token 严格按位置 `i` 一对一匹配 `arg = positional_args[i]`，对其 `arg.targets` **从上往下依次尝试匹配**（区分「形态不匹配 ⇒ 试下一个 Target」与「形态已认领但值非法 ⇒ 立即报 `invalid_target`」）：
+     - 若 `target.prefix` 非空：仅当 `token.startswith(target.prefix)` 时**认领**该 token，剥除前缀得到 `raw`（`raw` 为空直接报 `invalid_target`，不再回退后续 Target），再按有效类型（`target.type` 或 schema 派生类型）转换；不以 `prefix` 开头则试下一个 Target；
+     - 若有效类型为 `int`：当 `raw.isdigit()` 为真时**即认领该 token（不再回退后续 `str` Target）**——若 `int(raw) >= 1` 则命中并转为 `int`，若 `int(raw) < 1`（如 `"0"`）则**直接报 `invalid_target`**（防止 `dept get 0` / `dept rm 0` 静默滑落到按名字 `"0"` 查询/删除；对只接受 `int` 的 `update` 命令，若传入非数字如 `dept update 研发部`，报 `invalid_target` 并附引导「`update` 只接受正整数 ID；请先用 `get <名称>` 查询 ID」）；
+     - 若有效类型为 `str`：认领并原样返回 `raw`。
 3. **`--选项` 与整包 `payload` 解析（→ `opt_args` + `payload_args`）**：
    - `--kebab-case` / `--snake_case` / `Arg.alias` 统一归一为真实参数名（未知选项报 `unknown_option`），按 schema 类型转换值。
    - `cmd.payload` 开关收口整包配置输入：
@@ -348,7 +352,7 @@ class ConsoleExtension(Protocol):
    - 冲突校验（禁止静默覆盖）：位置槽位占用的所有目标参数（`{t.name for a in positional_args for t in a.targets}`）不得出现在 `--选项` 或 `payload_args`；同一普通参数不得同时出现在 `payload_args` 与 `opt_args`（均报 `ambiguous_input_source`）。
 4. **合并、必填校验与转发**：
    - `call_args = {**pos_args, **payload_args, **opt_args}`；
-   - 校验所有 `Arg(required=True)`（或 `required=None` 且签名无默认值）参数均已提供（缺失报 `missing_required_option` / `missing_target`）；
+   - 校验所有必填选项（`positional=False` 且 `Arg(required=True)`，或未显式声明 `required` 但函数签名无默认值的参数）均已提供（缺失报 `missing_required_option`）；
    - 抛出 `ForwardToolCall(tool_name=tool.name, arguments=call_args)` 交第 2 跳鉴权与执行。
 
 ### 5.2 `update` 纯 ID 定位与重命名示例
@@ -358,20 +362,26 @@ class ConsoleExtension(Protocol):
 | `dept update 7 --responsibility 研发` | `dept_id=7` | `responsibility="研发"` | `update_dept(dept_id=7, responsibility="研发")` | ✅ 按 ID 更新职责 |
 | `dept update 7 --name 产品部` | `dept_id=7` | `name="产品部"` | `update_dept(dept_id=7, name="产品部")` | ✅ 按 ID 重命名 |
 | `dept update 7 --from payload` (`{"name": "产品部"}`) | `dept_id=7` | `name="产品部"` | `update_dept(dept_id=7, name="产品部")` | ✅ 整包 payload 无冲突 |
-| `dept update 研发部 --responsibility 研发` | 校验失败 | — | — | ❌ `invalid_target`（只接受正整数 ID） |
+| `dept update 研发部 --responsibility 研发` | 校验失败 | — | — | ❌ `invalid_target`（提示只接受正整数 ID，引导先 `dept get 研发部` 查 ID） |
 | 直接调 tool `update_dept(dept_id=7, name="产品部")` | — | — | `update_dept(dept_id=7, name="产品部")` | ✅ 与 console 口径一致 |
 
 ### 5.3 Help 纯拼接与 `_HELP_OVERLAY` 归宿
 
 | help 片段 | 来源 |
 | --- | --- |
-| 摘要每行 `resource  ls\|get\|...` | `table.by_resource`（规范排序） |
+| 摘要每行 `resource  ls\|get\|...` | `table.by_resource`（规范排序，仅展示 `primary_action` 主名） |
 | mcp / openapi / graphql 摘要行 | 去重后的 `extension.summary` |
-| 用法行 | `ConsoleCommand`（`resource` + `primary_action` + `args`；`payload=True` 时追加 `['<json>' \| --from payload]`） |
+| 用法行 | `ConsoleCommand`（`resource` + `primary_action` + 位置槽占位符 + `payload=True` 时追加 `['<json>' \| --from payload]`） |
 | 用途 | 工具 description 首句 |
 | 参数清单（必填、默认值、别名、位置标注、形态说明） | 工具函数签名 schema + `ConsoleCommand.args` |
 | 补充说明 | `ToolSpec.help`（工具级）+ `ConsoleCommand.help`（命令级） |
 | 全局规则（重复选项、CSV / JSON 等价） | console 自有常量 |
+
+- **用法行位置槽占位符派生规则**（保持现网 help 零意外 diff）：
+  - 单位置槽含多 `Target`（同时覆盖 `int` 与 `str`）：渲染为 `<id|名称>`（如 `dept get <id|名称>`）；
+  - 单位置槽仅 `int` `Target`：渲染为 `<id>`（如 `dept update <id>`、`task get <id>`）；
+  - 单位置槽含 `prefix` 的 `str` `Target`（如 `role get/update/rm`）：渲染为 `<名称>`；
+  - 纯 `str` 直通位置槽（无 `prefix`）：单槽渲染为 `<target>`（如 `agent wake <target>`），多槽按各自 `Target.name` 渲染为 `<container_id> <note>`。
 
 > [!IMPORTANT]
 > `ToolSpec.help` 与 `ConsoleCommand.help` **只进 console help，不进 `get_function_metadata` 产出的模型 schema**。
@@ -387,7 +397,7 @@ class ConsoleExtension(Protocol):
 
 | 阶段 | 内容 | 验收护栏 |
 | --- | --- | --- |
-| **P0** | ① `tools.py` 中 4 个 `save_*` 拆分为 4 对 `create_* / update_*`（`dept/agent/room` 更新仅支持必填 `*_id: int`，删 `overwrite`）；默认值与提示归位（`create_dept.member_names=[]`、`list_tasks` 含 `mine` 无过滤默认 `scope="self"` + `auto_filled_filters`、`create_task` 返回 `hint`）；同步更新 `toolRegistry.CATEGORY_CONFIG` 与 `system_prompt.j2`；<br/>② 新增 `toolSpec.py` + `consoleRegistry.py`，全部工具挂 `@tool(...)`；<br/>③ 切换 `consoleTool.py` 到 `consoleRegistry.get_table()` 与四步流水线（避免拆完 `save_*` 后旧 `COMMAND_SPECS` 失配） | ① **import 冒烟**：`python -c "import service.funcToolService.consoleCommands"` 零异常、无半初始化重入；新模块顶层零 `core / tools` import；<br/>② **可见性校验**：普通工具 + 6 个容器工具逐个断言 `resolve_effective_visibility`（D2 开：`BOTH` 保持 `BOTH`；D2 关：所有 `BOTH` 统一降为 `CONSOLE_ONLY`），硬断言 `update_container_note == CONSOLE_ONLY` 且 `group == "container"` 精确等于原 6 项；<br/>③ **路由与参数验证**：28 条命令路由、`payload` 与纯 ID 更新用例全绿（同步更新现网单测中按名称 `dept/agent/room update` 及旧 D2 豁免名单的断言） |
+| **P0** | ① `tools.py` 中 4 个 `save_*` 拆分为 4 对 `create_* / update_*`（总工具数从 45 变为 **49**：43 普通 + 6 容器；`dept/agent/room` 更新仅支持必填 `*_id: int`，删 `overwrite`；`create_*` 必填项进签名并在 docstring `Args` 写清语义）；默认值与提示归位（`create_dept.member_names=[]`、`list_tasks` 含 `mine` 无过滤默认 `scope="self"` + `auto_filled_filters`、`create_task` 返回 `hint`）；同步更新 `toolRegistry.CATEGORY_CONFIG` 与 `system_prompt.j2`；<br/>② 新增 `toolSpec.py` + `consoleRegistry.py`，全部 49 个工具（含同步 `get_time`）挂 `@tool(...)`；<br/>③ 切换 `consoleTool.py` 到 `consoleRegistry.get_table()` 与四步流水线 | ① **import 冒烟**：`python -c "import service.funcToolService.consoleCommands"` 零异常、无半初始化重入；新模块顶层零 `core / tools` import；<br/>② **独立基线可见性校验（49 个工具 × D2 开/关 = 98 个断言）**：用独立期望表逐个比对——除 4 对新拆工具及「废止 #187 裁定②的 8 个 `BOTH` 工具（`task` 四工具 + `mcp` 四工具在 D2 关闭时从 `BOTH` 变为 `CONSOLE_ONLY`）」外与现网 100% 全等；加 smoke 断言 D2 关闭时 `get_tools()` 不含这 8 个工具但 `console("task ...")` / `console("mcp ...")` 仍可用；硬断言 `update_container_note == CONSOLE_ONLY` 且 `group == "container"` 精确等于原 6 项；<br/>③ **有意行为变化清单与 schema 重定基线**：明确登记 4 项有意变化并更新对应单测与 schema 快照（`test_tool_schema_nullable.py`、`test_tool_schema_snapshot.py`）：<br/>  a) `save_*` 拆为 `create_*/update_*`（45 → 49 工具，必填项由第 2 跳 schema 校验拦截）；<br/>  b) `dept/agent/room update` 仅接受正整数 ID（传名称报 `invalid_target` 并提示先 `get` 查 ID）；<br/>  c) `dept/room rm 0` 在位置解析层即以 `invalid_target` 拦截（不再下穿服务层报不存在）；<br/>  d) D2 关闭时 `task` 与 `mcp` 共 8 个工具统一收敛为 `CONSOLE_ONLY` |
 | **P1** | 清理旧实现：删 `COMMAND_SPECS`、`_OPTION_ALIASES`、`LEGACY_CONVERGED_TOOLS`、`_declared_visibility` 一族、两个 `FORWARD_TOOL_NAMES`、`CONTAINER_TOOL_NAMES`；driver 自中断改读 `FuncTool.spec` | 全量 console 单测与集成测试通过 |
 | **P2** | help 收拢与去重：`_HELP_OVERLAY` 按 §5.3 收归 `@tool` / `ConsoleCommand`，删冗余手写条目 | 人工审 help diff；更新 help 体积基线（#154 CC6） |
 | **P3** | `ConsoleExtension` 协议接入 `mcp / openapi / graphql` | 现有 mcp / spec 测试全绿 |
@@ -400,7 +410,7 @@ class ConsoleExtension(Protocol):
 | --- | --- | --- |
 | 1 | 声明载体 | `@tool(...)` 直接挂在工具函数上，与签名 / docstring 同处 |
 | 2 | help 补充放哪 | `ToolSpec.help` / `ConsoleCommand.help`，只进 console help，不进模型 schema |
-| 3 | `save_*` 拆分与 `update` 定位 | 拆为 `create_*` + `update_*`；`dept/agent/room` 更新只按必填 `*_id: int` 定位（`name` 仅表改名），`role` 按 `name` 定位且不改名，彻底去掉 `overwrite / bind / new_name` |
+| 3 | `save_*` 拆分与 `update` 定位 | 拆为 `create_*` + `update_*`（总工具数 45 → 49）；`dept/agent/room` 更新只按必填 `*_id: int` 定位（`name` 仅表改名），`role` 按 `name` 定位且不改名，彻底去掉 `overwrite / bind / new_name` |
 | 4 | 整包 JSON / `--from payload` | `ConsoleCommand.payload: bool = False` 命令级开关，保持 `Target.name: str` 纯单参数语义 |
-| 5 | D2 开关与 `ToolVisibility` | 不新增 `CONVERGED` 枚举、不保留 `converged` 字段；D2 关闭时所有 `BOTH` 工具（含 `task` 与 MCP 注册表工具）统一降为 `CONSOLE_ONLY`，废止旧按名单豁免 |
+| 5 | D2 开关与 `ToolVisibility`（废止 #187 裁定②） | 不新增 `CONVERGED` 枚举、不保留 `converged` 字段；D2 关闭时所有 `BOTH` 工具（**含原本豁免的 `task` 四工具与 MCP 注册表四工具**）统一降为 `CONSOLE_ONLY`，Operator 已确认知情 |
 | 6 | `CATEGORY_CONFIG` | **本期不改**（`create_* / update_*` 登记为 `ADMIN`）；表内含 11 个 TSP 外部工具无法挂装饰器，后续需要再加 `ToolSpec.category` |
