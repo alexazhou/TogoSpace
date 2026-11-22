@@ -88,8 +88,11 @@ fn close_splash_window(app: &tauri::AppHandle) {
 
 /// 后端就绪：关闭启动画面，打开主窗口。
 pub(crate) fn on_backend_ready(app: &tauri::AppHandle) {
-    close_splash_window(app);
+    // 顺序不能反：先关启动画面再建主窗口，中间会出现「零窗口」瞬间，
+    // Tauri 会判定最后一个窗口已销毁并发出 ExitRequested，外壳据此走优雅退出，
+    // 用户看到的现象就是「启动一下就自己退了」（Windows 上稳定复现）。
     show_main_window(app);
+    close_splash_window(app);
     tray::refresh(app);
 }
 
