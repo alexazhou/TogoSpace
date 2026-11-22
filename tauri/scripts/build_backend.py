@@ -15,23 +15,23 @@ from __future__ import annotations
 
 import argparse
 import os
-import platform
 import shutil
 import subprocess
 import sys
-import sysconfig
+
+from build_common import (
+    arch_from_sysconfig_platform,
+    configure_stdio,
+    host_arch,
+    is_macos,
+    is_windows,
+)
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TAURI_DIR = os.path.dirname(SCRIPT_DIR)
 REPO_ROOT = os.path.dirname(TAURI_DIR)
 
-# Windows 控制台重定向输出时默认用本地代码页（如 cp936），emoji 会抛
-# UnicodeEncodeError；保留编码，只替换不可编码字符。
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(errors="replace")
-    except (AttributeError, ValueError):
-        pass
+configure_stdio()
 
 SPEC_FILE = os.path.join(REPO_ROOT, "scripts", "togo_desktop.spec")
 # 本地构建产物统一放根目录 build/（PyInstaller 中间文件与 onedir 产物同处）
@@ -54,35 +54,16 @@ def _default_python() -> str:
     return sys.executable
 
 
-def _arch_from_sysconfig_platform(plat: str) -> str:
-    """把 `sysconfig.get_platform()` 的结果归一为 `arm64` / `x86_64`。
-
-    `sysconfig.get_platform()` 在编译 Python 解释器时确定（如 `win-amd64` / `win-arm64`），
-    不受 Windows on ARM 环境变量 `PROCESSOR_ARCHITECTURE` 干扰。
-    """
-    normalized = plat.strip().lower()
-    if normalized.endswith(("arm64", "aarch64")):
-        return "arm64"
-    return "x86_64"
-
-
-def _default_arch() -> str:
-    # 默认跟随解释器架构：PyInstaller 只能产出与解释器同架构的产物。
-    if sys.platform.startswith("win"):
-        return _arch_from_sysconfig_platform(sysconfig.get_platform())
-    return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
-
-
 def _python_arch(python: str) -> str:
     """读取解释器自身架构：PyInstaller 只能打包出与解释器同架构的产物。"""
     resolved = shutil.which(python) or python
     if os.path.abspath(resolved) == os.path.abspath(sys.executable):
-        return _default_arch()
+        return host_arch()
     result = subprocess.run(
         [resolved, "-c", "import sysconfig; print(sysconfig.get_platform())"],
         capture_output=True, text=True, check=True,
     )
-    return _arch_from_sysconfig_platform(result.stdout)
+    return arch_from_sysconfig_platform(result.stdout)
 
 
 def _run(command: list[str], env: dict[str, str]) -> None:
@@ -91,7 +72,7 @@ def _run(command: list[str], env: dict[str, str]) -> None:
 
 
 def _backend_executable() -> str:
-    suffix = ".exe" if os.name == "nt" else ""
+    suffix = ".exe" if is_windows() else ""
     return os.path.join(TARGET_DIR, f"Togobot-backend{suffix}")
 
 
@@ -113,7 +94,7 @@ def _sync_target_dir(source: str, target: str) -> None:
     else:
         os.makedirs(target, exist_ok=True)
     # Windows 非管理员终端默认无创建符号链接权限，跳过 symlinks 保留避免 WinError 1314
-    shutil.copytree(source, target, dirs_exist_ok=True, symlinks=(os.name != "nt"))
+    shutil.copytree(source, target, dirs_exist_ok=True, symlinks=not is_windows())
 
 
 def _warn_on_long_paths(target: str, limit: int = 200) -> None:
@@ -123,7 +104,7 @@ def _warn_on_long_paths(target: str, limit: int = 200) -> None:
     再加用户解压/安装的目录深度，相对路径超过 ~200 字符时很容易越过 MAX_PATH=260，
     表现为资源管理器解压 zip 报「路径太长」或 NSIS 安装到一半失败。
     """
-    if os.name != "nt":
+    if not is_windows():
         return
     offenders: list[str] = []
     for dirpath, _dirnames, filenames in os.walk(target):
@@ -152,7 +133,7 @@ def build_backend(python: str, arch: str) -> None:
 
     # PyInstaller 不支持交叉编译：Windows / Linux 上产物架构由解释器决定，
     # 请求的架构和解释器不一致时必须提前失败，否则会打出一个架构不对的 sidecar。
-    if sys.platform != "darwin":
+    if not is_macos():
         interpreter_arch = _python_arch(python)
         if interpreter_arch != arch:
             raise SystemExit(
@@ -181,7 +162,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # 未显式指定 --arch 时：非 macOS 跟随最终选定的 --python 架构，避免系统 Python 与 .venv 架构不同导致自相冲突
-    arch = args.arch or (_default_arch() if sys.platform == "darwin" else _python_arch(args.python))
+    arch = args.arch or (host_arch() if is_macos() else _python_arch(args.python))
     build_backend(args.python, arch)
     return 0
 

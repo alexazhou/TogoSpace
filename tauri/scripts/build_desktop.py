@@ -31,27 +31,21 @@ import glob
 import hashlib
 import json
 import os
-import platform
 import re
 import shutil
 import struct
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import time
+
+from build_common import configure_stdio, host_arch, is_macos, is_windows, platform_key
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TAURI_DIR = os.path.dirname(SCRIPT_DIR)
 REPO_ROOT = os.path.dirname(TAURI_DIR)
 
-# Windows 控制台重定向输出时默认用本地代码页（如 cp936），emoji 会抛
-# UnicodeEncodeError；保留编码，只替换不可编码字符。
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        _stream.reconfigure(errors="replace")
-    except (AttributeError, ValueError):
-        pass
+configure_stdio()
 
 FRONTEND_DIR = os.path.join(REPO_ROOT, "frontend")
 FRONTEND_DIST = os.path.join(FRONTEND_DIR, "dist")
@@ -90,15 +84,6 @@ BUNDLE_TARGETS = {
     "win32": ["nsis"],
     "linux": ["deb"],
 }
-
-
-def platform_key() -> str:
-    """sys.platform 归一：Windows=win32 / macOS=darwin / 其他=linux。"""
-    if sys.platform.startswith("win"):
-        return "win32"
-    if sys.platform == "darwin":
-        return "darwin"
-    return "linux"
 
 
 # ── 通用工具 ─────────────────────────────────────────────────────────────────
@@ -181,17 +166,6 @@ def _pe_arch(path: str) -> str | None:
     return {0x8664: "x86_64", 0xAA64: "arm64"}.get(machine)
 
 
-def host_arch() -> str:
-    """默认架构跟随当前解释器：PyInstaller 只能产出与解释器同架构的 sidecar。
-
-    Windows on ARM 上 `platform.machine()` 依赖 PROCESSOR_ARCHITECTURE 环境变量，
-    `sysconfig.get_platform()` 在编译解释器时确定（win-amd64 / win-arm64），不受其干扰。
-    """
-    if sys.platform.startswith("win"):
-        return "arm64" if sysconfig.get_platform().lower().endswith(("arm64", "aarch64")) else "x86_64"
-    return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
-
-
 def target_triple(arch: str) -> str:
     platform_triples = ARCH_TO_TRIPLE.get(platform_key())
     if platform_triples is None:
@@ -226,7 +200,7 @@ def installer_path(arch: str) -> str:
     优先按当前版本号匹配，并按修改时间降序取最新，避免误拷旧版本。
     """
     version = read_version()
-    if platform_key() == "win32":
+    if is_windows():
         subdir, ext = "nsis", "exe"
     else:
         subdir, ext = "deb", "deb"
@@ -301,7 +275,7 @@ def build_backend(arch: str, python: str | None = None) -> None:
 
 
 def _verify_windows_sidecar_arch(backend_executable: str, arch: str) -> None:
-    if platform_key() != "win32" or not os.path.isfile(backend_executable):
+    if not is_windows() or not os.path.isfile(backend_executable):
         return
     detected = _pe_arch(backend_executable)
     if detected and detected != arch:
@@ -324,7 +298,7 @@ def build_app(arch: str) -> None:
                 "APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH"):
         env.pop(key, None)
     backend_executable = os.path.join(
-        BACKEND_DIR, "Togobot-backend.exe" if os.name == "nt" else "Togobot-backend")
+        BACKEND_DIR, "Togobot-backend.exe" if is_windows() else "Togobot-backend")
     if os.path.isfile(backend_executable):
         # beforeBuildCommand 里会再调一次 build_backend.py，已构建则跳过
         env["TOGOSPACE_SKIP_BACKEND_BUILD"] = "1"
@@ -338,7 +312,7 @@ def build_app(arch: str) -> None:
     )
     _verify_windows_sidecar_arch(backend_executable, arch)
 
-    if platform_key() == "darwin":
+    if is_macos():
         app_path = app_bundle_path(arch)
         if not os.path.isdir(app_path):
             raise SystemExit(f"❌ 未找到构建产物: {app_path}")
@@ -383,7 +357,7 @@ def _codesign(path: str, identity: str, entitlements: str | None = None) -> None
 
 def sign_app(arch: str) -> None:
     print("\n--- sign: 代码签名 ---")
-    if sys.platform != "darwin":
+    if not is_macos():
         raise SystemExit("❌ 签名仅支持 macOS")
     config = resolve_signing_config()
     if config is None:
@@ -422,7 +396,7 @@ def sign_app(arch: str) -> None:
 
 def build_dmg(arch: str) -> None:
     print("\n--- zip: 生成 DMG ---")
-    if sys.platform != "darwin":
+    if not is_macos():
         raise SystemExit("❌ DMG 仅支持 macOS")
     app_path = app_bundle_path(arch)
     if not os.path.isdir(app_path):
@@ -623,7 +597,7 @@ def staple_with_retry(target: str, attempts: int = 3, backoff_seconds: int = 5) 
 
 def notarize_dmg(arch: str) -> None:
     print("\n--- notarize: 公证 + staple ---")
-    if sys.platform != "darwin":
+    if not is_macos():
         raise SystemExit("❌ 公证仅支持 macOS")
     config = resolve_signing_config()
     if config is None:
@@ -657,7 +631,7 @@ def notarize_dmg(arch: str) -> None:
 
 def check(arch: str) -> None:
     print("\n--- check: 签名与公证状态 ---")
-    if platform_key() != "darwin":
+    if not is_macos():
         raise SystemExit("❌ 签名/公证检查仅支持 macOS")
     app_path = app_bundle_path(arch)
     dmg = dmg_path(arch)
@@ -703,7 +677,7 @@ def check(arch: str) -> None:
 
 def parse_actions(raw: str | None) -> list[str]:
     if raw is None:
-        if sys.platform == "darwin":
+        if is_macos():
             return list(PIPELINE_ACTIONS)
         return ["frontend", "backend", "app"]
 
