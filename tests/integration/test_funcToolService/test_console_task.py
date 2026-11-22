@@ -810,10 +810,16 @@ class TestConsoleTaskCommand(ServiceTestCase):
         assert row.priority.value == "HIGH"
 
     async def test_task_create_without_input_is_rejected(self):
-        """裸 `task create` 必须报 `missing_input_source`（不许静默建出空单）。"""
+        """裸 `task create` 必须被显式拒绝（不许静默建出空单）。
+
+        P0 起必填项回到签名（设计 §2.2），所以错误码从 console 层自造的
+        `missing_input_source` 换成 `missing_required_option`，并点名缺哪几个字段——
+        比「你没给输入」更能让模型自纠。
+        """
         result = await self._call("task create", who="owner")
         assert result["success"] is False
-        assert result["error_code"] == "missing_input_source", result
+        assert result["error_code"] == "missing_required_option", result
+        assert set(result["missing"]) == {"title", "assignee_id"}, result
 
     async def test_task_create_is_in_command_index(self):
         """A6 的注册面：`task create` 必须在命令表里（变异删掉这一行即红）。"""

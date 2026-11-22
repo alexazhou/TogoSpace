@@ -520,14 +520,16 @@ def build(
         if resource in two_segment_resources:
             raise ValueError(f"扩展资源 {resource!r} 与命令表里的资源词冲突。")
 
-    specs = tuple(pending)
+    # 命令表按「预设资源顺序 + 动作顺序」规范化：help 摘要、`ACTIONS_BY_RESOURCE` 与
+    # 报错候选都从这份顺序派生，声明顺序（= `tools.py` 里函数的摆放）不该影响可读性。
+    specs = tuple(sorted(pending, key=lambda item: (_resource_rank(item.resource), _action_rank(item.primary_action))))
     by_path: dict[str, ResolvedCommand] = {}
     for cmd in specs:
         for key in cmd.keys:
             by_path[key] = cmd
 
     grouped: dict[str, list[ResolvedCommand]] = {}
-    for cmd in sorted(specs, key=lambda item: (_resource_rank(item.resource), _action_rank(item.primary_action))):
+    for cmd in specs:
         grouped.setdefault(cmd.resource, []).append(cmd)
 
     return CommandTable(

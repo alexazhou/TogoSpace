@@ -62,13 +62,9 @@ from service.roomService import ToolCallContext
 NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("send_chat_msg", "insert_immediately"),
     ("finish_action", "confirm_no_need_talk"),
-    ("save_agent", "overwrite"),
-    ("save_dept", "overwrite"),
     ("delete_dept", "recursive"),
     ("delete_dept", "dry_run"),
-    ("save_room", "overwrite"),
     ("delete_room", "dry_run"),
-    ("save_role_template", "overwrite"),
     ("create_task", "description"),
     ("create_task", "priority"),
     ("create_task", "note"),
@@ -96,13 +92,13 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
 #: #196 更新（41 → 62，+21）：本单把 save 系列的定位/必填参数改成可选（PATCH 语义要求
 #: 「未传」可达），并新增三个 `clear_fields: Optional[list[...]]`（详见报告 §「save 系列
 #: required 放开」）。逐条对应：
-#:   `save_agent`   + name / role_template_name / clear_fields / driver (4)
-#:   `save_dept`    + name / responsibility / manager_name
+#:   `update_agent` + name / role_template_name / clear_fields / driver (4)
+#:   `update_dept`  + name / responsibility / manager_name
 #:                    / member_names / clear_fields                   (5)
-#:   `save_room`    + name / member_names / initial_topic
+#:   `update_room`  + name / member_names / initial_topic
 #:                    / clear_fields                                  (4)
 #:   `update_task`  + new_status / reviewer_id / clear_fields         (3)
-#: （`save_room.initial_topic` 由 `str=''` 改 `Optional[str]=None` 是**必须**的：`''` 无法
+#: （`update_room.initial_topic` 由 `str=''` 改 `Optional[str]=None` 是**必须**的：`''` 无法
 #: 区分「未传」与「清空」，而 #195 之后 null 也不再是豁免通道。）
 #:
 #: ## #198 更新（62 → 63，+1：`console.payload`）
@@ -123,7 +119,7 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
 #:
 #: ## 角色模板 PATCH 下沉（63 → 65，+2：`save_role_template.type/soul`）
 #:
-#: `save_role_template` 改成 PATCH 语义后，`type` / `soul` 的注解从必填 `str` 变为
+#: `update_role_template` 保持 PATCH 语义：`type` / `soul` 的注解为 Optional
 #: `Optional[str] = None`，schema 随之声明 nullable。新建时仍要求 soul、type 默认
 #: USER 的兜底移到工具运行时（与 `save_agent` 的「schema 放开、运行时必填」同口径）。
 #:
@@ -186,32 +182,44 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("update_container_note", "container_id"),
     ("update_container_note", "note"),
     ("update_container_note", "record_id"),
-    ("save_agent", "agent_id"),
-    ("save_agent", "allow_skills"),
-    ("save_agent", "allow_tools"),
-    ("save_agent", "clear_fields"),
-    ("save_agent", "driver"),
-    ("save_agent", "i18n"),
-    ("save_agent", "model"),
-    ("save_agent", "name"),
-    ("save_agent", "role_template_name"),
-    ("save_dept", "clear_fields"),
-    ("save_dept", "dept_id"),
-    ("save_dept", "i18n"),
-    ("save_dept", "manager_name"),
-    ("save_dept", "member_names"),
-    ("save_dept", "name"),
-    ("save_dept", "parent_name"),
-    ("save_dept", "responsibility"),
-    ("save_role_template", "i18n"),
-    ("save_role_template", "soul"),
-    ("save_role_template", "type"),
-    ("save_room", "clear_fields"),
-    ("save_room", "initial_topic"),
-    ("save_room", "max_rounds"),
-    ("save_room", "member_names"),
-    ("save_room", "name"),
-    ("save_room", "room_id"),
+    # #315 P0（变化 a）：`save_*` 拆成 `create_*` / `update_*`，本清单按新签名重定。
+    # 拆分口径：`create_*` 只保留「新建时可省略」的参数（Optional + None 默认）；
+    # `update_*` 保留「PATCH 可省略」的参数 + `clear_fields`；`*_id` 定位参数是必填 int
+    # ⇒ 不在此表（null 必须被拒，归 `NON_OPTIONAL_BUT_DEFAULTED` 之外的必填口径）。
+    ("create_agent", "allow_skills"),
+    ("create_agent", "allow_tools"),
+    ("create_agent", "driver"),
+    ("create_agent", "i18n"),
+    ("create_agent", "model"),
+    ("update_agent", "allow_skills"),
+    ("update_agent", "allow_tools"),
+    ("update_agent", "clear_fields"),
+    ("update_agent", "driver"),
+    ("update_agent", "i18n"),
+    ("update_agent", "model"),
+    ("update_agent", "name"),
+    ("update_agent", "role_template_name"),
+    ("create_dept", "i18n"),
+    ("create_dept", "member_names"),
+    ("update_dept", "clear_fields"),
+    ("update_dept", "i18n"),
+    ("update_dept", "manager_name"),
+    ("update_dept", "member_names"),
+    ("update_dept", "name"),
+    ("update_dept", "parent_name"),
+    ("update_dept", "responsibility"),
+    ("create_role_template", "i18n"),
+    ("create_role_template", "type"),
+    ("update_role_template", "i18n"),
+    ("update_role_template", "soul"),
+    ("update_role_template", "type"),
+    ("create_room", "initial_topic"),
+    ("create_room", "max_rounds"),
+    ("update_room", "clear_fields"),
+    ("update_room", "initial_topic"),
+    ("update_room", "max_rounds"),
+    ("update_room", "member_names"),
+    ("update_room", "name"),
     ("update_task", "append_stages"),
     ("update_task", "clear_fields"),
     # #298：`depends_on: Optional[list[int]] = None`（省略=不改；`[]`=清空）
@@ -547,10 +555,12 @@ def test_field_lists_match_signatures() -> None:
         expected = (tool_name, param_name) in OPTIONAL_WITH_DEFAULT
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
-    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 26
+    # #315 P0（变化 a）：删掉 4 个 `overwrite`（字段已删）⇒ 26 → 22。
+    assert len(NON_OPTIONAL_BUT_DEFAULTED) == 22
     # #314：88 - 3（`mcp_call` 的 args/extra/tool）+ 6（`openapi_call` / `graphql_call`
     # 各 3 个同名字段）= 91。
-    assert len(OPTIONAL_WITH_DEFAULT) == 91
+    # #315 P0（变化 a）：`save_*` 拆分后 Optional+默认参数 91 → 99。
+    assert len(OPTIONAL_WITH_DEFAULT) == 99
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -826,7 +836,10 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 其余 43 个工具的 description / required / 参数说明**逐字未动**——复核方式：
 #: 在拆分前基线上跑 `_text_digest` 的同一段代码（或把本常量换回 `9369c9ff…` 跑本用例），
 #: 结构化 diff 只应出现 `[mcp_call]` 消失 + `[openapi_call]` / `[graphql_call]` 两项。
-BASELINE_TEXT_DIGEST = "8359d5ea450e932761ba9187492cc69fded9b401e0c401ad7956f8c859a0fc51"
+# #315 P0（变化 a）：`save_*` 拆成 `create_*/update_*`（45→49 工具、146→163 参数），
+# 新增 8 个工具的 description 与参数说明必须进基线，否则「说明漂移」在这 8 个工具上
+# 无人钉住。digest 由改后代码现算，改动逐项登记在报告 §「6 项有意变化 · a」。
+BASELINE_TEXT_DIGEST = "e936e0446f879ac202c69aa6884fc35cf09058ec174669681f5278ec4414dfff"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -876,8 +889,10 @@ def test_descriptions_and_required_do_not_drift() -> None:
     # #314：44 → 45 / 142 → 146 —— console 按协议拆分，`mcp_call`（6 参）删除、
     # `openapi_call` / `graphql_call`（各 5 参）新增 ⇒ 工具数 44 − 1 + 2、参数数
     # 142 − 6 + 5 + 5。来历见 `BASELINE_TEXT_DIGEST` 上方注释。
-    assert tools == 45, tools
-    assert params == 146, params  # #292 keep_alive +1、#298 depends_on +1、#314 拆分 +4
+    # #315 P0：45→49 工具 / 146→163 参数（`save_*` 拆分：+8 工具、−4 `overwrite`、
+    # +10 项 create_* 必填、+4 项 `*_id` 定位，余为各工具可选参数）。
+    assert tools == 49, tools
+    assert params == 163, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

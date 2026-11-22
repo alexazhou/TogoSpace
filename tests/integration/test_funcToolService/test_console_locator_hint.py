@@ -112,12 +112,32 @@ class TestConsoleLocatorHint(ServiceTestCase):
         assert f"dept get {self.dept_id}" in message, f"没给可执行的等价写法：{message!r}"
         assert "位置参数" in message, f"没说清定位只接受位置形态：{message!r}"
 
-    async def test_dept_get_with_name_option_gets_rewrite(self):
-        """`dept get --name hint_root`（名字形态的 locator 选项）同样给改写。"""
+    async def test_dept_get_with_name_option_is_unknown(self):
+        """`dept get --name <名称>` 不能当定位用（P0 变化 b：按名通道整体取消）。
+
+        改前 `--name` 是 locator 的名字形态选项，会被拒并给出「改写成位置参数
+        `dept get hint_root`」的提示。变化 b 之后**名字形态本身被取消**（`dept get`
+        只收正整数 ID），所以这个选项连存在都不该存在——继续要求「给它一个改写示例」
+        等于要求把按名定位加回来。这里改钉「选项不存在」+ 提示怎么查 ID。
+        """
+        # ① 只给 `--name`：位置槽先判数量（0 段）⇒ invalid_argument_count。
         result = await self._call("dept get --name hint_root")
-        assert result["success"] is False
-        message = result.get("message", "")
-        assert "dept get hint_root" in message, f"名字形态没给改写：{message!r}"
+        assert result["success"] is False, result
+        assert result["error_code"] == "invalid_argument_count", result
+        assert "位置参数" in result["message"], result["message"]
+
+        # ② 位置参数给足时，`--name` 会落到**原工具的同名可选参数**上，按变化 b 的契约
+        #    「`<id> --name` 同时给出时以 `<id>` 为准」⇒ 仍然按 ID 定位成功。
+        #    这条是 ① 的对照：证明 ① 的拒绝来自「位置参数缺失」，不是「命令整体不可用」。
+        with_pos = await self._call(f"dept get {self.dept_id} --name 不存在的名字")
+        assert with_pos["success"] is True, with_pos
+        assert with_pos["dept"]["dept_id"] == self.dept_id, with_pos
+        assert with_pos["dept"]["dept_name"] == "hint_root", with_pos
+
+        by_pos = await self._call("dept get hint_root")
+        assert by_pos["success"] is False, by_pos
+        assert by_pos["error_code"] == "invalid_target", by_pos
+        assert "dept ls" in by_pos["message"], by_pos["message"]
 
     async def test_help_carries_positional_label_via_real_entry(self):
         """真入口 `help dept get`：--dept-id 行带「位置参数」标注（需求 2）。"""
@@ -139,10 +159,16 @@ class TestConsoleLocatorHint(ServiceTestCase):
             f"定位错位（没定位到目标部门）：{result}"
         )
 
-    async def test_positional_name_form_still_works(self):
-        """`dept get <名称>`（D8 双定位的名字形态）照旧走通。"""
+    async def test_positional_name_form_is_rejected_with_id_hint(self):
+        """`dept get <名称>` 被拒（变化 b：位置槽只收正整数 ID），并提示先 `dept ls` 取 ID。
+
+        对应地，合**法**的位置调用是 `dept get <id>`——由上面
+        `test_positional_id_form_still_works` 钉住（不误伤真调用）。
+        """
         result = await self._call("dept get hint_root")
-        assert result["success"] is True, f"合法名字定位被误拒：{result}"
+        assert result["success"] is False, result
+        assert result["error_code"] == "invalid_target", result
+        assert "dept ls" in result["message"], result["message"]
 
     async def test_plain_missing_target_error_has_no_hint(self):
         """纯缺参（没写 locator 选项）报错不带改写（不无中生有），错误码不变。"""

@@ -5,7 +5,7 @@
     而 `Exception.__str__` 对**两个及以上** args 返回整个元组的 repr，于是
         str(TogoException("已存在成员相同的房间", error_code="ROOM_DUPLICATE"))
         == "('已存在成员相同的房间', 'ROOM_DUPLICATE')"
-    这串东西会原样进入工具层返回给模型的消息（`save_room` / `delete_room` / `delete_dept`）
+    这串东西会原样进入工具层返回给模型的消息（`create_room` / `delete_room` / `delete_dept`）
     以及 REST 的 `error_desc`。
 
 本文件守住三件事：
@@ -97,8 +97,8 @@ def test_tool_error_result_never_emits_tuple_literal():
 
 
 @pytest.mark.asyncio
-async def test_save_room_duplicate_returns_structured_error(monkeypatch):
-    """save_room 触发 ROOM_DUPLICATE：message 无元组形态，error_code 单独给出。"""
+async def test_create_room_duplicate_returns_structured_error(monkeypatch):
+    """create_room 触发 ROOM_DUPLICATE：message 无元组形态，error_code 单独给出。"""
 
     async def _boom(*args, **kwargs):
         raise TogoException("已存在成员相同的房间 'x'，不能创建重复房间", error_code="ROOM_DUPLICATE")
@@ -118,8 +118,8 @@ async def test_save_room_duplicate_returns_structured_error(monkeypatch):
     monkeypatch.setattr(tools.gtRoomManager, "get_room_by_team_and_name", _no_existing)
     monkeypatch.setattr(tools.roomService, "upsert_room", _boom)
 
-    ctx = ToolCallContext(agent_id=1, team_id=1, tool_name="save_room")
-    res = await tools.save_room(name="dup", member_names=["alice", "bob"], _context=ctx)
+    ctx = ToolCallContext(agent_id=1, team_id=1, tool_name="create_room")
+    res = await tools.create_room(name="dup", member_names=["alice", "bob"], _context=ctx)
 
     assert res["success"] is False
     assert res["error_code"] == "ROOM_DUPLICATE"
@@ -189,7 +189,7 @@ def test_tool_except_branches_use_shared_helper():
     这里断言**不出现**手拼返回体的写法，而不是钉一个精确的调用处数——钉数字会让
     每新增一个工具都要改这条护栏，而它真正要防的是「有人绕过 helper 自己拼」。
 
-    历史背景：最初是 3 处（`save_room` / `delete_room` / `delete_dept`），后来
+    历史背景：最初是 3 处（`create_room` / `delete_room` / `delete_dept`），后来
     容器沙箱工具（#109）也用同一个 helper，处数随工具数增长。
     """
     src = inspect.getsource(tools)
@@ -220,7 +220,7 @@ async def test_run_tool_call_fallback_carries_error_code(monkeypatch):
         lambda name: FuncTool(name=name, callable=_boom),
     )
 
-    ctx = ToolCallContext(agent_id=1, team_id=1, tool_name="save_room")
+    ctx = ToolCallContext(agent_id=1, team_id=1, tool_name="create_room")
     res = await funcToolService.run_tool_call("{}", context=ctx)
 
     assert res["success"] is False
@@ -363,7 +363,7 @@ async def test_run_tool_call_logs_error_code_via_repr(monkeypatch):
         lambda name: FuncTool(name=name, callable=_boom),
     )
 
-    ctx = ToolCallContext(agent_id=1, team_id=1, tool_name="save_room")
+    ctx = ToolCallContext(agent_id=1, team_id=1, tool_name="create_room")
     await funcToolService.run_tool_call("{}", context=ctx)
 
     assert len(recorder.errors) == 1

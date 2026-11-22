@@ -48,10 +48,11 @@ from service.funcToolService.tools import (
     get_room_info,
     get_time,
     list_role_templates,
-    save_agent,
-    save_dept,
-    save_role_template,
-    save_room,
+    create_dept,
+    create_room,
+    update_agent,
+    update_dept,
+    update_room,
     wake_up_agent,
 )
 from service.roomService import ToolCallContext
@@ -290,19 +291,27 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert _as_tool_result(direct)["dept"] == via["dept"]
 
     async def test_cc1_get_dept_info_get(self):
-        """get_dept_info(dept_id) ↔ `dept get <名称>` 与 `dept get <id>`。"""
+        """`dept get <id>` 与 `get_dept_info(dept_id=…)` 等价；按名称被拒并提示先 `ls`。
+
+        P0 变化 b：`dept get` 的位置参数是**必填正整数 ID**，按名查询通道取消。
+        所以这条从「名字与 ID 两条通道等价」改成「ID 通道等价 + 名字通道明确报错」——
+        名字通道如果被悄悄加回来，这里会红。
+        """
         root = await gtDeptManager.get_dept_by_name(self.team_id, "root")
         assert root is not None
 
         direct = await get_dept_info(dept_id=root.id, _context=self._ctx())
-        by_name = await self._call("dept get root", _context=self._ctx())
         by_id = await self._call(f"dept get {root.id}", _context=self._ctx())
+        by_name = await self._call("dept get root", _context=self._ctx())
 
-        assert by_name["success"] is True and by_id["success"] is True
-        assert _as_tool_result(direct)["dept"] == by_name["dept"] == by_id["dept"]
+        assert by_id["success"] is True, by_id
+        assert _as_tool_result(direct)["dept"] == by_id["dept"]
+        assert by_name["success"] is False, by_name
+        assert by_name["error_code"] == "invalid_target", by_name
+        assert "dept ls" in by_name["message"], by_name["message"]
 
-    async def test_cc1_save_dept_create(self):
-        """save_dept(新建) ↔ `dept create <json>`。"""
+    async def test_cc1_create_dept(self):
+        """`create_dept`(新建) ↔ `dept create <json>`（P0 前是 `save_dept(overwrite=False)`）。"""
         payload = {
             "name": "cc1_dept",
             "responsibility": "cc1 用",
@@ -313,7 +322,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         via = await self._call(
             f"dept create '{json.dumps(payload, ensure_ascii=False)}'", _context=self._ctx()
         )
-        direct = await save_dept(
+        direct = await create_dept(
             name="cc1_dept_direct",
             responsibility="cc1 用",
             manager_name="mgr7",
@@ -331,12 +340,16 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert set(direct["dept"]["members"]) == {"mgr7", "mgr8"}
         assert set(via["dept"].keys()) == set(direct["dept"].keys()), "字段集合必须一致"
 
-    async def test_cc1_save_dept_update_is_patch(self):
-        """save_dept(更新) ↔ `dept update`，且是 PATCH（见 CC5）。"""
+    async def test_cc1_update_dept_is_patch(self):
+        """`update_dept`(更新) ↔ `dept update <id>`，且是 PATCH（见 CC5）。
+
+        P0 起 `dept update` 的位置参数是**必填正整数 ID**（变化 b）：按名更新通道已取消，
+        名称要先 `dept ls` 换成 ID。这里正是「按 ID 更新」的真入口验证。
+        """
         row = await gtDeptManager.get_dept_by_name(self.team_id, "cc1_dept")
         assert row is not None
         via = await self._call(
-            "dept update cc1_dept '{\"responsibility\":\"改过的职责\"}'", _context=self._ctx()
+            f"dept update {row.id} '{{\"responsibility\":\"改过的职责\"}}'", _context=self._ctx()
         )
         assert via["success"] is True, via
 
@@ -363,19 +376,21 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert all(a.keys() == direct["agents"][0].keys() for a in via["agents"])
 
     async def test_cc1_get_agent_info_get(self, monkeypatch):
-        """get_agent_info(name) ↔ `agent get <名称>` 与 `agent get <id>`。"""
+        """`agent get <id>` 与工具同名参数等价；按名称被拒并提示先 `agent ls`（变化 b）。"""
         runtimes = await self._fake_runtime_agents()
         monkeypatch.setattr(agentService, "get_team_agents", lambda team_id: runtimes)
         ctx = self._ctx()
-        direct = await get_agent_info(name="bob", _context=ctx)
-        by_name = await self._call("agent get bob", _context=ctx)
+        direct = await get_agent_info(agent_id=self.agent_ids["bob"], _context=ctx)
         by_id = await self._call(f"agent get {self.agent_ids['bob']}", _context=ctx)
-        assert by_name["success"] is True and by_id["success"] is True
-        assert by_name["agent"] == _as_tool_result(direct)["agent"]
+        by_name = await self._call("agent get bob", _context=ctx)
+        assert by_id["success"] is True, by_id
         assert by_id["agent"] == _as_tool_result(direct)["agent"], "`agent get <id>` 必须按 id 定位到同一个成员"
+        assert by_name["success"] is False, by_name
+        assert by_name["error_code"] == "invalid_target", by_name
+        assert "agent ls" in by_name["message"], by_name["message"]
 
-    async def test_cc1_save_agent_create(self):
-        """save_agent(新建) ↔ `agent create <json>`。"""
+    async def test_cc1_create_agent(self):
+        """`create_agent`(新建) ↔ `agent create <json>`。"""
         via = await self._call(
             "agent create '{\"name\":\"cc1_agent\",\"role_template_name\":\"test_role\","
             "\"driver\":\"native\"}'",
@@ -387,12 +402,12 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert saved.role_template_id == self.role_template_id
         assert saved.driver.value == "native"
 
-    async def test_cc1_save_agent_update_is_patch(self):
-        """save_agent(更新) ↔ `agent update`，且未出现的字段保持原值。"""
+    async def test_cc1_update_agent_is_patch(self):
+        """`update_agent`(更新) ↔ `agent update <id>`，且未出现的字段保持原值。"""
         before = await gtAgentManager.get_agent(self.team_id, "cc1_agent", status=None)
         assert before is not None
         via = await self._call(
-            "agent update cc1_agent '{\"model\":\"gpt-4o-mini\"}'", _context=self._ctx()
+            f"agent update {before.id} '{{\"model\":\"gpt-4o-mini\"}}'", _context=self._ctx()
         )
         assert via["success"] is True, via
         after = await gtAgentManager.get_agent(self.team_id, "cc1_agent", status=None)
@@ -447,11 +462,12 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         row = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room")
         assert row is not None
 
-        direct = await get_room_info(name="cc1_room", _context=ctx)
-        by_name = await self._call("room get cc1_room", _context=ctx)
+        direct = await get_room_info(room_id=row.id, _context=ctx)
         by_id = await self._call(f"room get {row.id}", _context=ctx)
-        assert by_name["room"] == _as_tool_result(direct)["room"]
+        by_name = await self._call("room get cc1_room", _context=ctx)
         assert by_id["room"] == _as_tool_result(direct)["room"], "`room get <id>` 必须按 id 定位到同一个房间"
+        assert by_name["success"] is False and by_name["error_code"] == "invalid_target", by_name
+        assert "room ls" in by_name["message"], by_name["message"]
 
         direct_ls = await get_room_info(_context=ctx)
         via_ls = await self._call("room ls", _context=ctx)
@@ -459,8 +475,8 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             r["room_name"] for r in direct_ls["rooms"]
         ]
 
-    async def test_cc1_save_room_create(self):
-        """save_room(新建) ↔ `room create <json>`。"""
+    async def test_cc1_create_room(self):
+        """`create_room`(新建) ↔ `room create <json>`。"""
         via = await self._call(
             "room create '{\"name\":\"cc1_room2\",\"member_names\":[\"alice\",\"bob\"],"
             "\"max_rounds\":5}'",
@@ -472,12 +488,12 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert row.max_rounds == 5
         assert sorted(row.agent_ids) == sorted([self.agent_ids["alice"], self.agent_ids["bob"]])
 
-    async def test_cc1_save_room_update_is_patch(self):
-        """save_room(更新) ↔ `room update`，且是 PATCH。"""
+    async def test_cc1_update_room_is_patch(self):
+        """`update_room`(更新) ↔ `room update <id>`，且是 PATCH。"""
         before = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room2")
         assert before is not None
         via = await self._call(
-            "room update cc1_room2 '{\"max_rounds\":12}'", _context=self._ctx()
+            f"room update {before.id} '{{\"max_rounds\":12}}'", _context=self._ctx()
         )
         assert via["success"] is True, via
         after = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room2")
@@ -510,8 +526,8 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert via["success"] is True
         assert via["role_template"] == _as_tool_result(direct)["role_template"]
 
-    async def test_cc1_save_role_template_create_and_update(self):
-        """save_role_template ↔ `role create` / `role update`（update 是 PATCH）。"""
+    async def test_cc1_role_template_create_and_update(self):
+        """`create_role_template` / `update_role_template` ↔ `role create` / `role update`（update 是 PATCH）。"""
         via = await self._call(
             "role create '{\"name\":\"cc1_role\",\"soul\":\"be careful\",\"type\":\"USER\"}'",
             _context=self._ctx(),
@@ -541,7 +557,8 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         )
         assert via["success"] is True, via
 
-        result = await self._call("dept rm cc1_dept_rm", _context=self._ctx())
+        # 变化 e：按名删除改成 `--name`（位置参数只剩可选的正整数 ID）。
+        result = await self._call("dept rm --name cc1_dept_rm", _context=self._ctx())
         assert result["success"] is True, result
         assert any(entry["name"] == "cc1_dept_rm" for entry in result["deleted"]), result
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc1_dept_rm") is None
@@ -571,7 +588,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         )
         assert via["success"] is True, via
 
-        result = await self._call("room rm cc1_room_rm", _context=self._ctx())
+        result = await self._call("room rm --name cc1_room_rm", _context=self._ctx())
         assert result["success"] is True, result
         assert any(entry["name"] == "cc1_room_rm" for entry in result["deleted"]), result
         assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room_rm") is None
@@ -631,7 +648,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         )
         assert result["success"] is False
         # 拒绝文案来自统一入口（工具名是**转发目标**，不是 console 子命令）。
-        assert "工具无权限使用: save_agent" in result["message"], result
+        assert "工具无权限使用: create_agent" in result["message"], result
         # 反证：这个返回体不是 console 自己的错误格式（那些都带 error_code）。
         assert "error_code" not in result, f"拒绝应来自注册表而不是 console：{result}"
         # 光断言返回体不够：必须证明**真的没落库**（拒绝发生在执行之前）。
@@ -659,20 +676,21 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
     @pytest.mark.parametrize(
         "command,expected_tool",
         [
-            ("role create '{\"name\":\"x\",\"soul\":\"y\"}'", "save_role_template"),
+            ("role create '{\"name\":\"x\",\"soul\":\"y\"}'", "create_role_template"),
             # `list_role_templates` 在 CATEGORY_CONFIG 里就是 ADMIN（不是 BASIC），
             # 所以 `role ls` 必须按 ADMIN 校验——这条正是「按等价原工具查表」的体现。
             ("role ls", "list_role_templates"),
-            ("agent update bob '{\"model\":\"m\"}'", "save_agent"),
-            ("room update cc1_room '{\"max_rounds\":3}'", "save_room"),
+            # update 类命令的转发目标是 update_*，且位置参数必须是 ID（P0 变化 a/b）。
+            ("agent update 1 '{\"model\":\"m\"}'", "update_agent"),
+            ("room update 1 '{\"max_rounds\":3}'", "update_room"),
         ],
     )
     async def test_cc2_every_admin_subcommand_is_denied_for_basic_caller(
         self, command, expected_tool
     ):
-        """**逐条**验证管理类子命令对 BASIC 调用者都关门（不是只测 save_agent）。
+        """**逐条**验证管理类子命令对 BASIC 调用者都关门（不是只测 create_agent）。
 
-        单一用例容易漏掉「加新命令时忘填 legacy_tool」——这里按命令表遍历，
+        单一用例容易漏掉「加新命令时没登记等价工具」——这里按命令表遍历，
         新增管理命令若没被判为 ADMIN，这条会红。
         """
         result = await self._call(command, _context=self._ctx("charlie"))
@@ -700,8 +718,9 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         await self.create_room(TEAM, "cc2_rm_room", ["mgr6", "mgr7"], max_rounds=3)
 
         for command, expected_tool in (
-            ("dept rm cc2_rm_dept", "delete_dept"),
-            ("room rm cc2_rm_room", "delete_room"),
+            # 变化 e：按名删除走 `--name`（位置参数只剩可选的正整数 ID）。
+            ("dept rm --name cc2_rm_dept", "delete_dept"),
+            ("room rm --name cc2_rm_room", "delete_room"),
             ("reload", "reload_team"),
         ):
             result = await self._call(command, _context=charlie)
@@ -735,24 +754,44 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             f"`{command}` 等价于 {expected_tool}（BASIC），不该被拒：{result}"
         )
 
-    async def test_cc2_fail_closed_when_legacy_tool_missing(self, monkeypatch):
-        """命令表漏填 `legacy_tool` 时必须 **拒绝**，不能「没填就放行」。
+    async def test_cc2_fail_closed_when_tool_is_not_declared(self, monkeypatch):
+        """工具没声明命令时必须 **拒绝**，不能「没声明就放行」（D3 fail-closed）。
 
-        fail-closed 是 D3 的兜底：将来加命令时漏填等价工具名，#160 之后转发目标为空，
-        第 2 跳在注册表里查不到 → 按「未知工具」拒绝（而不是静默执行 console 自己）。
+        P0 之后「命令 ↔ 工具」的关系是**派生**的：命令只存在于「工具的 `@tool` 声明」里。
+        因此漏声明的表现不是「转发目标为空」，而是**这条命令在命令表里根本不存在** ——
+        `resolve` 直接失败，console 报 `unknown_command`，绝不会退化成「执行 console 自己」。
+        这条判据把这个结构性保证钉死：手工构造一张**少了 `create_agent`** 的表，
+        确认 `agent create` 变成未知资源，同时同一张表上 `dept ls` 仍然正常（对照，
+        证明不是「整张表都不可用」造成的假绿）。
         """
-        from dataclasses import replace as dc_replace
+        from service.funcToolService import consoleRegistry as _registry
+        from service.funcToolService import toolSpec as _toolSpec
+        from service.funcToolService.funcToolType import FuncTool
 
-        broken = dc_replace(cc.COMMAND_INDEX["agent create"], legacy_tool="")
-        monkeypatch.setitem(cc.COMMAND_INDEX, "agent create", broken)
+        partial = [
+            FuncTool(
+                name=decl.name,
+                callable=decl.func,
+                visibility=decl.spec.visibility,
+                spec=decl.spec,
+            )
+            for decl in _toolSpec.declared_tools()
+            if decl.name != "create_agent"
+        ]
+        table = _registry.build(partial)
+        monkeypatch.setattr(_registry, "get_table", lambda: table)
 
         result = await self._call(
             "agent create '{\"name\":\"cc2_failopen\",\"role_template_name\":\"test_role\"}'",
-            _context=self._ctx("alice"),  # 连根主管也拒：这是内部错误，不是权限问题
+            _context=self._ctx("alice"),  # 连根主管也拒：这是结构问题，不是权限问题
         )
-        assert result["success"] is False
-        assert "未知工具" in result["message"], result
+        assert result["success"] is False, result
+        assert result["error_code"] == "unknown_command", result
         assert await gtAgentManager.get_agent(self.team_id, "cc2_failopen", status=None) is None
+
+        # 对照：同一张表上别的命令仍可用 ⇒ 上面的拒绝确实来自「命令不存在」。
+        control = await self._call("dept ls", _context=self._ctx("alice"))
+        assert control["success"] is True, control
 
     async def test_cc2_permission_checked_before_execution(self, monkeypatch):
         """权限校验必须发生在**执行之前**：用计数桩证明底层实现没被调用。
@@ -772,10 +811,10 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             return {"success": True}  # 不落库：这是计数桩，不是被测行为
 
         def _spy_get(name):
-            if name == "save_agent":
+            if name == "create_agent":
                 # 桩必须保留真工具的基准可见性：console 路由按 `console_visible`
                 # 过滤命令，默认 TOOL_ONLY 会让命令在解析期就被判为不可用。
-                return FuncTool("save_agent", _spy, visibility=ToolVisibility.BOTH)
+                return FuncTool("create_agent", _spy, visibility=ToolVisibility.BOTH)
             return original_get(name)
 
         monkeypatch.setattr(func_tool_core, "get_func_tool", _spy_get)
@@ -784,8 +823,8 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             "agent create '{\"name\":\"cc2_spy\",\"role_template_name\":\"test_role\"}'",
             _context=self._ctx("bob"),
         )
-        assert "工具无权限使用: save_agent" in denied["message"], denied
-        assert calls == [], f"被拒的命令不得触达 save_agent，实际调用：{calls}"
+        assert "工具无权限使用: create_agent" in denied["message"], denied
+        assert calls == [], f"被拒的命令不得触达 create_agent，实际调用：{calls}"
 
         allowed = await self._call(
             "agent create '{\"name\":\"cc2_spy_ok\",\"role_template_name\":\"test_role\"}'",
@@ -842,10 +881,17 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert saved is not None and saved.driver.value == "native"
 
     async def test_cc3_no_input_source_at_all(self):
-        """create 什么都不给 → `missing_input_source`。"""
+        """create 什么都不给 → `missing_required_option`（必填项前置到签名，设计 §2.2）。
+
+        改前必填项在 schema 里是「可选」，只能靠「既无内联 JSON 又无 payload」反推意图，
+        报 `missing_input_source`。P0 把必填项放回签名后，检查点前移到**必填校验**，
+        所以错误码变成 `missing_required_option`，并且能直接点名缺哪几个字段 ——
+        比「你没给输入」更能让模型自纠。矩阵里没有 `missing_input_source` 了。
+        """
         result = await self._call("agent create", _context=self._ctx())
-        assert result["success"] is False
-        assert result["error_code"] == "missing_input_source"
+        assert result["success"] is False, result
+        assert result["error_code"] == "missing_required_option", result
+        assert set(result["missing"]) == {"name", "role_template_name"}, result
 
     @pytest.mark.parametrize(
         "command,expected_code",
@@ -892,7 +938,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         await self.create_room(TEAM, "cc4_room", ["bob", "charlie"], max_rounds=3)
         assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room") is not None
 
-        result = await self._call("room rm cc4_room", _context=ctx)
+        result = await self._call("room rm --name cc4_room", _context=ctx)
         assert result["success"] is True, result
         assert any(entry["name"] == "cc4_room" for entry in result["deleted"]), result
         assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room") is None
@@ -905,7 +951,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         所以这里断言原工具那条文案与「没有 error_code」（业务失败无码，见报告
         「对外契约变更」一节），**不是** `not_found`。
         """
-        result = await self._call("room rm cc4_no_such_room", _context=self._ctx())
+        result = await self._call("room rm --name cc4_no_such_room", _context=self._ctx())
         assert result["success"] is False
         assert "未找到房间: name=cc4_no_such_room" in result["message"], result
         assert await gtRoomManager.get_room_by_team_and_name(
@@ -936,7 +982,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         dept_room = await gtRoomManager.get_room_by_team_and_name(self.team_id, "root")
         if dept_room is None:
             pytest.skip("夹具里没有 root 房间，跳过")
-        result = await self._call("room rm root", _context=ctx)
+        result = await self._call("room rm --name root", _context=ctx)
         assert result["success"] is False, result
         for manifest in ("impact", "deleted", "would_delete"):
             assert manifest not in result, f"失败体不得带 {manifest}：{result}"
@@ -963,7 +1009,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             "\"manager_name\":\"mgr4\",\"parent_name\":\"cc4_parent\"}'",
             _context=ctx,
         )
-        result = await self._call("dept rm cc4_parent", _context=ctx)
+        result = await self._call("dept rm --name cc4_parent", _context=ctx)
         assert result["success"] is False
         assert result["error_code"] == "DEPT_HAS_CHILDREN", result
         # 「拒绝了」必须配「什么都没删」：只看错误码挡不住「先删一半再报错」。
@@ -998,7 +1044,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
                 _context=ctx,
             )
             assert created["success"] is True, (name, created)
-        result = await self._call("dept rm cc4r_parent --recursive", _context=ctx)
+        result = await self._call("dept rm --name cc4r_parent --recursive", _context=ctx)
         assert result["success"] is True, result
         deleted_names = {entry["name"] for entry in result["deleted"]}
         assert "cc4r_child" in deleted_names, f"删除清单必须列出被一并删掉的子部门：{deleted_names}"
@@ -1022,7 +1068,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert before is not None
 
         result = await self._call(
-            "dept update cc5_dept '{\"manager_name\":\"charlie\"}'", _context=ctx
+            f"dept update {before.id} '{{\"manager_name\":\"charlie\"}}'", _context=ctx
         )
         assert result["success"] is True, result
         after = await gtDeptManager.get_dept_by_name(self.team_id, "cc5_dept")
@@ -1043,8 +1089,10 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         )
         assert created["success"] is True, created
 
+        arr_row = await gtDeptManager.get_dept_by_name(self.team_id, "cc5_dept_arr")
+        assert arr_row is not None
         result = await self._call(
-            "dept update cc5_dept_arr '{\"member_names\":[\"mgr9\"]}'", _context=ctx
+            f"dept update {arr_row.id} '{{\"member_names\":[\"mgr9\"]}}'", _context=ctx
         )
         assert result["success"] is True, result
         after = await gtDeptManager.get_dept_by_name(self.team_id, "cc5_dept_arr")
@@ -1066,7 +1114,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert before is not None
         assert before.driver.value == "claude_sdk"
 
-        result = await self._call("agent update cc5_agent '{\"model\":\"m2\"}'", _context=ctx)
+        result = await self._call(f"agent update {before.id} '{{\"model\":\"m2\"}}'", _context=ctx)
         assert result["success"] is True, result
         after = await gtAgentManager.get_agent(self.team_id, "cc5_agent", status=None)
         assert after is not None
@@ -1086,7 +1134,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         before = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc5_room")
         assert before is not None
 
-        result = await self._call("room update cc5_room '{\"max_rounds\":9}'", _context=ctx)
+        result = await self._call(f"room update {before.id} '{{\"max_rounds\":9}}'", _context=ctx)
         assert result["success"] is True, result
         after = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc5_room")
         assert after is not None
@@ -1142,8 +1190,10 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
     async def test_cc6_update_with_options_only(self):
         """update 只给 `--选项` → 按 PATCH 语义只改该字段。"""
+        row = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
+        assert row is not None
         result = await self._call(
-            "dept update cc6_dept --responsibility 'cc6 改过'", _context=self._ctx()
+            f"dept update {row.id} --responsibility 'cc6 改过'", _context=self._ctx()
         )
         assert result["success"] is True, result
         saved = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
@@ -1152,8 +1202,10 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
 
     async def test_cc6_same_field_in_option_and_json_is_ambiguous(self):
         """同一字段同时出现在 `--选项` 与内联 JSON → ambiguous_input_source，且不写库。"""
+        row = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
+        assert row is not None
         result = await self._call(
-            "dept update cc6_dept --responsibility 'a' '{\"responsibility\":\"b\"}'",
+            f"dept update {row.id} --responsibility 'a' '{{\"responsibility\":\"b\"}}'",
             _context=self._ctx(),
         )
         assert result["success"] is False
@@ -1171,23 +1223,37 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert result["error_code"] == "ambiguous_input_source"
 
     async def test_cc6_locator_in_options_is_ambiguous(self):
-        """定位参数从 `--选项` 再给一次（与 `<target>` 来源重复）→ ambiguous_input_source。"""
-        result = await self._call("dept update root --dept_id 1", _context=self._ctx())
+        """定位参数从 `--选项` 再给一次（与位置槽来源重复）→ ambiguous_input_source。"""
+        root = await gtDeptManager.get_dept_by_name(self.team_id, "root")
+        assert root is not None
+        result = await self._call(
+            f"dept update {root.id} --dept_id {root.id + 1}", _context=self._ctx()
+        )
         assert result["success"] is False
         assert result["error_code"] == "ambiguous_input_source"
 
     async def test_cc6_update_with_only_mechanism_option_is_no_update_action(self):
-        """`--overwrite` 只是机制参数，不构成字段变更 → no_update_action。"""
+        """机制参数已被删除：`--overwrite` 现在是 `unknown_option`（变化 a）。
+
+        改前 `--overwrite` 是 `save_*` 的机制开关，只给机制不给字段 ⇒ `no_update_action`。
+        P0 拆分后这个开关不存在，同一句命令停在选项层报 `unknown_option`。
+        「无有效变更」语义本身仍在，由下面 `test_cc6_blank_config_counts_as_no_update_action`
+        （空白 JSON）钉住 —— 所以这里换的是**载体**，不是放弃判据。
+        """
+        row = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
+        assert row is not None
         result = await self._call(
-            "dept update cc6_dept --overwrite", _context=self._ctx()
+            f"dept update {row.id} --overwrite", _context=self._ctx()
         )
         assert result["success"] is False
-        assert result["error_code"] == "no_update_action"
+        assert result["error_code"] == "unknown_option", result
 
     async def test_cc6_blank_config_counts_as_no_update_action(self):
         """配置里只有空白值 = 没有可执行动作 → no_update_action（不静默成功）。"""
+        row = await gtDeptManager.get_dept_by_name(self.team_id, "cc6_dept")
+        assert row is not None
         result = await self._call(
-            "dept update cc6_dept '{\"responsibility\":\"   \"}'", _context=self._ctx()
+            f"dept update {row.id} '{{\"responsibility\":\"   \"}}'", _context=self._ctx()
         )
         assert result["success"] is False
         assert result["error_code"] == "no_update_action"
@@ -1245,8 +1311,9 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
     同名的「B」，返回体仍是 `success: True` —— 这是最贵的一类错：模型会当成成功
     继续往下做。draft §4.2 明确要求「同名冲突时提示改用 id」。
 
-    这组用例是**回归钉**：改坏 `save_agent` 的同名消歧（原在
-    `consoleParsing._resolve_agent_by_target`，已下沉到工具层），这里必须变红。
+    这组用例是**回归钉**：改坏「更新必须按 ID 定位」的这道闸（原在
+    `consoleParsing._resolve_agent_by_target` 的同名消歧，P0 起由位置槽的必填 int
+    直接挡住），这里必须变红。
 
     ## 为什么 `agent get <同名>` 的保护被撤掉（P2 已拍板，不阻塞）
 
@@ -1261,7 +1328,7 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
 
     这是本单的**对外契约变更**（报告「对外契约变更」一节逐条记）：`agent get` 是
     只读命令，取错人不会改库；而 `agent update` 才是「静默改错人」的真风险，所以
-    同名保护只留在它身上（已下沉到 `save_agent` 的工具层保护）。
+    同名保护只留在 `update_agent` 上——而且它现在连按名通道都没有，只能按 `agent_id`。
     """
 
     @classmethod
@@ -1336,25 +1403,41 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
         assert result["success"] is True, result
         assert result["agent"]["id"] == self.on_id
 
-    async def test_agent_get_by_duplicate_name_silently_takes_first_runtime_row(self, monkeypatch):
-        """`agent get <同名>` 现在是**原工具的语义**：取运行时列表里第一个，不报歧义。
+    async def test_agent_get_by_duplicate_name_is_rejected_without_ambiguity(self, monkeypatch):
+        """`agent get <同名>` 被位置槽层直接拒绝：歧义问题在**入口**就消失（变化 b）。
 
-        这是 P2 的**契约变更**（不是缺陷被容忍）：console 不再对只读命令做同名守卫，
-        详情见类 docstring。判据写成「钉住当前语义」而不是「期望它报错」——
-        哪天有人把守卫加回去，这里会红并提醒同步报告。
+        P2 的语义是「console 纯转发，由原工具取运行时第一个同名行」——也就是允许
+        「静默取错人」。P0 把 `agent get` 的位置参数改成必填正整数 ID 后，按名查询
+        这条通道没有了：同名多行根本走不到原工具，`invalid_target` 就停在命令层并提示
+        先 `agent ls` 取 ID。判据跟着改成「按名必须被拒 + 按 ID 取到指定那行」，
+        哪天有人把按名通道加回来（重新引入静默取错人的可能），这里会红。
         """
         self._runtime_stub(monkeypatch)
-        result = await self._call("agent get dup", _context=self._ctx())
-        assert result["success"] is True, result
-        # 运行时桩只含在职行 ⇒ 取到的必然是 on_id，不会跑到离职那一行。
-        assert result["agent"]["id"] == self.on_id
+        by_name = await self._call("agent get dup", _context=self._ctx())
+        assert by_name["success"] is False, by_name
+        assert by_name["error_code"] == "invalid_target", by_name
+        assert "agent ls" in by_name["message"], by_name["message"]
 
-    async def test_agent_update_by_duplicate_name_is_ambiguous_and_does_not_write(self):
-        """同名多行时 `agent update` 必须拒绝，且**库里一行都不能被改**。"""
+        by_id = await self._call(f"agent get {self.on_id}", _context=self._ctx())
+        assert by_id["success"] is True, by_id
+        assert by_id["agent"]["id"] == self.on_id
+
+    async def test_agent_update_by_name_is_rejected_at_locator_layer(self):
+        """按**名字**敲 `agent update` 必须被位置槽层拒绝，且库里一行都不能被改。
+
+        P0 变化 b：`agent update` 的位置参数是必填正整数 ID（完整 ID 唯一避免同名歧义），
+        按名更新通道取消。所以「同名多行」这件事现在更早被挡住——连 `ambiguous_target`
+        都不用走到：`invalid_target` 就停在命令层，并提示先 `agent ls` 取 ID。
+
+        改前判据钉的是 `ambiguous_target`（旧路径 `agent update dup` → 按名查全量 →
+        多行同名报歧义）。那条路径已随「位置参数必须 ID」消失，继续断言它等于要求
+        把按名更新通道加回来。
+        """
         before = {r.id: r.model for r in await gtAgentManager.get_team_all_agents(self.team_id) if r.name == "dup"}
         result = await self._call("agent update dup '{\"model\":\"should-not-be-written\"}'", _context=self._ctx())
         assert result["success"] is False
-        assert result["error_code"] == "ambiguous_target"
+        assert result["error_code"] == "invalid_target", result
+        assert "agent ls" in result["message"], result["message"]
         after = {r.id: r.model for r in await gtAgentManager.get_team_all_agents(self.team_id) if r.name == "dup"}
         assert after == before, f"被拒的更新不得改库：{before} -> {after}"
 
@@ -1401,12 +1484,14 @@ def _console_tool_source() -> str:
 
 
 def test_p165_b_forward_tool_call_has_single_construction_site():
-    """`ForwardToolCall` 只在 `_forward` 里构造一次（#165 B）。
+    """`ForwardToolCall` 在本模块只构造一次，且那次在 `_dispatch` 内（#165 B）。
 
-    改动前有 4 处：`_forward` 一处 + `dept rm` / `room rm` / `role rm` 各手写一处字面量。
-    那 3 处绕开了命令表的 `legacy_tool`，于是 `_forward` docstring 里「目标名只从
-    命令表取」的不变式是假的——把 `dept rm` 的等价工具改成别的，静态护栏咬不住。
-    判据：源码里 `ForwardToolCall(` 的出现次数必须 == 1，且那一次在 `_forward` 内。
+    转发是**控制流信号**：多一个构造点就意味着有一条路径绕开命令表的 `tool_name`，
+    自己拼目标名（P2 之前 `dept rm` / `room rm` / `role rm` 就各手写过一处字面量，
+    于是「目标名只从命令表取」这条不变式是假的）。
+
+    P0 之后构造点从 `_forward` 收拢到 `_dispatch`（`_forward` 系列处理器已删除），
+    判据只换函数名，语义不变：**唯一构造点 + 必须在那个入口里**。
     """
     source = _console_tool_source()
     sites = [m for m in _re.finditer(r"ForwardToolCall\(", source)]
@@ -1414,60 +1499,56 @@ def test_p165_b_forward_tool_call_has_single_construction_site():
         f"`ForwardToolCall` 构造点必须唯一（当前 {len(sites)} 处）："
         f"{[source[max(0, m.start()-60):m.start()+20] for m in sites]}"
     )
-    # 那唯一一处必须在 _forward 函数体内（用函数起点定位，避免行号脆断）。
-    forward_start = source.index("def _forward(")
-    next_def = source.index("\ndef ", forward_start) if "\ndef " in source[forward_start:] else len(source)
-    assert forward_start < sites[0].start() < next_def, "唯一的构造点必须在 `_forward` 内"
+    owner_start = source.index("def _dispatch(")
+    owner_end = source.index("\ndef ", owner_start)
+    assert owner_start < sites[0].start() < owner_end, "唯一的构造点必须在 `_dispatch` 内"
 
 
-def test_p165_a_no_dead_rest_assignment():
-    """`rest = tokens[...]` 必须只赋值一次（#165 A），且解析入口唯一。
+def test_p165_a_pipeline_has_single_implementation():
+    """四步流水线在本模块只有**一份**实现，且谓词与真执行共用它（#165 A 的同型缺陷）。
 
-    旧代码是三行连击：`rest = tokens[1:]` → `if reload: rest = tokens[1:]` →
-    `else: rest = tokens[2:]`。第一行被两分支无条件覆盖，是死赋值；读代码的人会
-    以为「默认 tokens[1:]」，实际永远走不到。
+    为什么这条最重要：`console_triggers_self_interrupt`（自中断谓词）必须回答「这条命令
+    会不会真的走到转发」。若它自己再抄一遍解析链，一旦与真执行漂移，就会留下**假中断
+    标记**——P2 之前实测踩过（`reload --confirm xxx` 被误判为会中断）。P0 重写时这一
+    风险原样存在，所以把「流水线只有一份」做成结构判据：
 
-    **这条判据本轮抓到了真问题**：第一版修改后 `rest = tokens[...]` 出现 2 次 ——
-    `console()` 与 `console_triggers_self_interrupt` 各抄一遍，导致谓词只看命令名
-    不看选项，`reload --confirm xxx` 被误判「会中断」（假中断标记）。现已抽成
-    `_parse_command_tokens` 单一入口。所以这里不只数赋值次数，还要断言
-    「切 rest + 解析选项」只存在于那一个函数里。
+      ① `cp._parse_options` 在本模块只出现 1 次；
+      ② 那一次在 `_build_call_args` 内（唯一实现）；
+      ③ `console_triggers_self_interrupt` 必须调用 `_build_call_args`（而不是自己拼）。
     """
     source = _console_tool_source()
-    assignments = _re.findall(r"^\s*rest = tokens\[", source, flags=_re.MULTILINE)
-    assert len(assignments) == 1, f"`rest = tokens[...]` 必须只出现 1 次（当前 {len(assignments)} 次）"
-
-    # 解析入口唯一：`cp._parse_options(` 只许在 `_parse_command_tokens` 内出现。
     parse_sites = [m.start() for m in _re.finditer(r"cp\._parse_options\(", source)]
     assert len(parse_sites) == 1, f"`cp._parse_options` 必须只有一个调用点（当前 {len(parse_sites)} 处）"
-    owner_start = source.index("def _parse_command_tokens(")
+
+    owner_start = source.index("def _build_call_args(")
     owner_end = source.index("\ndef ", owner_start)
     assert owner_start < parse_sites[0] < owner_end, (
-        "`cp._parse_options` 的唯一调用点必须在 `_parse_command_tokens` 内——"
-        "否则谓词与真执行又会各写一遍，重新长出「假中断标记」那个坑"
+        "`cp._parse_options` 的唯一调用点必须在 `_build_call_args` 内——否则谓词与真执行"
+        "各写一遍，重新长出「假中断标记」那个坑"
+    )
+
+    predicate_start = source.index("def console_triggers_self_interrupt(")
+    # 后面那个顶层函数是 `async def console(...)`，所以不能只找 "\ndef "。
+    predicate_end = _re.search(r"\n(?:async\s+)?def ", source[predicate_start:]).start() + predicate_start
+    assert "_build_call_args(" in source[predicate_start:predicate_end], (
+        "自中断谓词必须复用 `_build_call_args`，不得自己拼解析链"
     )
 
 
 def test_p165_c_destructive_commands_resolve_target_once():
-    """删除命令的目标**只在命令表声明一次**，代码里不得再自行解析（#165 C）。
+    """删除命令的目标**只在命令表声明一次**，`consoleTool` 里不得再自行解析（#165 C）。
 
     旧实现的病：`_route` 里先 `_resolve_*` 拿 id/row（拼转发参数），`_handle_rm` 内的
-    planner 又 resolve 一遍（拼 impact 文本）—— 同一请求查两次库，两次结果若在中途
-    被改，行为无法预测。
+    planner 又 resolve 一遍（拼 impact 文本）——同一请求查两次库。P0 的修法同样是
+    「让它结构上不可能发生」：目标定位统一由 `ConsoleCommand.args` 的位置槽声明、
+    由 `_resolve_positionals` 一处翻译成工具参数，`consoleTool` 不再碰任何 Manager。
 
-    P2 的修法不是「把两次合并成一次」，而是**让它结构上不可能发生**：删掉了全部
-    `_plan_*` planner，目标定位统一由 `CommandSpec.locator` 声明、由 `_locator_args`
-    一处翻译成工具参数。所以判据也跟着换 —— 继续数 `_resolve_*` 的次数会变成
-    「测一个已被删除的结构」（本单实测：planner 删掉后这条直接 ValueError 崩在
-    `source.index`）。
-
-    新判据（三条，任一条失效都说明定位又长出了第二个来源）：
+    三条判据（任一条失效都说明定位又长出了第二个来源）：
       ① 源码里不存在任何 `_plan_<资源>_rm`（planner 不许复活）；
-      ② 三条 delete 命令在命令表里都有 `locator`，且 `verb == "DELETE"`；
-      ③ delete 的处理器（`verb=DELETE` 映射到的那个）体内不得出现 `cp._resolve_`。
+      ② `dept rm` / `room rm` / `role rm` 在命令表里都声明了位置槽参数（定位形态有据可查）；
+      ③ `consoleTool` 源码里不出现任何 `Manager.` 查库调用（它必须保持「纯翻译」）。
     """
-    import ast as _ast
-    from service.funcToolService import consoleCommands as _cc
+    from service.funcToolService import consoleRegistry as _registry
 
     source = _console_tool_source()
 
@@ -1475,22 +1556,12 @@ def test_p165_c_destructive_commands_resolve_target_once():
     resurrected = _re.findall(r"def _plan_\w+\(", source)
     assert not resurrected, f"planner 已被删除，不得复活：{resurrected}"
 
-    # ② 命令表必须声明定位形态（否则 `_locator_args` 静默返回 {}，命令会漏定位参数）。
+    # ② 定位形态必须在命令表里声明（否则命令会漏定位参数）。
+    table = _registry.get_table()
     for key in ("dept rm", "room rm", "role rm"):
-        spec = _cc.COMMAND_INDEX[key]
-        assert spec.verb == "DELETE", f"{key} 的 verb 必须是 DELETE，当前 {spec.verb!r}"
-        assert spec.locator is not None, f"{key} 必须在命令表里声明 locator"
+        cmd = table.by_path[key]
+        assert cmd.positional_args, f"{key} 必须在命令表里声明位置槽（当前没有）"
 
-    # ③ DELETE 处理器体内不得自行查库定位：定位只经 `_locator_args`。
-    tree = _ast.parse(source)
-    handler = _console_tool_module._VERB_HANDLERS["DELETE"]
-    node = next(
-        n for n in _ast.walk(tree)
-        if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and n.name == handler.__name__
-    )
-    body = _ast.unparse(node)
-    resolves = _re.findall(r"_resolve_\w+", body)
-    assert not resolves, (
-        f"`{handler}` 体内出现了 {resolves}：目标定位必须只经 `_locator_args` 一处，"
-        "否则同一个目标会有两个解析来源"
-    )
+    # ③ 命令层不许自己查库定位：定位只经命令表 + `_resolve_positionals`。
+    managers = _re.findall(r"\bgt\w*Manager\b", source)
+    assert not managers, f"`consoleTool` 不得直接查库（发现 {managers}）"

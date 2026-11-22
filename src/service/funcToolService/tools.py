@@ -624,6 +624,17 @@ def _truncate_error_message(message: str | None, limit: int = 100) -> str:
     return message[:limit].rstrip() + "..."
 
 
+def _is_blank_update_value(value: Any) -> bool:
+    """某个更新字段是否算「本次没给」。
+
+    `None` / 空列表 / 空串 / **纯空白串** 都算没给：纯空白在语义上不是一次变更，
+    而是把现值改成一串空格（旧实现在 console 层拦过这种情况，迁到工具层后口径保持一致）。
+    """
+    if value is None or value == [] or value == "":
+        return True
+    return isinstance(value, str) and not value.strip()
+
+
 def _normalize_clear_fields(
     clear_fields: Any, allowed: frozenset[str], tool_name: str
 ) -> tuple[list[str], dict[str, Any] | None]:
@@ -1325,7 +1336,14 @@ async def create_agent(
     ok, team_id = _require_team_context(_context)
     if not ok:
         return {"success": False, "message": "当前没有可用的团队上下文。"}
-    existing = await gtAgentManager.get_team_agents_by_names(team_id, [name.strip()])
+    existing = [
+        agent
+        for agent in await gtAgentManager.get_team_agents_by_names(team_id, [name.strip()])
+        # 系统保留成员（`team_id == -1`，如 OPERATOR）不算「同名冲突」：放它过去，
+        # 由 `_upsert_agent` 的保留名判定报「不允许通过工具创建或修改」。否则这里先撞
+        # 「已存在，请用 update_agent」——把「这个名额永远不许你碰」说成「改个接口再来」。
+        if agent.team_id != SpecialAgent.OPERATOR.value
+    ]
     if existing:
         return {
             "success": False,
@@ -1383,7 +1401,7 @@ async def update_agent(
         clear_fields: 要清除（恢复默认）的字段名列表，可选 "model"、"allow_tools"、"allow_skills"；空数组 [] 视为未提供。
     """
     effective = (name, role_template_name, model, driver, allow_tools, allow_skills, i18n, clear_fields)
-    if all(value is None or value == [] or value == "" for value in effective):
+    if all(_is_blank_update_value(value) for value in effective):
         return {
             "success": False,
             "error_code": "no_update_action",
@@ -1691,6 +1709,8 @@ async def create_dept(
     ok, team_id = _require_team_context(_context)
     if not ok:
         return {"success": False, "message": "当前没有可用的团队上下文。"}
+    from dal.db import gtDeptManager
+
     if await gtDeptManager.get_dept_by_name(team_id, name.strip()) is not None:
         return {
             "success": False,
@@ -1747,7 +1767,7 @@ async def update_dept(
         clear_fields: 要清除的字段名列表；空数组 [] 视为未提供。
     """
     effective = (name, responsibility, manager_name, member_names, parent_name, i18n, clear_fields)
-    if all(value is None or value == [] or value == "" for value in effective):
+    if all(_is_blank_update_value(value) for value in effective):
         return {
             "success": False,
             "error_code": "no_update_action",
@@ -2042,7 +2062,7 @@ async def update_room(
         clear_fields: 要清除的字段名列表；空数组 [] 视为未提供。
     """
     effective = (name, member_names, initial_topic, max_rounds, clear_fields)
-    if all(value is None or value == [] or value == "" for value in effective):
+    if all(_is_blank_update_value(value) for value in effective):
         return {
             "success": False,
             "error_code": "no_update_action",
@@ -2734,6 +2754,33 @@ async def update_task(
     ok, team_id = _require_team_context(_context)
     if not ok:
         return {"success": False, "message": "无法获取团队上下文"}
+
+    # 「什么都没给」必须显式拒绝（#187 裁定①的附加硬要求：不许静默成功）。
+    # P0 之前这条判定在 console 层（`_effective_action_names`），console 收敛成纯转发后
+    # 由工具自己兜——否则一次空调用会被服务层报成 `empty_note`（文案在讲「追加评论必须
+    # 填 note」，而调用方其实什么都没给，会把人往错误方向带）。
+    # 判定看**是否真的构成变更**，不看参数个数：`note=''` / `note='   '` 不写任何事件。
+    # `depends_on` 例外：显式 `[]` 是「清空依赖」，属于真实变更，所以只判 `is None`。
+    given = (
+        new_status,
+        note,
+        reviewer_id,
+        clear_fields,
+        workflow_action,
+        target_stage,
+        append_stages,
+        remove_stage_index,
+        reassign_stage,
+    )
+    if all(_is_blank_update_value(value) for value in given) and depends_on is None:
+        return {
+            "success": False,
+            "error_code": "no_update_action",
+            "message": (
+                "update_task 没有可执行的动作：请至少给出一个要改的字段"
+                "（或用 depends_on=[] 显式清空依赖）。"
+            ),
+        }
 
     return await taskService.update_task(
         team_id=team_id,

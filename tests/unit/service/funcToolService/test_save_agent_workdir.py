@@ -1,4 +1,4 @@
-"""save_agent 工具在成员改名 / 写库失败时同步迁移私有目录的单元测试。"""
+"""`update_agent` 工具在成员改名 / 写库失败时同步迁移私有目录的单元测试。"""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -61,7 +61,7 @@ def _context() -> ToolCallContext:
 
 
 @pytest.mark.asyncio
-async def test_save_agent_renames_private_dir(monkeypatch, tmp_path) -> None:
+async def test_update_agent_renames_private_dir(monkeypatch, tmp_path) -> None:
     """按 agent_id 改名后，<team>/agent/<old> 应移动到 <team>/agent/<new>。"""
     agent = _make_existing("alice")
     _mock_dependencies(monkeypatch, tmp_path, agent, AsyncMock())
@@ -70,11 +70,10 @@ async def test_save_agent_renames_private_dir(monkeypatch, tmp_path) -> None:
     old_dir.mkdir(parents=True)
     (old_dir / "notes.txt").write_text("hello", encoding="utf-8")
 
-    result = await tools.save_agent(
+    result = await tools.update_agent(
         name="bob",
         role_template_name="writer",
         agent_id=11,
-        overwrite=True,
         _context=_context(),
     )
 
@@ -86,7 +85,7 @@ async def test_save_agent_renames_private_dir(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_save_agent_cleans_containers_before_renaming_dir(monkeypatch, tmp_path) -> None:
+async def test_update_agent_cleans_containers_before_renaming_dir(monkeypatch, tmp_path) -> None:
     """改名必须先清旧容器再移动目录：bind mount 固化的是旧绝对路径（§7）。"""
     agent = _make_existing("alice")
     _mock_dependencies(monkeypatch, tmp_path, agent, AsyncMock())
@@ -114,11 +113,10 @@ async def test_save_agent_cleans_containers_before_renaming_dir(monkeypatch, tmp
     monkeypatch.setattr(tools.containerService, "delete_agent_containers_safely", _clean)
     monkeypatch.setattr(core.workspaceUtil, "rename_agent_workdirs", _record_rename)
 
-    result = await tools.save_agent(
+    result = await tools.update_agent(
         name="bob",
         role_template_name="writer",
         agent_id=11,
-        overwrite=True,
         _context=_context(),
     )
 
@@ -128,7 +126,7 @@ async def test_save_agent_cleans_containers_before_renaming_dir(monkeypatch, tmp
 
 
 @pytest.mark.asyncio
-async def test_save_agent_rollback_does_not_clean_containers_again(monkeypatch, tmp_path) -> None:
+async def test_update_agent_rollback_does_not_clean_containers_again(monkeypatch, tmp_path) -> None:
     """写库失败回滚目录时不再删一次容器：容器在移动目录前已清理。"""
     agent = _make_existing("alice")
     _mock_dependencies(
@@ -140,11 +138,10 @@ async def test_save_agent_rollback_does_not_clean_containers_again(monkeypatch, 
     (tmp_path / "demo" / "agent" / "alice").mkdir(parents=True)
 
     with pytest.raises(RuntimeError, match="db down"):
-        await tools.save_agent(
+        await tools.update_agent(
             name="bob",
             role_template_name="writer",
             agent_id=11,
-            overwrite=True,
             _context=_context(),
         )
 
@@ -152,15 +149,15 @@ async def test_save_agent_rollback_does_not_clean_containers_again(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_save_agent_rejects_invalid_name(monkeypatch, tmp_path) -> None:
+async def test_update_agent_rejects_invalid_name(monkeypatch, tmp_path) -> None:
     """名称含路径分隔符等特殊字符时返回失败，不写库也不碰目录。"""
     agent = _make_existing("alice")
     batch_save_agents = AsyncMock()
     _mock_dependencies(monkeypatch, tmp_path, agent, batch_save_agents)
 
-    result = await tools.save_agent(
+    result = await tools.update_agent(
+        agent_id=11,
         name="../bob",
-        role_template_name="writer",
         _context=_context(),
     )
 
@@ -171,7 +168,7 @@ async def test_save_agent_rejects_invalid_name(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_save_agent_rolls_back_dir_when_save_fails(monkeypatch, tmp_path) -> None:
+async def test_update_agent_rolls_back_dir_when_save_fails(monkeypatch, tmp_path) -> None:
     """目录已改名但写库失败时，应把目录改回原名并抛出异常。"""
     agent = _make_existing("alice")
     _mock_dependencies(monkeypatch, tmp_path, agent, AsyncMock(side_effect=RuntimeError("db down")))
@@ -181,11 +178,10 @@ async def test_save_agent_rolls_back_dir_when_save_fails(monkeypatch, tmp_path) 
     (old_dir / "notes.txt").write_text("hello", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="db down"):
-        await tools.save_agent(
+        await tools.update_agent(
             name="bob",
             role_template_name="writer",
             agent_id=11,
-            overwrite=True,
             _context=_context(),
         )
 

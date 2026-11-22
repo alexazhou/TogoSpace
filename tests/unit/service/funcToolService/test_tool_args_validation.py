@@ -42,7 +42,7 @@ WARNING_KEYWORD = "已跳过校验"
 #: 32 → 33：webfetch（#191）进默认工具组，故默认组 33、合计 33+5=38。
 # 合并 #203 + #202：默认组 +1(mcp_call)、容器组 +1(update_container_note)
 # #224：MCP 注册表三工具进默认组（默认组 +3）⇒ 37 / 37+6=43。
-DEFAULT_TOOL_COUNT = 39
+DEFAULT_TOOL_COUNT = 43
 CONTAINER_TOOL_COUNT = 6
 
 
@@ -202,7 +202,7 @@ async def test_all_container_tools_reject_invalid_args() -> None:
 
     from service.funcToolService.funcToolType import get_function_metadata
 
-    names = list(funcToolService.CONTAINER_TOOL_NAMES)
+    names = list(funcToolService.container_tool_names())
     assert len(names) == CONTAINER_TOOL_COUNT, names
 
     covered = 0
@@ -602,7 +602,7 @@ async def test_root_null_rejected_default_tools() -> None:
 async def test_root_null_rejected_container_tools() -> None:
     """容器工具组：同样的根节点 null，一个都不许漏。"""
 
-    names = list(funcToolService.CONTAINER_TOOL_NAMES)
+    names = list(funcToolService.container_tool_names())
     assert len(names) == CONTAINER_TOOL_COUNT
 
     covered = 0
@@ -701,7 +701,13 @@ async def test_element_null_rejected_for_all_array_params() -> None:
 
     # v3 新增两个数组参数：create_task.stages（多级节点链）、update_task.append_stages（后置加签）
     # #298 再 +1：update_task.depends_on（依赖整体替换）⇒ 15 → 16
-    assert len(array_params) == 16, array_params
+    # #315 P0：`save_*` 拆成 create_* / update_* 后数组参数 +4（变化 a）——
+    #   save_agent{allow_tools, allow_skills, clear_fields} ⇒ create_agent{allow_tools, allow_skills}
+    #     + update_agent{allow_tools, allow_skills, clear_fields}（净 +2）
+    #   save_dept{member_names, clear_fields} ⇒ create_dept{member_names} + update_dept{member_names, clear_fields}（+1）
+    #   save_room{member_names, clear_fields} ⇒ create_room{member_names} + update_room{member_names, clear_fields}（+1）
+    #   合计 16 + 4 = 20
+    assert len(array_params) == 20, array_params
 
     blocked = 0
     for name, param_name in array_params:
@@ -717,7 +723,8 @@ async def test_element_null_rejected_for_all_array_params() -> None:
         assert _LEGACY_MESSAGE_MARK not in result["message"], (name, param_name, result)
         blocked += 1
 
-    assert blocked == 16
+    # #315 P0：数组参数 16 → 20（`save_*` 拆分，见上条注释），元素级 null 逐项全拦。
+    assert blocked == 20
 
 
 @pytest.mark.asyncio
@@ -970,11 +977,18 @@ async def test_null_injection_exhaustive_table() -> None:
     # 「有默认值但注解不含 None」⇒ p1_required 53→54、总数 +1。
     # #298：`update_task.depends_on: Optional[list[int]] = None` 是新增可选参数
     # ⇒ p1_optional 87→88、P2 数组元素 15→16、总数再 +1。
-    assert p1_required + p1_optional == 146, (p1_required, p1_optional)
-    assert p1_required == 55, p1_required
-    assert p1_optional == 91, p1_optional
-    assert p2 == 16, f"P2={p2}"
-    assert p3_fields == 12, f"P3字段={p3_fields}"
+    # #315 P0：45 → 49 工具（变化 a）后参数面重定基线：146 → 163。
+    #   拆分的净增是 create_* 的必填项进签名（create_dept 4 项 / create_agent 2 项 /
+    #   create_room 2 项 / create_role_template 2 项）与 update_* 新增的 `*_id` 定位参数，
+    #   同时 `overwrite` 被删（4 处）；具体读数以本断言为准，不在这里复述分项算式。
+    assert p1_required + p1_optional == 163, (p1_required, p1_optional)
+    # #315 P0：create_* 的必填项进签名（10 项）+ update_* 的 `*_id` 定位参数（4 项）
+    #          − 删掉的 overwrite（各自有默认值，不计入 required）⇒ 55 → 64。
+    assert p1_required == 64, p1_required
+    assert p1_optional == 99, p1_optional
+    assert p2 == 20, f"P2={p2}"
+    # #315 P0：裸 object 字段 12 → 15（create_agent/update_agent/update_dept 等 i18n 类裸 object 随拆分增多）。
+    assert p3_fields == 15, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
@@ -985,7 +999,9 @@ async def test_null_injection_exhaustive_table() -> None:
     # （#292：`exit_to_host.keep_alive` +1 ⇒ 199→200 = 44 + 54 + 87 + 15 + 0）
     # （#202 实测：166 = 39 + 46 + 68 + 13 + 0；#196 前 148；#189 时 146）
     # 202 = 44 + 54（#292 keep_alive）+ 88（#298 depends_on）+ 16（#298 数组元素）+ 0
-    assert total == 207, total
+    # #315 P0 重定基线：49 + 64 + 99 + 20 + 0 = 232（改前 44 + 54 + 88 + 16 + 0 = 202→207）。
+    # 增量来源：工具 45→49（p0 +4，含容器）+ create_*/update_* 的必填与定位参数。
+    assert total == 232, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

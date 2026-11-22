@@ -24,6 +24,7 @@ import pytest
 from service.funcToolService import consoleCommands as cc
 from service.funcToolService import consoleParsing as cp
 from service.funcToolService import consoleSchema as cs
+from service.funcToolService import consoleRegistry as cr
 from service.funcToolService import consoleTool as ct
 
 
@@ -163,11 +164,19 @@ class TestHelpShowsKebabOnly:
         assert "--member-names" in summary
         assert "--member_names" not in summary
 
-    def test_aliases_rendered_in_kebab(self) -> None:
-        """旧别名含下划线的（role update 的 --role_name）在 help 里显示 --role-name。"""
-        detail = ct.HELP_DETAIL["role update"]
-        assert "--role-name" in detail, f"别名没按 kebab 展示：\n{detail}"
-        assert "--role_name" not in detail
+    def test_underscore_param_names_render_as_kebab(self) -> None:
+        """形参名是 snake_case（`parent_name`），help 里必须渲染成 `--parent-name`。
+
+        判据对象由「role update 的 `--role_name` 别名」换成**渲染边界的通用规则**：
+        那个别名随 P0 的 `save_* → update_*` 签名归一消失了（`update_role_template(name, …)`
+        的定位参数现在是位置槽，`role_name` 这个形参已不存在）。留下真正会复发的风险：
+        `create_dept(parent_name=…)` 这类下划线形参若被渲染成 `--parent_name`，
+        模型照着敲就报未知选项。所以钉「下划线形参 ⇒ kebab 选项」这一条渲染规则本身。
+        """
+        detail = ct.HELP_DETAIL["dept create"]
+
+        assert "--parent-name" in detail, f"下划线形参没转 kebab：\n{detail}"
+        assert "--parent_name" not in detail, "help 里混入下划线写法（模型照抄会报未知选项）"
 
     def test_unknown_option_hint_has_no_option_list(self) -> None:
         """未知选项报错**不再列「可用选项」清单**，改为一行可复制的正确调用（#281 P1）。

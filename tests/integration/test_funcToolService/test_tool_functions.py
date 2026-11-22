@@ -34,7 +34,7 @@ from service.funcToolService.tools import (
     wake_up_agent,
     send_chat_msg,
     finish_action,
-    save_dept,
+    create_dept,
 )
 from constants import AgentStatus, ScheduleJobStatus, ScheduleJobType
 from ...base import ServiceTestCase
@@ -546,8 +546,8 @@ class TestToolFunctions(ServiceTestCase):
         assert "收到消息的房间【turn_room】" in result["message"]
 
 
-class TestSaveDeptParentName(ServiceTestCase):
-    """save_dept 工具函数的 parent_name 参数校验测试。"""
+class TestCreateDeptParentName(ServiceTestCase):
+    """`create_dept`（P0 前是 `save_dept`）的 parent_name 参数校验测试。"""
 
     @classmethod
     async def async_setup_class(cls):
@@ -599,7 +599,7 @@ class TestSaveDeptParentName(ServiceTestCase):
 
     async def test_parent_name_empty_string_returns_error(self):
         """parent_name='' 应报错：未找到父组织。"""
-        result = await save_dept(
+        result = await create_dept(
             name="test_dept",
             responsibility="test",
             manager_name="alice",
@@ -611,8 +611,13 @@ class TestSaveDeptParentName(ServiceTestCase):
         assert "未找到父组织" in result["message"]
 
     async def test_parent_name_none_for_new_dept_returns_error(self):
-        """parent_name=None 新建组织应报错：必须指定父组织。"""
-        result = await save_dept(
+        """parent_name=None 新建组织应报错：必须指定父组织。
+
+        P0 起 `parent_name` 是签名级必填 `str`，正常调用不会传 None；这里刻意越过
+        类型直接传 None，验证「真给了空定位」时工具内部仍是「必须指定父组织」而不是
+        500 或静默建成孤立部门（模型面由 schema 先拦一道，这一层是最后一道）。
+        """
+        result = await create_dept(
             name="test_dept",
             responsibility="test",
             manager_name="alice",
@@ -625,7 +630,7 @@ class TestSaveDeptParentName(ServiceTestCase):
 
     async def test_parent_name_valid_creates_dept(self):
         """parent_name 指定有效的父组织名称时应成功创建。"""
-        result = await save_dept(
+        result = await create_dept(
             name="child_dept",
             responsibility="child",
             manager_name="bob",
@@ -639,7 +644,7 @@ class TestSaveDeptParentName(ServiceTestCase):
 
     async def test_parent_name_nonexistent_returns_error(self):
         """parent_name 指定不存在的组织名称应报错。"""
-        result = await save_dept(
+        result = await create_dept(
             name="test_dept",
             responsibility="test",
             manager_name="alice",
@@ -652,7 +657,7 @@ class TestSaveDeptParentName(ServiceTestCase):
 
     async def test_parent_name_whitespace_only_returns_error(self):
         """parent_name='   '（纯空白）应报错：未找到父组织。"""
-        result = await save_dept(
+        result = await create_dept(
             name="test_dept",
             responsibility="test",
             manager_name="alice",

@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, NoReturn, Optional
+from typing import Any, NoReturn, Optional, cast
 
 from constants import ALLOWED_CLEAR_FIELDS, ToolVisibility
 from exception import ForwardToolCall
@@ -493,7 +493,7 @@ def _positional_rewrite_hint(cmd: registry.ResolvedCommand, arg: registry.Arg) -
 
 
 def _resolve_positionals(
-    cmd: registry.ResolvedCommand, tokens: list[str]
+    cmd: registry.ResolvedCommand, tokens: list[str], options: dict[str, Any] | None = None
 ) -> tuple[dict[str, Any], str | None]:
     """第 2 步：位置 token → `pos_args` + 尾部内联 payload token。"""
     positional_args = cmd.positional_args
@@ -502,12 +502,14 @@ def _resolve_positionals(
     allowed_max = max_pos + 1 if cmd.payload else max_pos
     if len(tokens) < min_pos or len(tokens) > allowed_max:
         expected = (
-            f"{max_pos}~{max_pos + 1} 段（位置参数 + 可选内联 JSON）" if cmd.payload else f"{min_pos}~{max_pos} 段"
+            f"位置参数 + 可选内联 JSON，共 {max_pos}~{max_pos + 1} 段"
+            if cmd.payload
+            else f"{min_pos}~{max_pos} 个位置参数"
         )
         raise ConsoleError(
             "invalid_argument_count",
-            f"`{cmd.key}` 需要 {expected}位置参数，收到 {len(tokens)} 段"
-            + _locator_rewrite_hint(cmd, tokens)
+            f"`{cmd.key}` 需要 {expected}，收到 {len(tokens)} 段"
+            + _locator_rewrite_hint(cmd, options or {})
             + "。",
             example=f"help {cmd.key}",
         )
@@ -534,27 +536,30 @@ def _resolve_positionals(
     return pos_args, inline_payload
 
 
-def _locator_rewrite_hint(cmd: registry.ResolvedCommand, tokens: list[str]) -> str:
-    """位置槽参数被写成 `--选项` 时的改写示例（#220 需求 1，不扩错误码面）。
+def _locator_rewrite_hint(cmd: registry.ResolvedCommand, options: dict[str, Any]) -> str:
+    """位置槽参数被写成 `--选项` 时的**等价改写示例**（#220 需求 1，不扩错误码面）。
 
-    `tokens` 这里收到的已是剥掉命令名后的 rest；为了保持「按选项名找」的既有口径，
-    调用方传入的是**原始 rest**，本函数只做一次保守匹配：任一 token 形如
-    `--<某个位置槽参数的 kebab 形态>` 即给出等价写法。
+    为什么在报错里给改写而不是放行：清单 §A7 实测 `dept get --dept-id 7` 是第一次
+    使用必踩的坑——help 把位置参数标成「不接受选项写法」，照着敲却被
+    `invalid_argument_count` 拒，而报错只说「收到 0 个」，一个字不提怎么改。
+    这里只做「说清楚」：语义不放宽，错误码也不扩。
+
+    值取**首个**出现的定位选项（`--dept-id 7 --name x` 同时给出时提示改第一个即可，
+    报错文案不承诺处理第二种写法）。
     """
     positional = cmd.positional_param_names
     if not positional:
         return ""
-    kebab_to_real = {cc.to_kebab(name): name for name in positional}
-    for token in tokens:
-        if not token.startswith("--"):
+    for name, raw in options.items():
+        real = cmd.normalize_option(name)
+        if real not in positional:
             continue
-        name = token[2:].partition("=")[0].strip()
-        real = kebab_to_real.get(name)
-        if real is None:
-            continue
+        text = str(raw).strip()
+        quoted = f"'{text}'" if (not text or " " in text) else text
         return (
-            f"。注意：--{name} 是定位参数，`{cmd.key}` 的定位只接受位置参数形态"
-            f"（不接受 --选项 写法）；等价写法：`{cmd.key} <{real}>`"
+            f"。注意：--{cc.to_kebab(name)} 是定位参数，`{cmd.key}` 的定位只接受位置参数形态"
+            f"（不接受 --选项 写法）；等价写法：`{cmd.key} {quoted}`"
+            f"（其余 --选项 照原样保留在命令尾部）"
         )
     return ""
 
@@ -617,6 +622,30 @@ def _check_required(cmd: registry.ResolvedCommand, call_args: dict[str, Any]) ->
         )
 
 
+def _build_call_args(
+    cmd: registry.ResolvedCommand, rest: list[str], payload: dict[str, Any] | None
+) -> dict[str, Any]:
+    """四步流水线的**同步唯一实现**：解析 → 位置槽 → 选项 → payload → 冲突/必填 → 工具入参。
+
+    为什么单独抽出来：`_dispatch`（真执行）与 `console_triggers_self_interrupt`
+    （自中断谓词）都必须跑完这四步才能回答「这条命令会不会走到转发」。两处各抄一份的话，
+    一旦漂移就会出现「谓词说会中断、真执行却在选项层失败」的**假中断标记**——正是 #165 A
+    那类缺陷。所以这里只允许有一份实现，谓词与执行都调用它，判据钉「`cp._parse_options`
+    在本模块只出现一次」。
+    """
+    # `ResolvedCommand` 按契约兼容 `CommandSpec` 的选项面（见其类 docstring），但两者没有
+    # 共享基类/Protocol，静态检查只能显式 cast；真正的约束由 `consoleRegistry.build()`
+    # 的 fail-fast 校验兜住（选项面不合规的命令根本建不出表）。
+    positional, options, input_source = cp._parse_options(cast(Any, cmd), rest)
+    pos_args, inline_payload = _resolve_positionals(cmd, positional, options)
+    opt_args = _option_args(cmd, options)
+    payload_args = _resolve_payload(cmd, inline_payload, input_source, payload)
+    _check_conflicts(cmd, pos_args, opt_args, payload_args)
+    call_args = {**pos_args, **payload_args, **opt_args}
+    _check_required(cmd, call_args)
+    return call_args
+
+
 def _dispatch(cmd: registry.ResolvedCommand, rest: list[str], payload: dict[str, Any] | None) -> NoReturn:
     """四步流水线 → `ForwardToolCall`（同步抛出，控制流不经过 await）。"""
     if not registry.command_console_visible(cmd):
@@ -624,14 +653,7 @@ def _dispatch(cmd: registry.ResolvedCommand, rest: list[str], payload: dict[str,
             "unknown_command",
             f"命令当前不可用：`{cmd.key}`（对应工具已被环境开关停用）。",
         )
-    positional, options, input_source = cp._parse_options(cmd, rest)
-    pos_args, inline_payload = _resolve_positionals(cmd, positional)
-    opt_args = _option_args(cmd, options)
-    payload_args = _resolve_payload(cmd, inline_payload, input_source, payload)
-    _check_conflicts(cmd, pos_args, opt_args, payload_args)
-    call_args = {**pos_args, **payload_args, **opt_args}
-    _check_required(cmd, call_args)
-    raise ForwardToolCall(cmd.tool_name, call_args)
+    raise ForwardToolCall(cmd.tool_name, _build_call_args(cmd, rest, payload))
 
 
 # ---------------------------------------------------------------------------
@@ -675,13 +697,8 @@ def console_triggers_self_interrupt(tool_call: Any) -> bool:
         if payload is not None and not isinstance(payload, dict):
             return False
         rest = tokens[1:] if not cmd.actions else tokens[2:]
-        positional, options, input_source = cp._parse_options(cmd, rest)
-        pos_args, inline_payload = _resolve_positionals(cmd, positional)
-        opt_args = _option_args(cmd, options)
-        payload_args = _resolve_payload(cmd, inline_payload, input_source, payload)
-        _check_conflicts(cmd, pos_args, opt_args, payload_args)
-        call_args = {**pos_args, **payload_args, **opt_args}
-        _check_required(cmd, call_args)
+        # 与真执行共用同一份流水线（`_build_call_args`）：解析失败会抛，被下面兜住 ⇒ False。
+        _build_call_args(cmd, rest, payload)
         return True
     except Exception:  # noqa: BLE001 —— 判定器绝不把异常抛进 turn runner
         return False

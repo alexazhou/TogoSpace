@@ -34,7 +34,7 @@ def test_validate_tool_allow_specs() -> None:
     # 包含 ADMIN 类别
     assert "不允许分配管理员类别权限" in validate_tool_allow_specs(["Category:Admin"])
     # 包含 ADMIN 工具
-    assert "不允许分配管理员工具权限" in validate_tool_allow_specs(["save_role_template"])
+    assert "不允许分配管理员工具权限" in validate_tool_allow_specs(["create_role_template"])
 
 def test_build_runtime_allow_specs() -> None:
     # 默认权限
@@ -71,7 +71,7 @@ def test_registry_clear() -> None:
 
 def test_apply_tool_allow_specs() -> None:
     registry = AgentToolRegistry()
-    _register_tools(registry, "list_dir", "send_chat_msg", "save_role_template")
+    _register_tools(registry, "list_dir", "send_chat_msg", "create_role_template")
     
     # 仅开启 Basic
     registry.apply_tool_allow_specs(["Category:Basic"])
@@ -83,8 +83,8 @@ def test_apply_tool_allow_specs() -> None:
     assert registry.list_enabled_tool_names() == ["list_dir"]
     
     # 开启 Read 和具体工具
-    registry.apply_tool_allow_specs(["Category:Read", "save_role_template"])
-    assert set(registry.list_enabled_tool_names()) == {"list_dir", "save_role_template"}
+    registry.apply_tool_allow_specs(["Category:Read", "create_role_template"])
+    assert set(registry.list_enabled_tool_names()) == {"list_dir", "create_role_template"}
 
 def test_read_image_categorized_and_enabled_under_read() -> None:
     """read_image 应归入 READ 类别，Category:Read 策略下被启用（防止漏配 CATEGORY_CONFIG）。"""
@@ -409,12 +409,17 @@ EXPECTED_TOOL_CATEGORIES = {
     "read_file": ToolCategory.READ,
     "read_image": ToolCategory.READ,
     "reload_team": ToolCategory.ADMIN,
-    "save_agent": ToolCategory.ADMIN,
-    "save_dept": ToolCategory.ADMIN,
+    # P0：4 个 save_* 拆成 4 对 create_*/update_*（设计 §2.1），类别逐个沿用 ADMIN。
+    "create_agent": ToolCategory.ADMIN,
+    "update_agent": ToolCategory.ADMIN,
+    "create_dept": ToolCategory.ADMIN,
+    "update_dept": ToolCategory.ADMIN,
     # #277：MCP 注册表三工具归 WRITE（Operator 20:21：写入不再要求管理员权限）。
     "save_mcp_server": ToolCategory.WRITE,
-    "save_role_template": ToolCategory.ADMIN,
-    "save_room": ToolCategory.ADMIN,
+    "create_role_template": ToolCategory.ADMIN,
+    "update_role_template": ToolCategory.ADMIN,
+    "create_room": ToolCategory.ADMIN,
+    "update_room": ToolCategory.ADMIN,
     "set_mcp_server_enabled": ToolCategory.WRITE,
     "send_chat_msg": ToolCategory.BASIC,
     "start_chat": ToolCategory.BASIC,

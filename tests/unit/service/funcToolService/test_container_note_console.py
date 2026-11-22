@@ -28,6 +28,8 @@ import pytest
 from exception import ForwardToolCall
 from service.agentService import toolRegistry
 from service.funcToolService import consoleCommands as cc
+from service.funcToolService import consoleRegistry
+from service.funcToolService import toolSpec
 from service.funcToolService import core as funcCore
 from service.funcToolService.consoleTool import console
 from service.roomService import ToolCallContext
@@ -93,14 +95,14 @@ def test_visibility_is_console_only_in_both_switch_states(monkeypatch):
 
     funcCore.load_func_tools()
     for value in ("1", "0"):
-        monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, value)
+        monkeypatch.setenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, value)
         registry = _registry()
         registered = registry.get_registered_tool(NOTE_TOOL)
         assert registered is not None, f"KEEP_LEGACY_ADMIN_TOOLS={value} 时未注册"
         assert registered.effective_visibility == ToolVisibility.CONSOLE_ONLY, value
 
     # 反向对照：同一时刻其它容器工具仍是 TOOL_ONLY（证明本用例不是恒真）
-    monkeypatch.delenv(cc.ENV_KEEP_LEGACY_TOOLS, raising=False)
+    monkeypatch.delenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, raising=False)
     registry = _registry()
     others = registry.get_registered_tool("list_containers")
     assert others is not None
@@ -291,7 +293,8 @@ def test_usage_line_lists_both_positionals_with_schema_names():
     """
     from service.funcToolService.consoleTool import _usage_line
 
-    spec = next(s for s in cc.COMMAND_SPECS if s.key == "container note")
+    # #315 P0：命令表改由 `@tool(...)` 派生，取运行时命令对象（字段名 `positional_args`）。
+    spec = consoleRegistry.get_table().by_path["container note"]
     usage = _usage_line(spec)
 
     assert "<container_id>" in usage, usage

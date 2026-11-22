@@ -35,6 +35,8 @@ def build_tools(func_tools: Iterable[FuncTool]) -> list[llmApiUtil.OpenAITool]:
 
 
 _func_tools: dict[str, FuncTool] = {}
+# 容器工具单独一组（`ToolSpec.group == "container"`），与默认组同源装配、物理分离存放。
+_container_func_tools: dict[str, FuncTool] = {}
 
 
 def declared_visibility(name: str) -> ToolVisibility:

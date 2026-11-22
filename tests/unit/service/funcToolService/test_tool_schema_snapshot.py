@@ -57,7 +57,7 @@ def test_tool_schema_matches_committed_snapshot():
 #
 # 为什么不塞进快照文件：`scripts/tool_schema_snapshot.py:96` 用
 # `json.dumps(..., sort_keys=True)` 序列化，`parameters` 这个 dict 的键会被排序 ⇒
-# 快照里根本没有声明顺序。实测：交换 `save_room` 的 `initial_topic` / `max_rounds`
+# 快照里根本没有声明顺序。实测：交换 `create_room` 的 `initial_topic` / `max_rounds`
 # （两个都非必填）后，快照对比测试仍然 `1 passed`，一行不红。
 #
 # 必填参数看起来「有保护」，但那是偶然的：交换两个必填参数会让 `required` 数组顺序变，
@@ -115,10 +115,15 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "memory_search": ["query", "limit"],
     "memory_update": ["memory_id", "title", "summary", "content", "star_level", "status", "tags"],
     "reload_team": [],
-    "save_agent": ["name", "role_template_name", "model", "driver", "allow_tools", "allow_skills", "i18n", "overwrite", "agent_id", "clear_fields"],
-    "save_dept": ["name", "responsibility", "manager_name", "member_names", "parent_name", "i18n", "overwrite", "dept_id", "clear_fields"],
-    "save_role_template": ["name", "type", "soul", "i18n", "overwrite"],
-    "save_room": ["name", "member_names", "initial_topic", "max_rounds", "overwrite", "room_id", "clear_fields"],
+    # #315 P0（变化 a）：`save_*` 拆成 `create_*` / `update_*`，参数顺序按新签名重定基线。
+    "create_agent": ["name", "role_template_name", "model", "driver", "allow_tools", "allow_skills", "i18n"],
+    "update_agent": ["agent_id", "name", "role_template_name", "model", "driver", "allow_tools", "allow_skills", "i18n", "clear_fields"],
+    "create_dept": ["name", "responsibility", "manager_name", "parent_name", "member_names", "i18n"],
+    "update_dept": ["dept_id", "name", "responsibility", "manager_name", "member_names", "parent_name", "i18n", "clear_fields"],
+    "create_role_template": ["name", "soul", "type", "i18n"],
+    "update_role_template": ["name", "soul", "type", "i18n"],
+    "create_room": ["name", "member_names", "initial_topic", "max_rounds"],
+    "update_room": ["room_id", "name", "member_names", "initial_topic", "max_rounds", "clear_fields"],
     "send_chat_msg": ["room_name", "msg", "insert_immediately"],
     "start_chat": ["agent_name"],
     # #158：`update_task` 增加验收人变更能力。顺序「先定位、后流转/评论、最后改验收人」：
@@ -196,7 +201,7 @@ def _format_order_diff(expected: dict[str, list[str]], actual: dict[str, list[st
 def test_parameter_declaration_order_matches_baseline():
     """参数**声明顺序**必须与基表一致（快照因 `sort_keys=True` 看不见顺序）。
 
-    这条专治「交换两个非必填参数」：`save_room` 的 `initial_topic` / `max_rounds`
+    这条专治「交换两个非必填参数」：`create_room` 的 `initial_topic` / `max_rounds`
     互换后，快照测试仍会绿，只有本用例会红。
     """
     actual = _live_parameter_order()

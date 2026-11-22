@@ -56,7 +56,7 @@
       "src/appPaths.py": 1,
       "src/backend_main.py": 1,
       "src/desktopEntry.py": 4,
-      "src/service/funcToolService/consoleCommands.py": 1,
+      "src/service/funcToolService/toolSpec.py": 1,
       "src/util/frontendLog.py": 2,
       "tauri/README.md": 1,
       "tauri/scripts/build_backend.py": 1,

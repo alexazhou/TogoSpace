@@ -191,19 +191,33 @@ async def test_list_tasks_scope_team_without_filters_is_forwarded(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_rejects_when_no_filter_at_all():
-    """#62 回归 + #76 新口径：assignee / reviewer / **scope** 三者都不传 ⇒ `missing_target`。
+async def test_list_tasks_auto_fills_scope_self_when_no_filter_at_all(monkeypatch):
+    """#315 P0（设计 §2.2 默认值归位）：过滤项**全缺**时不再报 `missing_target`，
+    而是在**工具函数内**补 `scope="self"`，并在返回体显式附带 `auto_filled_filters`。
 
-    这是防滥用契约，不许放松：想拿范围视角必须显式传 `scope`。
+    改前（#62/#76 口径）：`list_tasks()` 无任何过滤项 ⇒ `success=False` +
+    `error_code="missing_target"`，要求调用方显式给 `scope`。
+    改后：口径不变（仍然**不会**静默变成全团队查询），但默认值从 console 层下沉到工具层，
+    且必须「补了就说」——`auto_filled_filters` + message 双重说明，直调工具与命令行
+    两条入口行为一致（设计 §2.2 第 2 条）。
     """
     from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
 
+    captured: dict = {}
+
+    async def _fake(**service_kwargs):
+        captured.update(service_kwargs)
+        return {"success": True, "tasks": [], "count": 0, "total": 0}
+
+    monkeypatch.setattr(taskService, "list_tasks", _fake)
     ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
     res = await tools.list_tasks(_context=ctx)
 
-    assert res["success"] is False
-    assert res["error_code"] == "missing_target"
-    assert "assignee" in res["message"] and "scope" in res["message"]
+    assert res["success"] is True
+    assert captured["scope"] == "self", captured
+    assert res["auto_filled_filters"] == {"scope": "self"}, res
+    assert "--scope self" in res["message"], res
 
 
 @pytest.mark.asyncio
@@ -493,20 +507,20 @@ async def test_list_tasks_title_keyword_alone_is_a_valid_target(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_blank_title_keyword_is_missing_target(monkeypatch):
-    """纯空白关键字不算过滤条件：返回 missing_target，而不是去查全部任务。
+async def test_list_tasks_blank_title_keyword_counts_as_absent(monkeypatch):
+    """纯空白关键字不算过滤条件：strip 后按「没给」处理 —— `LIKE '%%'` 会匹配全部任务，
+    把它当成过滤条件等于静默取消过滤（「看起来查到了结果」正是要避免的）。
 
-    `LIKE '%%'` 会匹配全部任务，把它当成过滤条件等于静默取消过滤 —— 这正是要避免的
-    「看起来查到了结果」。工具层先 strip 再判空，与传给服务层的值保持同一口径。
+    #315 P0 起「没给」的后果是补 `scope="self"` 并显式告知（`auto_filled_filters`），
+    而不是旧的 `missing_target`；透传给服务层的 `title_keyword` 必须是 None。
     """
     from service.roomService.core import ToolCallContext
     import service.taskService as taskService
 
-    called = False
+    captured: dict = {}
 
     async def _fake(**service_kwargs):
-        nonlocal called
-        called = True
+        captured.update(service_kwargs)
         return {"success": True, "tasks": [], "count": 0, "total": 0}
 
     monkeypatch.setattr(taskService, "list_tasks", _fake)
@@ -514,9 +528,9 @@ async def test_list_tasks_blank_title_keyword_is_missing_target(monkeypatch):
 
     res = await tools.list_tasks(assignee=None, scope=None, title_keyword="   ", _context=ctx)
 
-    assert res["success"] is False
-    assert res["error_code"] == "missing_target"
-    assert called is False
+    assert captured["title_keyword"] is None, captured
+    assert captured["scope"] == "self", captured
+    assert res["auto_filled_filters"] == {"scope": "self"}, res
 
 
 @pytest.mark.asyncio

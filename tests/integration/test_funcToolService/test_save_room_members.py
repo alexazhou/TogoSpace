@@ -1,6 +1,6 @@
-"""#85：`save_room` 工具层的成员重复拒绝（Layer 1）。
+"""#85：`create_room`（P0 前是 `save_room`）工具层的成员重复拒绝（Layer 1）。
 
-缺陷：`save_room` 用 `len(member_names) < 2` 判人数，而 `["alice","alice"]` 的
+缺陷：`create_room` 用 `len(member_names) < 2` 判人数，而 `["alice","alice"]` 的
 len 是 2 直接通过 → `resolved_ids=[7,7]` → 房间被 `upsert_room` 判成 PRIVATE（len==2）
 并生成「alice 和 alice」话题；之后调度器把「同一人连续发言」判为跳过，房间永久 IDLE。
 
@@ -72,13 +72,14 @@ class TestSaveRoomMemberDedup(ServiceTestCase):
             ],
         )
         self.team_id = team.id
-        self.ctx = ToolCallContext(agent_id=0, team_id=team.id, tool_name="save_room")
+        self.ctx = ToolCallContext(agent_id=0, team_id=team.id, tool_name="create_room")
         agents = await gtAgentManager.get_team_all_agents(team.id)
         self.agent_ids = {a.name: a.id for a in agents}
 
     async def _save(self, name: str, member_names: list[str]) -> dict:
+        """新建房间（P0 后由 `create_room` 承担 `save_room(overwrite=False)` 的角色）。"""
         await self._prepare()
-        return await tools.save_room(name=name, member_names=member_names, _context=self.ctx)
+        return await tools.create_room(name=name, member_names=member_names, _context=self.ctx)
 
     async def _rooms(self) -> list[GtRoom]:
         return await gtRoomManager.get_rooms_by_team(self.team_id)
@@ -110,13 +111,19 @@ class TestSaveRoomMemberDedup(ServiceTestCase):
     async def test_duplicate_reported_before_room_lookup(self):
         """判重要在"房间已存在"之前：否则 repeats 会被误导成去改 overwrite。"""
         await self._prepare()
-        first = await tools.save_room(
+        first = await tools.create_room(
             name="same_name", member_names=["alice", "bob"], _context=self.ctx
         )
         assert first["success"] is True
 
-        result = await tools.save_room(
-            name="same_name", member_names=["alice", "alice"], overwrite=True, _context=self.ctx
+        # 改前用 `save_room(overwrite=True)` 复用同名房间来证明「判重早于已存在检查」；
+        # P0 拆成 create_/update_ 后没有 overwrite 开关，改用 `update_room(room_id=…)`
+        # 表达同一次「更新已有房间」的调用——判重仍然必须先于任何定位/写入。
+        result = await tools.update_room(
+            room_id=first["room"]["room_id"],
+            name="same_name",
+            member_names=["alice", "alice"],
+            _context=self.ctx,
         )
 
         assert result["success"] is False

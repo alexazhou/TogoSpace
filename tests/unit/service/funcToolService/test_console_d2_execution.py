@@ -1,26 +1,16 @@
-"""D2 隐藏模式下的 **console 真实执行路径** 判据（#166-A 修复后的口径）。
+"""D2 开关、注册面 / 暴露面 / 执行面的口径（P0 重写）。
 
-本文件与 `test_console_meta.py` 的分工：
-- `test_console_meta.py`：**元数据**级（schema 形态、暴露面、命令表静态约束）。
-- 本文件：**执行**级——真的构建注册表、真的抛 `ForwardToolCall`、真的看第 2 跳能不能到目标。
+旧版围绕 `consoleCommands.LEGACY_CONVERGED_TOOLS`（16 项手写清单）与 `COMMAND_SPECS`
+写结构断言。P0 把可见性收归 `ToolSpec`、废止 #187 裁定②（task / mcp 工具不再豁免收敛），
+旧判据覆盖的模型整体消失，因此按新模型重写：
 
-## #166-A 修复前的问题（历史）
+- **收敛规则**：D2 关闭时**所有** `BOTH` 工具统一降为 `CONSOLE_ONLY`（设计 §4.3 / §7-5）。
+- **转发目标**：命令表的转发目标由 `@tool(console=...)` 派生；`mcp` / `openapi` /
+  `graphql` 子树仍由 console 硬分派（P3 才 extension 化），其靶子工具单独列出。
+- 注册面（`get_all_tools`）与暴露面（`get_tools` / `export_openai_tools`）分离不变。
 
-`console` 抛 `ForwardToolCall` 后由 `execute_tool_call` 第 2 跳执行。修复前三个 Driver
-只注册 `get_tools()` 返回的工具，而 `get_tools()` 会按 D2 开关过滤掉 16 个已收敛工具，
-于是隐藏模式下第 2 跳 `registered is None`，23 条命令全部返回「未知工具」。
-
-## 修复后的口径（本文件守护的性质）
-
-`ToolVisibility` 把**注册面**与**暴露面**分开：
-
-- Driver 用 `get_all_tools()` 全量注册（`visibility != NONE`），第 2 跳总能找到目标；
-- `get_tools()` / `export_openai_tools()` / Claude SDK 的 MCP 工具列表只保留
-  `tool_visible`；
-- `execute_tool_call` 第 1 跳要求 `tool_visible`、第 2 跳要求 `console_visible`；
-- D2 开关把已收敛工具的可见性在 `BOTH`（默认）与 `CONSOLE_ONLY`（隐藏）之间动态解析。
-
-所以隐藏模式下：**模型直接调 `save_dept` 被拒；console 转发到 `save_dept` 可达**。
+**独立期望表**（98 条可见性断言）不在这里，见 `test_tool_visibility_baseline.py`：
+本文件的目的是执行面覆盖（第 2 跳可达、直调被拒、暴露面过滤），因此列表从注册表派生。
 """
 
 from __future__ import annotations
@@ -32,63 +22,55 @@ import pytest
 from constants import ToolVisibility
 from exception import ForwardToolCall
 from service.agentService import toolRegistry
-from service.funcToolService import consoleCommands as cc
+from service.funcToolService import consoleRegistry
 from service.funcToolService import core as func_tool_core
-from service.funcToolService import consoleMcp as mcp_console
-from service.funcToolService import consoleSpec as spec_console
+from service.funcToolService import toolSpec
 from util import llmApiUtil
 
+#: `mcp` / `openapi` / `graphql` 子树硬分派会转发的靶子工具（P0 期间不由命令表派生）。
+EXTENSION_FORWARD_TARGETS: tuple[str, ...] = (
+    "save_mcp_server",
+    "delete_mcp_server",
+    "list_mcp_servers",
+    "set_mcp_server_enabled",
+    "openapi_call",
+    "graphql_call",
+)
 
-#: 去重后的**全部**转发目标（含 #187 新接进来的 task 三工具、#203 的 container note）。
-#:
-#: #291 起 console 的转发面有多个来源：① 通用命令表的 `legacy_tool`；② `mcpConsole.FORWARD_TOOL_NAMES`；
-#: ③ `specConsole.FORWARD_TOOL_NAMES`。
-FORWARD_TARGETS: tuple[str, ...] = tuple(
-    sorted(
-        {s.legacy_tool for s in cc.COMMAND_SPECS if s.legacy_tool}
-        | set(mcp_console.FORWARD_TOOL_NAMES)
-        | set(spec_console.FORWARD_TOOL_NAMES)
-    )
+#: 命令表里挂了 console 命令的工具（派生，不手抄）。
+CONSOLE_BOUND_TOOLS: tuple[str, ...] = tuple(
+    sorted({cmd.tool_name for cmd in consoleRegistry.get_table().specs if cmd.tool_name})
 )
-#: 全部带转发目标的命令 key（参数化用，与 COMMAND_SPECS 同源，不手抄）。
-FORWARD_COMMANDS: tuple[str, ...] = tuple(s.key for s in cc.COMMAND_SPECS if s.legacy_tool)
-#: 落在 D2 隐藏清单内的转发目标 —— 隐藏模式下变为 `CONSOLE_ONLY`。
-CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
-    t for t in FORWARD_TARGETS if t in cc.LEGACY_CONVERGED_TOOLS
-)
-#: **基准可见性**就是 `CONSOLE_ONLY` 的转发目标（与 D2 开关无关）。
-CONSOLE_ONLY_FORWARD_TARGETS: tuple[str, ...] = (
+
+#: 全部 console 可达的转发目标 = 命令表转发 + 扩展子树靶子。
+FORWARD_TARGETS: tuple[str, ...] = tuple(sorted(set(CONSOLE_BOUND_TOOLS) | set(EXTENSION_FORWARD_TARGETS)))
+
+#: 全部带 console 命令的 key（参数化用）。
+FORWARD_COMMANDS: tuple[str, ...] = tuple(cmd.key for cmd in consoleRegistry.get_table().specs if cmd.tool_name)
+
+#: 基准可见性为 `CONSOLE_ONLY` 的工具（与 D2 开关无关）。
+CONSOLE_ONLY_TOOLS: tuple[str, ...] = (
     "update_container_note",
     "openapi_call",
     "graphql_call",
 )
-#: **不**在隐藏清单、也不在 `CONSOLE_ONLY` 基准里的转发目标（#187：task 三工具）。
-#: 隐藏模式下仍是 `BOTH`。
-NON_CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
-    t
-    for t in FORWARD_TARGETS
-    if t not in cc.LEGACY_CONVERGED_TOOLS and t not in CONSOLE_ONLY_FORWARD_TARGETS
+
+#: 基准可见性为 `BOTH` 的工具（D2 关闭时全部收敛为 `CONSOLE_ONLY`）。
+BOTH_TOOLS: tuple[str, ...] = tuple(
+    sorted(name for name, spec in toolSpec.declared_specs() if spec.visibility == ToolVisibility.BOTH)
 )
 
 
 @pytest.fixture
 def hidden_mode(monkeypatch: pytest.MonkeyPatch):
     """进入 D2 隐藏模式（并在用例结束后恢复）。"""
-    monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, "0")
+    monkeypatch.setenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, "0")
     assert func_tool_core.keep_legacy_admin_tools() is False, "开关未生效，判据无意义"
     return monkeypatch
 
 
 def _build_registry() -> toolRegistry.AgentToolRegistry:
-    """按 Driver 的方式构建注册表：`get_all_tools()` 全量注册（#166-A）。
-
-    顺序要紧：先 `load_func_tools()` 填 `_func_tools`，再 `get_all_tools()`。
-
-    `include_container_tools=True` 是**照抄 `TspAgentDriver`**（唯一会执行容器工具的
-    驱动，`tspDriver.py` 用的就是这个参数）：`container note` 的第 2 跳要落到
-    `update_container_note` 上，注册表里没有它就只能报「未知工具」。若这里不传，
-    测的就不是生产注册面。
-    """
+    """按 Driver 的方式构建注册表：`get_all_tools()` 全量注册（#166-A）。"""
     func_tool_core.load_func_tools()
     func_tool_core.load_container_func_tools()
     registry = toolRegistry.AgentToolRegistry()
@@ -109,9 +91,7 @@ def _register_console_stub(
         function=llmApiUtil.OpenAIFunction(
             name="console",
             description="",
-            parameters=llmApiUtil.OpenAIFunctionParameter(
-                type="object", properties={}, required=[]
-            ),
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[]),
         )
     )
     registry.register(console_tool, _stub_console)
@@ -129,54 +109,43 @@ async def _forward_via_registry(
 
 
 # ---------------------------------------------------------------------------
-# 命令表结构：转发目标与隐藏清单的关系（不依赖 D2 开关）
+# 命令表结构（不依赖 D2 开关）
 # ---------------------------------------------------------------------------
 
-def test_forward_targets_are_exactly_the_converged_set():
-    """已收敛的转发目标集合必须精确等于 `LEGACY_CONVERGED_TOOLS`。
-
-    ⚠️ #187 起「全部转发目标 == 收敛清单」不再成立：`task ls|get|update` 把
-    `list_tasks` / `get_task_detail` / `update_task` 接成了转发目标，但按裁定②
-    **不**扩 `LEGACY_CONVERGED_TOOLS`。于是「转发目标 ⊋ 收敛清单」。
-
-    因此这里守两条：
-    ① 收敛清单里的每个工具**都必须**有命令在转发它（清单里不得有僵尸项）；
-    ② 差额只能是 `NON_CONVERGED_FORWARD_TARGETS` 这一组，且该组必须显式非空。
-    """
-    assert set(CONVERGED_FORWARD_TARGETS) == set(cc.LEGACY_CONVERGED_TOOLS), (
-        f"有收敛清单成员没有任何命令转发它：{set(cc.LEGACY_CONVERGED_TOOLS) - set(CONVERGED_FORWARD_TARGETS)}"
-    )
-    assert set(FORWARD_TARGETS) == (
-        set(cc.LEGACY_CONVERGED_TOOLS)
-        | set(NON_CONVERGED_FORWARD_TARGETS)
-        | set(CONSOLE_ONLY_FORWARD_TARGETS)
-    )
-    # #202：`mcp_call` 同理——它是 console 的转发目标，但不在 D2 收敛清单里
-    # （那份清单是 #154 定的 16 项，扩表属 Operator 决策），所以它是「未收敛转发目标」。
-    # #222 A6 起 `create_task` 也是同类：`task create` 转发它，同样按 #187 裁定②
-    # 不扩 `LEGACY_CONVERGED_TOOLS`（那份 16 项清单属 Operator 决策）。
-    # #224→#273：MCP 注册表四工具同理入组（BOTH 可见面，未进收敛清单）。
-    assert set(NON_CONVERGED_FORWARD_TARGETS) == {
-        "list_tasks", "get_task_detail", "update_task", "create_task",
-        "save_mcp_server", "delete_mcp_server", "list_mcp_servers",
-        "set_mcp_server_enabled",
-    }, f"未收敛的转发目标集合变了：{set(NON_CONVERGED_FORWARD_TARGETS)}"
-    assert set(CONSOLE_ONLY_FORWARD_TARGETS) == {
-        "update_container_note", "openapi_call", "graphql_call",
-    }, (
-        "基准 CONSOLE_ONLY 的转发目标集合变了："
-        f"{set(CONSOLE_ONLY_FORWARD_TARGETS)}"
-    )
-
-
 def test_forward_command_count():
-    """报总数：全部命令、带转发目标的命令、去重目标数。"""
-    # 27 = 26 - mcp_call + openapi_call + graphql_call
-    assert len(cc.COMMAND_SPECS) == 28, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条）"
+    """报总数：可见性收敛模型的转发面读数（P0 后 28 条命令 / 27 个转发目标）。"""
+    table = consoleRegistry.get_table()
+    assert len(table.specs) == 28, f"命令表已变化（现 {len(table.specs)} 条）"
     assert len(FORWARD_COMMANDS) == 28
-    assert len(FORWARD_TARGETS) == 27
-    assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "收敛清单必须仍是 16 项（#187 裁定②：本单不动）"
-    assert cc.HELP_SPEC.legacy_tool == ""
+    # 31 = 25 个命令表工具（dept 4 / agent 5 / room 4 / role 5 / task 4 / container 1 /
+    #      time 1 / reload 1；`dept ls` 与 `dept get` 等共用同一个工具）+ 6 个扩展子树靶子
+    assert len(FORWARD_TARGETS) == 31, f"转发目标数变了：{FORWARD_TARGETS}"
+    assert table.help_spec.tool is None
+
+
+def test_all_console_bound_tools_are_declared_both():
+    """挂了 console 命令的工具，静态可见性必须是 `console_visible`（设计 §4.2）。"""
+    for name in CONSOLE_BOUND_TOOLS:
+        spec = toolSpec.get_declared_spec(name)
+        assert spec is not None, name
+        assert spec.visibility.console_visible, f"{name} 挂了命令却不可通过 console 使用"
+
+
+def test_container_note_hard_assertion():
+    """硬断言（设计 §6 P0 护栏②）：`update_container_note` 必须是 CONSOLE_ONLY + container 组。"""
+    spec = toolSpec.get_declared_spec("update_container_note")
+    assert spec is not None
+    assert spec.visibility == ToolVisibility.CONSOLE_ONLY
+    assert spec.group == "container"
+    container = {name for name, s in toolSpec.declared_specs() if s.group == "container"}
+    assert container == {
+        "create_container",
+        "enter_container",
+        "exit_to_host",
+        "list_containers",
+        "delete_container",
+        "update_container_note",
+    }, f"容器组精确 6 项被改了：{sorted(container)}"
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +164,7 @@ def test_hidden_mode_every_forward_target_is_registered(target, hidden_mode):
 @pytest.mark.parametrize("target", FORWARD_TARGETS)
 def test_default_mode_every_forward_target_is_registered(target, monkeypatch):
     """默认模式下同样全部注册。"""
-    monkeypatch.delenv(cc.ENV_KEEP_LEGACY_TOOLS, raising=False)
+    monkeypatch.delenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, raising=False)
     assert func_tool_core.keep_legacy_admin_tools() is True
     registry = _build_registry()
     assert registry.get_registered_tool(target) is not None, f"默认模式下 `{target}` 未注册"
@@ -207,11 +176,7 @@ def test_default_mode_every_forward_target_is_registered(target, monkeypatch):
 
 @pytest.mark.parametrize("target", FORWARD_TARGETS)
 async def test_hidden_mode_forwarding_reaches_target_handler(target, hidden_mode):
-    """隐藏模式下 console 的第 2 跳能真正执行到目标 handler。
-
-    用计数 handler 替换目标工具，把「可达」与「目标工具自身的参数/DB 前置条件」
-    解耦：否则缺参/无 DB 的失败会被误读成「仍然不可达」。
-    """
+    """隐藏模式下 console 的第 2 跳能真正执行到目标 handler。"""
     registry = _build_registry()
     called: list[dict] = []
 
@@ -242,18 +207,19 @@ async def test_hidden_mode_unknown_target_is_still_reported(hidden_mode):
 # 可见性与执行入口：hop 0 要求 tool_visible，hop 1 要求 console_visible
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("target", CONVERGED_FORWARD_TARGETS)
-def test_hidden_mode_converged_targets_are_console_only(target, hidden_mode):
-    """隐藏模式下已收敛工具的动态可见性是 `CONSOLE_ONLY`（不只是"没暴露"）。"""
+@pytest.mark.parametrize("target", BOTH_TOOLS)
+def test_hidden_mode_both_tools_are_console_only(target, hidden_mode):
+    """隐藏模式下**所有** `BOTH` 工具统一收敛为 `CONSOLE_ONLY`（废止 #187 裁定②）。"""
     registry = _build_registry()
     registered = registry.get_registered_tool(target)
     assert registered is not None
     assert registered.effective_visibility == ToolVisibility.CONSOLE_ONLY, target
 
 
-@pytest.mark.parametrize("target", NON_CONVERGED_FORWARD_TARGETS)
-def test_hidden_mode_task_targets_stay_both(target, hidden_mode):
-    """task 三工具不在收敛清单内，隐藏模式下仍是 `BOTH`（裁定②的现状）。"""
+@pytest.mark.parametrize("target", BOTH_TOOLS)
+def test_default_mode_both_tools_stay_both(target, monkeypatch):
+    """默认模式下 `BOTH` 工具仍是 `BOTH`：独立 Tool 与 console 两个入口都可用。"""
+    monkeypatch.delenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, raising=False)
     registry = _build_registry()
     registered = registry.get_registered_tool(target)
     assert registered is not None
@@ -261,15 +227,15 @@ def test_hidden_mode_task_targets_stay_both(target, hidden_mode):
 
 
 async def test_hidden_mode_direct_call_to_console_only_tool_is_rejected(hidden_mode):
-    """隐藏模式下模型直接调用 `save_dept`（hop 0）→ 可见性拒绝，提示走 console。"""
+    """隐藏模式下模型直接调用 `update_dept`（hop 0）→ 可见性拒绝，提示走 console。"""
     registry = _build_registry()
     ctx = toolRegistry.ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock())
     tool_call = llmApiUtil.OpenAIToolCall(
-        id="tc_direct", function={"name": "save_dept", "arguments": "{}"}
+        id="tc_direct", function={"name": "update_dept", "arguments": "{}"}
     )
     result = await registry.execute_tool_call(tool_call, context=ctx)
     assert result.success is False
-    assert result.result.get("message") == "工具不能直接调用，请通过 console 命令使用: save_dept", (
+    assert result.result.get("message") == "工具不能直接调用，请通过 console 命令使用: update_dept", (
         result.result
     )
 
@@ -278,7 +244,6 @@ async def test_tool_only_target_cannot_be_forwarded_from_console():
     """第 2 跳要求 `console_visible`：TOOL_ONLY 工具不能被 console 转发。
 
     用 `load_skill` 做探针：它不在任何 console 命令的转发目标里，可见性是 TOOL_ONLY。
-    这条防止「注册面全量」被误读成「console 可以转发任意工具」。
     """
     registry = _build_registry()
     registered = registry.get_registered_tool("load_skill")
@@ -292,30 +257,18 @@ async def test_tool_only_target_cannot_be_forwarded_from_console():
     )
 
 
-def test_default_mode_converged_targets_are_both(monkeypatch):
-    """默认模式下已收敛工具是 `BOTH`：独立 Tool 与 console 两个入口都可用。"""
-    monkeypatch.delenv(cc.ENV_KEEP_LEGACY_TOOLS, raising=False)
-    registry = _build_registry()
-    for target in CONVERGED_FORWARD_TARGETS:
-        registered = registry.get_registered_tool(target)
-        assert registered is not None
-        assert registered.effective_visibility == ToolVisibility.BOTH, target
-
-
 # ---------------------------------------------------------------------------
-# 暴露面：隐藏模式下已收敛工具不出现在模型工具列表（OpenAI 与 Claude 两个出口）
+# 暴露面：隐藏模式下收敛工具不出现在模型工具列表（OpenAI 与 Claude 两个出口）
 # ---------------------------------------------------------------------------
 
 def test_hidden_mode_export_excludes_converged_tools(hidden_mode):
     """`export_openai_tools()` 按 `tool_visible` 过滤（native / tsp 的出口）。"""
     registry = _build_registry()
     exported = {tool.function.name for tool in registry.export_openai_tools()}
-    assert not (set(cc.LEGACY_CONVERGED_TOOLS) & exported), (
-        f"隐藏模式下仍暴露了已收敛工具：{set(cc.LEGACY_CONVERGED_TOOLS) & exported}"
+    assert not (set(BOTH_TOOLS) & exported), (
+        f"隐藏模式下仍暴露了已收敛工具：{set(BOTH_TOOLS) & exported}"
     )
     assert "console" in exported
-    for target in NON_CONVERGED_FORWARD_TARGETS:
-        assert target in exported, target
 
 
 def test_hidden_mode_claude_sdk_tool_list_excludes_converged_tools(hidden_mode):
@@ -323,7 +276,5 @@ def test_hidden_mode_claude_sdk_tool_list_excludes_converged_tools(hidden_mode):
     registry = _build_registry()
     exposed = set(registry.list_exposed_tool_names())
     enabled = set(registry.list_enabled_tool_names())
-    assert not (set(cc.LEGACY_CONVERGED_TOOLS) & exposed)
-    assert set(cc.LEGACY_CONVERGED_TOOLS) <= enabled, (
-        "权限面（enabled）不受可见性影响：隐藏只改暴露面"
-    )
+    assert not (set(BOTH_TOOLS) & exposed)
+    assert set(BOTH_TOOLS) <= enabled, "权限面（enabled）不受可见性影响：隐藏只改暴露面"

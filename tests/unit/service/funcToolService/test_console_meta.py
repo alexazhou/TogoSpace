@@ -12,7 +12,9 @@ import json
 import pytest
 
 from service.funcToolService import consoleCommands as cc
+from service.funcToolService import consoleRegistry
 from service.funcToolService import core as func_tool_core
+from service.funcToolService import toolSpec
 from service.funcToolService.consoleTool import HELP_DETAIL, HELP_SUMMARY, console
 from service.funcToolService.funcToolType import get_function_metadata
 from service.funcToolService import tools as legacy
@@ -35,7 +37,21 @@ def _token_count(text: str) -> int:
     )
 
 
-def test_cc6_help_is_far_smaller_than_the_16_legacy_schemas():
+BOTH_TOOLS = (
+    "get_time",
+    "get_dept_info", "get_agent_info", "get_room_info",
+    "wake_up_agent", "start_chat", "reload_team",
+    "list_role_templates", "get_role_template",
+    "create_dept", "update_dept", "delete_dept",
+    "create_agent", "update_agent",
+    "create_room", "update_room", "delete_room",
+    "create_role_template", "update_role_template", "delete_role_template",
+    "create_task", "update_task", "get_task_detail", "list_tasks",
+    "save_mcp_server", "delete_mcp_server", "list_mcp_servers", "set_mcp_server_enabled",
+)
+
+
+def test_cc6_help_is_far_smaller_than_the_both_tool_schemas():
     """help 精简表 + console schema 的 token 必须显著小于 16 个原工具 schema 之和。
 
     `draft_v_console.md` §8 写的是「净省 50% 以上」——那是**估算**。本用例把
@@ -43,7 +59,7 @@ def test_cc6_help_is_far_smaller_than_the_16_legacy_schemas():
     实测远高于 50%，但**结论以实测为准，不以 draft 为准**。
     """
     legacy_schemas = [
-        get_function_metadata(name, getattr(legacy, name)) for name in cc.LEGACY_CONVERGED_TOOLS
+        get_function_metadata(name, getattr(legacy, name)) for name in BOTH_TOOLS
     ]
     console_schema = get_function_metadata("console", console)
 
@@ -56,12 +72,12 @@ def test_cc6_help_is_far_smaller_than_the_16_legacy_schemas():
     ratio = saved / legacy_tokens
 
     print(
-        f"\n[CC6 实测] 16 工具 schema={legacy_tokens} tokens；"
+        f"\n[CC6 实测] 28 个 BOTH 工具 schema={legacy_tokens} tokens；"
         f"console schema={console_tokens}；help={help_tokens}；"
         f"净省={saved} tokens（{ratio:.1%}，最保守口径含 help）"
     )
 
-    assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "被收敛工具清单必须仍是 16 项（draft §1）"
+    assert len(BOTH_TOOLS) == 28, "被收敛工具集合必须仍是 28 项（P0：49 工具 = 28 BOTH + 3 CONSOLE_ONLY + 18 TOOL_ONLY）"
     assert ratio > 0.5, f"净省必须超过 draft 声称的 50%，实测 {ratio:.1%}"
 
 
@@ -100,36 +116,37 @@ def _effective(name: str) -> "ToolVisibility":
 
     func_tool = func_tool_core.get_func_tool(name)
     assert func_tool is not None, f"工具未加载: {name}"
-    return func_tool_core.resolve_effective_visibility(func_tool.name, func_tool.visibility)
+    return func_tool_core.resolve_effective_visibility(func_tool.visibility)
 
 
 def test_d2_keep_legacy_by_default(monkeypatch):
-    """默认（无环境变量）必须**保留**原 16 个工具——D2 明确要求默认值 = 保留。"""
+    """默认（无环境变量）必须**保留**全部 BOTH 工具——D2 明确要求默认值 = 保留。"""
     from constants import ToolVisibility
 
-    monkeypatch.delenv(cc.ENV_KEEP_LEGACY_TOOLS, raising=False)
+    monkeypatch.delenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, raising=False)
     func_tool_core.load_func_tools()
     assert func_tool_core.keep_legacy_admin_tools() is True
-    for name in cc.LEGACY_CONVERGED_TOOLS:
+    for name in BOTH_TOOLS:
         assert _effective(name) == ToolVisibility.BOTH, name
 
 
 @pytest.mark.parametrize("value", ["0", "false", "FALSE", "no", "off", " off "])
-def test_d2_switch_off_hides_exactly_the_16(monkeypatch, value):
-    """开关置假 ⇒ 那 16 个工具降为 `CONSOLE_ONLY`：模型看不到、console 仍可用。"""
+def test_d2_switch_off_hides_all_both_tools(monkeypatch, value):
+    """开关置假 ⇒ **全部** BOTH 工具降为 `CONSOLE_ONLY`（含 task / mcp 八件，变化 d）。"""
     from constants import ToolVisibility
 
-    monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, value)
+    monkeypatch.setenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, value)
     func_tool_core.load_func_tools()
-    for name in cc.LEGACY_CONVERGED_TOOLS:
+    for name in BOTH_TOOLS:
         effective = _effective(name)
         assert effective == ToolVisibility.CONSOLE_ONLY, name
         assert effective.tool_visible is False
         assert effective.console_visible is True
     assert _effective("console") == ToolVisibility.TOOL_ONLY
-    # task 三工具不在收敛清单内，隐藏模式下仍是 BOTH（#187 裁定②的现状）。
-    for name in ("list_tasks", "get_task_detail", "update_task"):
-        assert _effective(name) == ToolVisibility.BOTH, name
+    # 变化 d：`task` 四工具与 `mcp` 四工具不再豁免，同样收敛为 CONSOLE_ONLY。
+    for name in ("list_tasks", "get_task_detail", "update_task", "create_task",
+                 "save_mcp_server", "delete_mcp_server", "list_mcp_servers", "set_mcp_server_enabled"):
+        assert _effective(name) == ToolVisibility.CONSOLE_ONLY, name
 
 
 @pytest.mark.parametrize("value", ["1", "true", "", "yes", "garbage"])
@@ -137,9 +154,9 @@ def test_d2_switch_is_fail_safe(monkeypatch, value):
     """无法识别的值按**保留**处理：少暴露工具的后果比多暴露严重得多。"""
     from constants import ToolVisibility
 
-    monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, value)
+    monkeypatch.setenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, value)
     func_tool_core.load_func_tools()
-    for name in cc.LEGACY_CONVERGED_TOOLS:
+    for name in BOTH_TOOLS:
         assert _effective(name) == ToolVisibility.BOTH, name
 
 
@@ -152,18 +169,18 @@ def test_d2_get_tools_respects_switch_for_exposure_only(monkeypatch):
     # ⚠️ 必须**显式**清掉环境变量再测默认态：不能假定进程环境是干净的。
     # 隐藏模式全量回归是用 `TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0` 起的，
     # 这里若只 setenv 不 delenv，第一步的「默认态」断言就会红（#166 踩过）。
-    monkeypatch.delenv(cc.ENV_KEEP_LEGACY_TOOLS, raising=False)
+    monkeypatch.delenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, raising=False)
     func_tool_core.load_func_tools()
     exposed_default = {t.function.name for t in func_tool_core.get_tools()}
     assert "console" in exposed_default
-    assert set(cc.LEGACY_CONVERGED_TOOLS) <= exposed_default
+    assert set(BOTH_TOOLS) <= exposed_default
 
-    monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, "0")
+    monkeypatch.setenv(toolSpec.ENV_KEEP_LEGACY_TOOLS, "0")
     exposed_off = {t.function.name for t in func_tool_core.get_tools()}
     all_off = {t.function.name for t in func_tool_core.get_all_tools()}
     assert "console" in exposed_off, "console 本身必须始终暴露（收敛的前提）"
-    assert not (set(cc.LEGACY_CONVERGED_TOOLS) & exposed_off), "开关置假后 16 个原工具不得再暴露"
-    assert set(cc.LEGACY_CONVERGED_TOOLS) <= all_off, (
+    assert not (set(BOTH_TOOLS) & exposed_off), "开关置假后 BOTH 工具不得再暴露"
+    assert set(BOTH_TOOLS) <= all_off, (
         "注册面必须仍是全量：console 的第 2 跳要靠它找到转发目标（#166-A）"
     )
 
@@ -180,8 +197,8 @@ def test_every_command_declares_legacy_tool():
     → 第 2 跳在注册表里查不到 → 按「未知工具」拒绝）；更糟的是如果实现改成
     「没填就按原样执行」，那就是给所有人开了 Admin 后门。
     """
-    for spec in cc.COMMAND_SPECS:
-        assert spec.legacy_tool, f"命令 `{spec.key}` 未声明等价原工具"
+    for cmd in consoleRegistry.get_table().specs:
+        assert cmd.tool_name, f"命令 `{cmd.key}` 未声明等价原工具"
 
 
 def test_every_legacy_tool_has_a_category():
@@ -189,22 +206,25 @@ def test_every_legacy_tool_has_a_category():
     `Category:*` 里，任何身份的 allow_specs 都展开不到它，命令永久不可用。"""
     from service.agentService.toolRegistry import CATEGORY_CONFIG
 
-    for spec in cc.COMMAND_SPECS:
-        assert spec.legacy_tool in CATEGORY_CONFIG, (
-            f"命令 `{spec.key}` 声明的 {spec.legacy_tool} 不在 CATEGORY_CONFIG 里，权限无从校验"
+    for cmd in consoleRegistry.get_table().specs:
+        assert cmd.tool_name in CATEGORY_CONFIG, (
+            f"命令 `{cmd.key}` 声明的 {cmd.tool_name} 不在 CATEGORY_CONFIG 里，权限无从校验"
         )
 
 
-def test_converged_list_covers_draft_scope():
-    """收敛清单必须与 draft §1 的 16 项完全一致（不多不少）。"""
-    expected = {
-        "get_dept_info", "save_dept", "delete_dept",
-        "get_agent_info", "save_agent", "wake_up_agent", "start_chat",
-        "get_room_info", "save_room", "delete_room",
-        "list_role_templates", "get_role_template", "save_role_template",
-        "delete_role_template", "get_time", "reload_team",
+def test_both_tool_set_matches_expectation():
+    """`BOTH` 工具集合必须与独立期望表完全一致（不多不少）。
+
+    旧版这里钉的是 `LEGACY_CONVERGED_TOOLS` 的 16 项；P0 删掉那张名单后，D2 的语义
+    变成「所有 BOTH 统一收敛」，所以 BOTH 集合本身成了必须钉死的契约：
+    漏声明一个 `BOTH` ⇒ 该工具在隐藏模式下暴露面漏收敛；多声明 ⇒ 模型面被悄悄收走。
+    """
+    declared = {
+        name for name, spec in toolSpec.declared_specs() if spec.visibility.name == "BOTH"
     }
-    assert set(cc.LEGACY_CONVERGED_TOOLS) == expected
+    assert declared == set(BOTH_TOOLS), (
+        f"BOTH 集合变了：多 {sorted(declared - set(BOTH_TOOLS))} / 少 {sorted(set(BOTH_TOOLS) - declared)}"
+    )
 
 
 def test_console_registered_as_basic():

@@ -59,88 +59,59 @@ def _forward_args(command: str) -> tuple[str, dict]:
     return signal.tool_name, signal.tool_args, signal.post_process
 
 
-class TestTaskLsAutoScope:
-    """A3：过滤项全缺时补 `scope=self` 并显式提示。"""
+class TestTaskLsForwardsRaw:
+    """A3 的**命令层**半侧：P0 之后补参不再由 console 做，命令层必须原样转发。
 
-    def test_status_only_auto_fills_scope_self(self) -> None:
-        """`task ls --status TODO` 转发参数里必须出现 `scope=self`（且 status 原样保留）。"""
+    责任归位（设计 §7-P0-①「默认值与提示归位」）：`--scope self` 的兜底从
+    `consoleTool._handle_list` 的 `fallback_options` 挪进了 `list_tasks` 自己——
+    工具层在过滤项全缺时补 `scope="self"`，并把 `auto_filled_filters` 与说明写进
+    自己的返回体。于是命令层的正确行为变成「一个字都不许补、也不许挂后处理」，
+    否则同一份兜底会出现两个来源（命令层补了、工具层又看到 scope 不为空）。
+
+    兜底本身的行为判据在工具层与本文件的集成对应件里：
+    `tests/unit/service/funcToolService/test_task_tools.py`（补参 + 提示 + 不覆盖显式值）
+    与 `tests/integration/test_funcToolService/test_console_task.py`（真入口 + DB）。
+    本类只钉「命令层不越权」这一半，避免两层判据互相顶牛。
+    """
+
+    def test_status_only_forwards_raw(self) -> None:
+        """`task ls --status TODO`：转发参数只有 status，无 scope，无后处理。"""
         tool_name, args, post_process = _forward_args("task ls --status TODO")
 
         assert tool_name == "list_tasks"
-        assert args.get("scope") == "self", f"未自动补 scope=self：{args}"
-        assert args.get("status") == ["TODO"], f"status 被改坏了：{args.get('status')!r}"
-        assert post_process is not None, "补了参数却没有后处理 ⇒ auto_filled_filters 不会出现（属静默补参）"
+        assert args == {"status": ["TODO"]}, f"命令层擅自补了我没给的参数：{args}"
+        assert post_process is None, "补参已归工具层，命令层不许再挂后处理（会出现两个来源）"
 
-    def test_auto_fill_is_announced_in_result(self) -> None:
-        """后处理必须在返回体里署名：`auto_filled_filters` + message 说明。"""
-        _name, args, post_process = _forward_args("task ls --status TODO")
-        assert post_process is not None
-
-        result = post_process({"success": True, "tasks": [], "count": 0, "total": 0})
-
-        assert result["auto_filled_filters"] == {"scope": "self"}, result
-        assert "自动补" in result["message"] and "--scope self" in result["message"], result
-        assert result["tasks"] == [] and result["success"] is True, "不许改动原结果集与成败"
-        # 原返回体没有 message 时也要能生成一句，不能把 None 拼进字符串
-        assert post_process({"success": True, "tasks": []})["message"]
-
-    def test_note_states_scope_fields_and_keeps_other_filters(self) -> None:
-        """#238 判据 1：给了 `--status` 时 note 不得说「未给过滤条件」。
-
-        note 必须与真实判据一致：补 `--scope self` 只因**过滤项
-        （--assignee / --reviewer / --scope / --kw）全缺**，与 `--status` 无关；
-        且要点明「其它过滤条件（如 --status）照旧生效」，不能让用户以为
-        自己给的过滤项没生效。
-        """
-        _name, args, post_process = _forward_args("task ls --status TODO")
-        assert post_process is not None
-
-        result = post_process({"success": True, "tasks": [], "count": 0, "total": 0})
-        message = result["message"]
-
-        assert "未给过滤条件" not in message, message
-        assert "--assignee / --reviewer / --scope / --kw" in message, message
-        assert "全缺" in message, message
-        assert "--scope self" in message, message
-        assert "--status" in message and "照旧生效" in message, message
-        assert "只列与我相关的任务" in message, message
-
-    def test_no_filter_at_all_still_announced(self) -> None:
-        """#238 判据 2：全缺时照旧补 `scope=self` 且显式提示（#222「不许静默」不退化）。"""
+    def test_no_filter_at_all_forwards_empty(self) -> None:
+        """`task ls` 裸敲：转发空参数，兜底由 `list_tasks` 自己决定。"""
         _name, args, post_process = _forward_args("task ls")
-        assert args.get("scope") == "self", args
-        assert post_process is not None
 
-        result = post_process({"success": True, "tasks": []})
+        assert args == {}, f"命令层擅自补参数：{args}"
+        assert post_process is None
 
-        assert result["auto_filled_filters"] == {"scope": "self"}, result
-        assert "已自动补" in result["message"] and "--scope self" in result["message"], result
-
-    def test_explicit_scope_gets_no_note(self) -> None:
-        """#238 判据 3：显式给 `--scope team` ⇒ 不补参，无 `auto_filled_filters`、无该文案。"""
-        _name, args, post_process = _forward_args("task ls --scope team")
-        assert post_process is None, "显式给过滤项不许挂补参后处理"
-        assert "auto_filled" not in str(args), args
-
-    def test_help_task_ls_states_same_condition(self) -> None:
-        """#238 判据 4：`help task ls` 与 note 同口径（全缺才补 + 显式 --scope team 可查全团队）。"""
-        result = _run("help task ls")
-        help_text = result["help"]
-
-        assert "过滤项 --assignee / --reviewer / --scope / --kw 全缺时自动补 --scope self" in help_text, help_text
-        assert "要查全团队请显式给 --scope team" in help_text, help_text
-
-    def test_explicit_filter_is_not_overridden(self) -> None:
-        """显式给过滤项时**不许**再补（否则 `--assignee X` 会被 scope=self 收窄）。"""
-        for command in (
-            f"task ls --assignee 42",
-            "task ls --scope team --status TODO",
-            "task ls --kw 登录",
-            "task ls --reviewer 7",
+    def test_explicit_filters_pass_through_untouched(self) -> None:
+        """显式给的过滤项逐字透传（`--assignee` 不能被命令层改写成 scope=self）。"""
+        for command, expected in (
+            ("task ls --assignee 42", {"assignee": 42}),
+            ("task ls --scope team --status TODO", {"scope": "team", "status": ["TODO"]}),
+            ("task ls --kw 登录", {"title_keyword": "登录"}),
+            ("task ls --reviewer 7", {"reviewer": 7}),
         ):
             _name, args, post_process = _forward_args(command)
-            assert "scope" not in args or args["scope"] == "team", f"{command} 被补了 scope：{args}"
-            assert post_process is None, f"{command} 不该带自动补参后处理"
+            assert args == expected, f"{command} 转发参数被改动：{args}"
+            assert post_process is None, f"{command} 不该带任何后处理"
+
+    def test_help_states_the_same_owner(self) -> None:
+        """`help task ls` 必须说清「补参由 `list_tasks` 做、结果里有 `auto_filled_filters`」。
+
+        help 是模型唯一能读到的口径：若它还说「上游会自动补」，模型就无从解释
+        `auto_filled_filters` 是谁写的，也想不到可以用 `--scope team` 查全团队。
+        """
+        help_text = _run("help task ls")["help"]
+
+        assert "全缺时由 list_tasks 自身补 --scope self" in help_text, help_text
+        assert "auto_filled_filters" in help_text, help_text
+        assert "--scope team" in help_text, help_text
 
     def test_non_filter_command_is_untouched(self) -> None:
         """对照组：`dept ls` 没有过滤项概念，行为必须逐字不变（不许被顺手加上 scope）。"""
@@ -262,10 +233,11 @@ class TestMcpBasePathNote:
 
 
 class TestTaskCreateForwarding:
-    """A6 的单元半侧：转发目标、参数映射、`success_hint` 追加。
+    """A6 的单元半侧：转发目标、参数映射、以及「提示归工具层」这条边界。
 
-    真跑建成任务在集成层（`test_console_task.py`），这里只钉「命令层交出去的
-    到底是什么」——两层各自失效面不同。
+    真跑建成任务在集成层（`test_console_task.py`），这里只钉「命令层交出去的是
+    什么」。P0 之后 `hint` 由 `create_task` 自己的返回体携带（默认值/提示归位），
+    命令层不再挂 `success_hint` 后处理 —— 两处都写会拼出两句重复提醒。
     """
 
     def test_forwards_to_create_task_with_options(self) -> None:
@@ -276,34 +248,28 @@ class TestTaskCreateForwarding:
         assert args["title"] == "修一下"
         assert args["assignee_id"] == 42
         assert args["priority"] == "HIGH"
-        assert post_process is not None, "建单没有后处理 ⇒ 唤醒提示不会出现在返回体"
+        assert "hint" not in args, "提示不是入参：由 create_task 的返回体自带"
+        assert post_process is None, "提示归工具层，命令层不许再挂后处理"
 
-    def test_hint_is_appended_to_success_message(self) -> None:
-        _name, _args, post_process = _forward_args(
-            "task create --title x --assignee_id 42"
-        )
-        assert post_process is not None
+    def test_hint_lives_in_tool_docstring_contract(self) -> None:
+        """命令层不再追加提示后，模型侧的唯一提示来源是工具说明与返回体。
 
-        result = post_process({"success": True, "task_id": 77, "message": "任务已创建"})
+        这里钉「用户能读到的那句话仍在 help 里」——help 由 `create_task` 的 docstring
+        派生，docstring 掉了这句话，模型就再也不知道建完要另发 `send_chat_msg`。
+        """
+        help_text = _run("help task create")["help"]
 
-        assert result["task_id"] == 77, "不许改动原返回体的关键字段"
-        assert "不会自动唤醒" in result["hint"], result
-        assert result["message"].startswith("任务已创建"), result["message"]
-        assert "send_chat_msg" in result["message"], result["message"]
-
-    def test_hint_not_injected_into_failures(self) -> None:
-        """建单失败时不该附「记得通知对方」——会误导成「建成功了」。"""
-        _name, _args, post_process = _forward_args("task create --title x --assignee_id 42")
-        assert post_process is not None
-
-        result = post_process({"success": False, "message": "无权将任务分配给他"})
-
-        assert "hint" not in result
-        assert result["message"] == "无权将任务分配给他"
+        assert "不会唤醒执行人" in help_text, help_text
+        assert "send_chat_msg" in help_text, help_text
+        assert "hint" in help_text, help_text
 
     def test_other_create_commands_have_no_hint(self) -> None:
-        """对照组：`dept create` 不带唤醒提示（提示是 task create 的命令级事实）。"""
-        _name, args, post_process = _forward_args("dept create --name x --responsibility y")
+        """对照组：`dept create` 不带唤醒提示（提示是 task create 独有的事实）。"""
+        # `manager_name` / `parent_name` 都是 `create_dept` 的签名级必填（P0 起必填项
+        # 进签名），少给会在命令层先报 missing_required_option，根本到不了转发。
+        _name, args, post_process = _forward_args(
+            "dept create --name x --responsibility y --manager-name alice --parent-name 总部"
+        )
         assert post_process is None
         assert cc.COMMAND_INDEX["dept create"].success_hint == ""
 
@@ -311,86 +277,3 @@ class TestTaskCreateForwarding:
 # --------------------------------------------------------------------------- #
 # #233 记档 D1：`_handle_list` 两条路径**各转发恰一次**
 # --------------------------------------------------------------------------- #
-
-
-class TestHandleListForwardsExactlyOnce:
-    """`_handle_list` 的转发必须结构化：有 fallback ⇒ 恰 1 次带 `post_process`；
-    无 fallback ⇒ 恰 1 次不带。
-
-    合并前的形态是 `if auto_filled:` 块尾**裸调用** `_forward(parsed, **args)`、
-    没有显式 `else:`——不双转发完全靠「`_forward` 恒 raise」这个未受保护的
-    前提（#222 记档 D1）。本判据把 `_forward` 换成**返回而不抛**的记录 stub，
-    走真解析链直调 `_handle_list`，只认**精确计数 == 1**：
-
-    - 「双转发」⇒ 计数 2 ⇒ 红（裸调用在「`_forward` 会返回」假设下的真实行为）；
-    - 「零转发」⇒ 计数 0 ⇒ 红；
-    - 「至少一次」类断言咬不住双转发，**禁止使用**——本类三条全部是精确计数。
-
-    解析走真链（tokenizer → _parse_options → ParsedCommand，同
-    `test_console_locator_hints` 的做法），不 mock ParsedCommand，避免与生产解析分叉。
-    """
-
-    @staticmethod
-    def _parsed(command: str) -> cp.ParsedCommand:
-        tokens = cp._tokenize(command)
-        spec = cc.COMMAND_INDEX[" ".join(tokens[:2])]
-        positional, options, input_source = cp._parse_options(spec, tokens[2:])
-        return cp.ParsedCommand(
-            spec,
-            positional=positional,
-            options=options,
-            input_source=input_source,
-            raw_tokens=tokens[2:],
-        )
-
-    @staticmethod
-    def _record_and_run(
-        monkeypatch: pytest.MonkeyPatch, command: str
-    ) -> list[tuple[str, Any, dict[str, Any]]]:
-        calls: list[tuple[str, Any, dict[str, Any]]] = []
-
-        def _stub(parsed: cp.ParsedCommand, /, *, post_process: Any = None, **args: Any) -> None:
-            """返回而不抛：制造「`_forward` 会返回」的假设态，让计数说话。"""
-            calls.append((parsed.spec.legacy_tool, post_process, dict(args)))
-
-        monkeypatch.setattr(ct, "_forward", _stub)
-        ct._handle_list(TestHandleListForwardsExactlyOnce._parsed(command))
-        return calls
-
-    def test_auto_fallback_forwards_once_with_post_process(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`task ls`（过滤项全缺 ⇒ 自动补 scope=self）：恰 1 次，带 post_process。"""
-        calls = self._record_and_run(monkeypatch, "task ls")
-        assert len(calls) == 1, calls
-        target, post_process, args = calls[0]
-        assert target == "list_tasks", target
-        assert post_process is not None, "自动补参必须带 post_process（auto_filled_filters 的唯一来源）"
-        assert args.get("scope") == "self", args
-
-    def test_explicit_filter_forwards_once_without_post_process(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`task ls --scope team`（有 fallback 表但过滤项已给）：恰 1 次，不带 post_process。
-
-        注意不能拿 `--status TODO` 当「已给过滤」：`status` 不在
-        `filter_options`（assignee/reviewer/scope/title_keyword）里，A3 的设计
-        本来就会在只有 --status 时自动补 scope=self（见 TestTaskLsAutoScope）。
-        """
-        calls = self._record_and_run(monkeypatch, "task ls --scope team")
-        assert len(calls) == 1, calls
-        target, post_process, args = calls[0]
-        assert target == "list_tasks", target
-        assert post_process is None, "未补参不许挂后处理（否则 auto_filled_filters 会凭空出现）"
-        assert args.get("scope") == "team", args
-
-    def test_no_fallback_spec_forwards_once_without_post_process(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`dept ls`（命令表根本没有 fallback_options）：恰 1 次，不带 post_process。"""
-        calls = self._record_and_run(monkeypatch, "dept ls")
-        assert len(calls) == 1, calls
-        target, post_process, args = calls[0]
-        assert target == "get_dept_info", target
-        assert post_process is None, "无补参路径不该有后处理"
-        assert "scope" not in args, args

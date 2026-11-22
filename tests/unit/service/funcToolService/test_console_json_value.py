@@ -134,8 +134,8 @@ class TestObjectConsistency:
 
 class TestHelpShapeAnnotation:
     def test_array_param_line_carries_shape_note(self) -> None:
-        """`room create` 的 `--member-names <array>` 行必须写明 CSV / JSON / 重复等价。"""
-        lines = cs.describe_tool_params("save_room")
+        """`room create`（P0 后是 `create_room`）的 `--member-names <array>` 行必须写明 CSV / JSON / 重复等价。"""
+        lines = cs.describe_tool_params("create_room")
         member_lines = [line for line in lines if line.startswith("--member-names")]
         assert member_lines, f"room create 参数清单里没有 member_names 行：{lines!r}"
         line = member_lines[0]

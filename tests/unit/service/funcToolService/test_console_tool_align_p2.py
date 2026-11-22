@@ -1,29 +1,18 @@
-"""#196 P2 结构护栏：命令表是唯一事实源。
+"""help 与命令表的**派生一致性**护栏（P0 重写：命令表改由 `@tool(...)` 派生）。
 
-## 这组判据防的是什么
+旧版拿 `consoleCommands.COMMAND_SPECS` 当「命令表」，逐条比对 help；P0 之后那张表
+只剩 P1 待删的残留，真正的运行时命令表是 `consoleRegistry.get_table()`。本文件因此
+全部改为对着 **registry** 比对——这恰好也是设计 §5.3「help 纯拼接」的可观测结果：
 
-P2 把「加一条命令要改四处」（路由 if 分支、help 正文、选项白名单、布尔开关集合）
-收敛成「只改命令表一行」。收益是**少三处可能漂移的地方**，但漂移本身不会让任何
-行为用例变红 —— 加了命令忘记加 help 行、schema 加了参数但 help 没跟上，都能全绿。
-
-所以这里用**派生一致性**钉住：把两份独立算出来的东西对比，而不是对比「我手抄的
-期望值」。手抄的期望值本身就是第三份事实源，会和实现一起漂。
-
-三条护栏：
-  1. help 的命令键集合 == 命令表的键集合（加命令不写 help / 删命令留 help 都红）；
-  2. help 里列出的每个 `--参数` 都能在该命令的 schema properties 里找到（反之亦然）；
-  3. `HELP_SUMMARY` 里的资源与操作 == 命令表派生结果。
-
-## 另外两条是 `delete_dept` 的定位判据
-
-P2 之前 console 自己预查部门再删（`_plan_dept_rm`），P2 改成纯转发后，定位只剩
-两种形态：按 id、按名字。这里钉住「单给 id 能删」与「什么都不给被拒」——
-后者是 `delete_dept` 的 `required` 已被放开（P1）之后的**新增风险**：`required`
-空了，schema 层不再挡「两个定位都不给」，必须由运行时兜住并给 `invalid_tool_args`。
+- 键集合：`table.specs` ↔ `HELP_DETAIL` 双向全等；
+- 参数面：help 里列的 `--参数` ↔ 工具 schema properties（kebab 形态）；
+- 摘要：`HELP_SUMMARY` 的资源行 ↔ `table.by_resource`（预设资源/动作顺序）；
+- 渲染：schema 里每个参数都必须能被 `describe_param` 渲染出来。
 """
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 from typing import Any
@@ -32,11 +21,14 @@ import pytest
 
 from service.funcToolService import consoleCommands as cc
 from service.funcToolService import consoleParsing as cp
+from service.funcToolService import consoleRegistry
 from service.funcToolService import consoleSchema as cs
 from service.funcToolService import consoleTool as ct
 from service.funcToolService import core as funcCore
 from service.funcToolService import tools as funcTools
 from service.roomService import ToolCallContext
+
+TABLE = consoleRegistry.get_table()
 
 
 # --------------------------------------------------------------------------- #
@@ -47,10 +39,10 @@ from service.roomService import ToolCallContext
 def test_help_keys_match_command_table() -> None:
     """help 的键集合必须与命令表**完全相同**（双向）。
 
-    单向比较会漏掉一半：只查「命令表 ⊆ help」时，删掉一条命令但 help 里留着旧行
-    不红；只查「help ⊆ 命令表」时，加了命令不写 help 也不红。
+    单向比较会漏掉一半：只查「命令表 ⊆ help」时，删掉一条命令但 help 里留着旧行不红；
+    只查「help ⊆ 命令表」时，加了命令不写 help 也不红。
     """
-    spec_keys = {spec.key for spec in cc.COMMAND_SPECS}
+    spec_keys = {spec.key for spec in TABLE.specs}
     help_keys = set(ct.HELP_DETAIL)
 
     assert spec_keys == help_keys, (
@@ -61,65 +53,49 @@ def test_help_keys_match_command_table() -> None:
 
 
 def test_help_lists_exactly_the_schema_params() -> None:
-    """help 里列出的 `--参数` 必须与 schema properties **逐名相同**（#221 起按 kebab 形态）。
+    """help 里列出的 `--参数` 必须与工具 schema properties **逐名相同**（kebab 形态）。
 
-    这是「选项面从 schema 派生」这件事的**可观测结果**：派生逻辑一旦回退成手抄、
-    或者 schema 加了参数但 help 渲染漏了，这里立刻红。别名也要在——用户在 help 上
-    看到的写法必须真能用（`--kw` 在 `options` 白名单里）。
+    这是「选项面从工具签名派生」这件事的可观测结果：派生逻辑一旦回退成手抄、或者
+    schema 加了参数但 help 渲染漏了，这里立刻红。别名也要在——用户在 help 上看到的
+    写法必须真能用。
 
-    kebab 口径（#221）：help 行展示的是命令行形态（`--clear-fields`），比对时
-    schema 真名先过 `to_kebab`；反向比对用 `display_options`（kebab + 短别名，
-    不含兼容旧名 —— help 不展示旧名，旧名若出现在 help 行反而要红）。
-
-    #281 P1 口径更新：`display_options` 现在**排除位置参数**（`mcp call` 的 `target`、
-    `mcp rm` 的 `name` …），而 help 里这些参数仍会出现——它们是**位置参数声明行**
-    （`--target <string>（位置参数：值必须写在命令名后面）`），本来就不在选项白名单里。
-    所以反向比对的允许集 = `display_options` ∪ `positional_param_names`。
-    保护力不变：help 里出现任何既不是选项、也不是本命令位置参数的名字，仍然红。
+    位置槽绑定的参数（`dept get` 的 `dept_id` 等）也在 help 里出现，但它们是被标注为
+    「位置参数」的声明行，本来就不在 `display_options` 里，所以反向比对允许
+    `display_options ∪ 位置槽参数 kebab 形态`。
     """
     problems: list[str] = []
 
-    for spec in cc.COMMAND_SPECS:
-        if not spec.legacy_tool:
+    for cmd in TABLE.specs:
+        if cmd.tool is None:
             continue
-        props = {cc.to_kebab(name) for name in spec.param_names}
-        # `HELP_DETAIL[key]` 是**一段文本**（不是行列表）：按行正则捞 `  --name`。
-        listed = set(
-            re.findall(r"^  --([A-Za-z][\w-]*)", ct.HELP_DETAIL[spec.key], flags=re.MULTILINE)
-        )
+        props = {cc.to_kebab(name) for name in cmd.param_names}
+        listed = set(re.findall(r"^  --([A-Za-z][\w-]*)", ct.HELP_DETAIL[cmd.key], flags=re.MULTILINE))
 
         missing = props - listed
-        allowed_display = set(spec.display_options) | {
-            cc.to_kebab(name) for name in spec.positional_param_names
+        allowed_display = set(cmd.display_options) | {
+            cc.to_kebab(name) for name in cmd.positional_param_names
         }
         extra = listed - allowed_display
         if missing:
-            problems.append(f"{spec.key}: schema 有但 help 没列 {sorted(missing)}")
+            problems.append(f"{cmd.key}: schema 有但 help 没列 {sorted(missing)}")
         if extra:
-            problems.append(f"{spec.key}: help 列了但选项白名单没有 {sorted(extra)}")
+            problems.append(f"{cmd.key}: help 列了但选项白名单没有 {sorted(extra)}")
 
     assert not problems, "help 与 schema 参数面不一致：\n" + "\n".join(problems)
 
 
 def test_help_summary_is_derived_from_command_table() -> None:
-    """`HELP_SUMMARY` 的资源与操作 == 命令表派生结果（按资源分组、保表内顺序）。"""
-    expected: dict[str, list[str]] = {}
-    for spec in cc.COMMAND_SPECS:
-        expected.setdefault(spec.resource, []).append(spec.action or spec.key)
-
+    """`HELP_SUMMARY` 的资源与操作 == `table.by_resource`（规范排序后）派生结果。"""
     summary = ct.HELP_SUMMARY
-    for resource in expected:
+    for resource, commands in TABLE.by_resource.items():
         assert resource in summary, f"HELP_SUMMARY 缺少资源 {resource!r}：{summary}"
-
-    # 每个资源行里必须出现该资源的全部操作（顺序也按命令表）。
-    # 顶层命令（`reload`）没有 action，摘要里就是单独一个词，所以按 `resource` 前缀取行。
-    for resource, actions in expected.items():
         line = next(
             (ln for ln in summary.splitlines() if ln.strip().split()[:1] == [resource]),
             None,
         )
         assert line is not None, f"HELP_SUMMARY 里没有 {resource} 的行：{summary}"
-        positions = [line.find(action) for action in actions if action]
+        actions = [cmd.primary_action for cmd in commands if cmd.primary_action]
+        positions = [line.find(action) for action in actions]
         assert all(pos >= 0 for pos in positions), (
             f"HELP_SUMMARY 的 {resource} 行缺少操作：{actions} —— 实际 {line!r}"
         )
@@ -129,43 +105,34 @@ def test_help_summary_is_derived_from_command_table() -> None:
 
 
 def test_help_detail_covers_every_schema_param_name() -> None:
-    """反向护栏：schema 里的**每一个**参数名都必须能在 `describe_param` 渲染出来。
-
-    上一条比的是「help 文本 vs 白名单」，这条比的是「渲染函数 vs schema」——
-    两处各自独立算，任一处漏参数都会红。
-    """
+    """反向护栏：schema 里的**每一个**参数名都必须能在 `describe_param` 渲染出来。"""
     problems: list[str] = []
-    for spec in cc.COMMAND_SPECS:
-        if not spec.legacy_tool:
+    for cmd in TABLE.specs:
+        if cmd.tool is None:
             continue
-        schemas = cs.param_schemas(spec.legacy_tool)
-        for name in schemas:
+        for name, prop in cmd.param_schemas.items():
             rendered = cs.describe_param(
                 name,
-                schemas[name],
-                required=name in (cs.required_params(spec.legacy_tool)),
-                aliases=tuple(
-                    alias for alias, real in spec.alias_map.items() if real == name
-                ),
+                prop,
+                required=name in cmd.schema_required,
+                aliases=tuple(alias for alias, real in cmd.alias_map.items() if real == name),
             )
-            # #221：渲染形态是 kebab（--clear-fields），按形态比对；
-            # kebab 双向同形（to_kebab 幂等），无下划线参数不受影响。
             if f"--{cc.to_kebab(name)}" not in rendered:
-                problems.append(f"{spec.key}: 参数 {name} 未出现在渲染结果里")
+                problems.append(f"{cmd.key}: 参数 {name} 未出现在渲染结果里")
     assert not problems, "参数渲染漏项：\n" + "\n".join(problems)
 
 
 # --------------------------------------------------------------------------- #
-# `delete_dept` 的两条定位判据（P2：纯转发后的定位面）
+# `dept rm` 的定位行为（P0 变化 e：位置槽可选 ID + 按名删除改 --name）
 # --------------------------------------------------------------------------- #
 
 
-class TestDeleteDeptByP2Locator:
-    """`delete_dept` 两条定位判据：单给 id 能删、什么都不给被拒。
+class TestDeleteDeptLocator:
+    """`delete_dept` 的定位面：位置 `<id>` 与 `--name` 二选一，名称不再走位置槽。
 
-    这两条钉的是**命令表 locator 声明**的结果，不是服务层：
-    `dept rm` 的 `locator=_loc("dept_id", "name")` ⇒ `dept rm 7` 传 `dept_id=7`。
-    若有人把 locator 改成只填 `name`，第一条立刻红（会按名字找 "7" 找不到）。
+    这两条钉的是**声明结果**（`ConsoleCommand("dept", ("rm","remove"), args=(Arg(Target("dept_id", int), positional=True, required=False),))`），
+    不是服务层：声明若被改成必填，`dept rm --name 研发部` 会立刻被 arity 拒；
+    声明若被改成 `str`，`dept rm 研发部` 就不再报 `invalid_target`。
     """
 
     @pytest.fixture(autouse=True)
@@ -174,96 +141,99 @@ class TestDeleteDeptByP2Locator:
         funcCore.load_container_func_tools()
         yield
 
-    def test_delete_dept_by_id_alone_deletes(self) -> None:
-        """`delete_dept(dept_id=N)` 单靠 id 就能删（不要求同时给 name）。"""
-        signature = inspect.signature(funcTools.delete_dept)
-        params = signature.parameters
+    def _resolve(self, tokens: list[str]) -> dict[str, Any]:
+        cmd = TABLE.by_path["dept rm"]
+        positional, options, _source = cp._parse_options(cmd, tokens)
+        pos_args, _inline = ct._resolve_positionals(cmd, positional, options)
+        args = ct._option_args(cmd, options)
+        return {**pos_args, **args}
 
-        assert "dept_id" in params, "delete_dept 必须支持按 id 定位"
-        assert params["dept_id"].default is None, (
-            "dept_id 必须有默认值 None —— 否则「按 id 删」与「按名删」无法二选一"
-        )
-        assert params["name"].default is None, (
-            "name 必须有默认值 None —— 同上；这是 P1 放开 required 的前提"
-        )
+    def test_positional_id_maps_to_dept_id(self) -> None:
+        """`dept rm 7` ⇒ `{"dept_id": 7}`（正整数按 int 收敛）。"""
+        assert self._resolve(["7"]) == {"dept_id": 7}
 
-        # 命令表必须把位置参数映射到 dept_id（而不是只映射 name）。
-        spec = cc.COMMAND_INDEX["dept rm"]
-        assert spec.locator is not None, "dept rm 必须声明 locator"
-        assert spec.locator.id_param == "dept_id", (
-            f"dept rm 的 id_param 必须是 dept_id，当前 {spec.locator.id_param!r}"
-        )
-        assert spec.locator.name_param == "name", (
-            f"dept rm 的 name_param 必须是 name，当前 {spec.locator.name_param!r}"
-        )
+    def test_name_is_only_accepted_as_option(self) -> None:
+        """`dept rm --name 研发部` ⇒ `{"name": "研发部"}`（按名删除改走选项，变化 e）。"""
+        assert self._resolve(["--name", "研发部"]) == {"name": "研发部"}
 
-        # 定位翻译：纯数字 ⇒ 当 id；非数字 ⇒ 当 name（D8 兼容方案）。
-        translated = ct._locator_args(spec, "7", require_positive_id=False)
-        assert translated == {"dept_id": 7}, translated
-        translated = ct._locator_args(spec, "研发部", require_positive_id=False)
-        assert translated == {"name": "研发部"}, translated
+    def test_positional_name_is_rejected_at_cli_layer(self) -> None:
+        """`dept rm 研发部` 在**位置解析层**就报 `invalid_target`，并提示改用 `--name`。
 
-    def test_delete_dept_without_locator_is_rejected_with_schema_code(self) -> None:
-        """`delete_dept()` 两个定位都不给 ⇒ 被拒，且 `error_code == invalid_tool_args`。
-
-        ⚠️ 这是 P1 放开 `required` 之后的**新增风险点**：schema 层不再拦「不给定位」，
-        全靠运行时那条 `if dept_id is None and name is None`。若有人顺手删掉它，
-        schema 与运行时都不挡 ⇒ 一次 `delete_dept()` 会走到「删掉整个团队」的分支。
-        所以必须在**运行时层**钉住，并且要求它与 schema 层**同码**
-        （小马哥 12:02 硬条件 1：调用方一个码就能判「补参数重试」）。
+        改前：位置槽是「数字当 id、其余当名字」（D8 双定位）；
+        改后（变化 e）：位置槽只收正整数，按名删除必须显式 `--name`——零隐式猜测。
         """
-        result = funcCore.run_tool_call_sync_for_tests = None  # 占位，见下
-        del result
+        with pytest.raises(cp.ConsoleError) as caught:
+            self._resolve(["研发部"])
+        assert caught.value.code == "invalid_target", caught.value.code
+        assert "--name" in caught.value.message, caught.value.message
 
-        coro = funcTools.delete_dept(
-            _context=ToolCallContext(agent_id=1, team_id=1, chat_room=None)
+    def test_delete_dept_without_locator_is_rejected_by_tool(self) -> None:
+        """`delete_dept()` 两个定位都不给 ⇒ 运行时被拒，`error_code == invalid_tool_args`。
+
+        命令层不再替它报错（P0 把「无有效动作」的判定归回工具层），因此这条必须在
+        工具层钉住：schema 层因「均可选」拦不住，若运行时那条判断被删，一次
+        `delete_dept()` 会走到「删掉整个团队」的分支。
+        """
+        outcome = asyncio.run(
+            funcTools.delete_dept(_context=ToolCallContext(agent_id=1, team_id=1, chat_room=None))
         )
-        outcome = _run(coro)
 
         assert outcome.get("success") is False, f"不给定位竟然成功了：{outcome}"
         assert outcome.get("error_code") == "invalid_tool_args", (
             f"期望 invalid_tool_args（与 schema 层同码），实际 {outcome.get('error_code')!r}"
             f"（{outcome.get('message')!r}）"
         )
-        # 文案必须点名「怎么补」——只说「参数错」不够模型自纠。
         message = outcome.get("message", "")
         assert "dept_id" in message or "name" in message, f"文案没告诉怎么补：{message!r}"
-
-
-def _run(coro: Any) -> dict:
-    """在同步用例里跑一个协程（本文件的判据都是同步用例）。"""
-    import asyncio
-
-    return asyncio.run(coro)
 
 
 # --------------------------------------------------------------------------- #
 # 布尔选项的显式值：`--flag` 与 `--flag=false` 都必须落到 bool
 #
-# `spec.boolean_options` 由 schema 派生，只说明「这是开关」；不能顺带假设
-# 「写了 false 也当打开」。`role update` 的 PATCH 语义依赖显式 false 能压过
-# `patch_by_name` 补的 true，所以解析层必须把文本值读进来。
+# P0 删掉了 `overwrite`（那正是旧判据的探针），改用 `dept rm --dry-run`：
+# 它是 schema 里的 `bool=False`，且 `dept rm` 的位置槽可选 ⇒ 单给开关也合法。
 # --------------------------------------------------------------------------- #
 
 
+def _dry_run_options(tokens: list[str]) -> dict[str, Any]:
+    cmd = TABLE.by_path["dept rm"]
+    _positional, options, _source = cp._parse_options(cmd, tokens)
+    return options
+
+
 def test_boolean_option_bare_flag_is_true() -> None:
-    spec = cc.COMMAND_INDEX["role update"]
-    _, options, _ = cp._parse_options(spec, ["--overwrite"])
-    assert options["overwrite"] is True
+    assert _dry_run_options(["--dry-run"])["dry-run"] is True
 
 
 def test_boolean_option_explicit_false_is_preserved() -> None:
-    spec = cc.COMMAND_INDEX["role update"]
-    positional, options, source = cp._parse_options(
-        spec, ["tpl", "--overwrite=false"]
-    )
-    assert positional == ["tpl"]
+    cmd = TABLE.by_path["dept rm"]
+    positional, options, source = cp._parse_options(cmd, ["7", "--dry-run=false"])
+    assert positional == ["7"]
     assert source is None
-    assert options["overwrite"] is False
+    assert options["dry-run"] is False
 
 
 def test_boolean_option_invalid_text_is_rejected() -> None:
-    spec = cc.COMMAND_INDEX["role update"]
+    cmd = TABLE.by_path["dept rm"]
     with pytest.raises(cp.ConsoleError) as exc:
-        cp._parse_options(spec, ["--overwrite=maybe"])
+        cp._parse_options(cmd, ["--dry-run=maybe"])
     assert exc.value.code == "invalid_option_value"
+
+
+def test_removed_overwrite_option_is_unknown() -> None:
+    """`--overwrite` 已随 `save_*` 一起删除（变化 a）：现在必须报 unknown_option。
+
+    这条是反对回流判据：只要有人把 overwrite 加回任何一个命令的参数面，它就红。
+    """
+    for key in ("dept update", "agent update", "room update", "role update"):
+        cmd = TABLE.by_path[key]
+        with pytest.raises(cp.ConsoleError) as exc:
+            cp._parse_options(cmd, ["--overwrite"])
+        assert exc.value.code == "unknown_option", (key, exc.value.code)
+
+
+def test_signature_of_delete_dept_keeps_both_locators_optional() -> None:
+    """`delete_dept` 的 `name` / `dept_id` 必须都带默认值 None（按 id 或按名二选一）。"""
+    params = inspect.signature(funcTools.delete_dept).parameters
+    assert params["dept_id"].default is None
+    assert params["name"].default is None

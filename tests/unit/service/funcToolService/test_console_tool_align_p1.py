@@ -31,6 +31,8 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -45,6 +47,7 @@ from constants import DriverType, EmployStatus, RoomType
 from model.dbModel.gtAgent import GtAgent
 from dal.db import gtScheduleJobManager as dalDb_gtScheduleJobManager
 from model.dbModel.gtDept import GtDept
+from service.funcToolService import core as funcCore
 from service.funcToolService import tools
 from service.roomService import ToolCallContext
 
@@ -332,17 +335,21 @@ class TestP1bSaveAgentPatch:
         )
 
     @pytest.mark.asyncio
-    async def test_update_by_id_requires_overwrite(self, monkeypatch):
-        """按 ID 更新已有成员同样必须显式 `overwrite=true`（防止误覆盖）。"""
+    async def test_update_by_id_needs_no_overwrite(self, monkeypatch):
+        """按 ID 更新已有成员**不再需要 overwrite**（变化 a：`overwrite` 已删）。
+
+        改前：不带 `overwrite=True` 会被拒（「已存在，如需覆盖请把 overwrite 设为 true」），
+        「表达更新意图」被压给调用方；改后：`update_agent(agent_id=…)` 本身就是更新语义，
+        覆盖保护改由 `create_agent` 承担（同名已存在直接拒绝）。
+        """
         agent = _agent(11, "alice", model="old-model")
         self._patch(monkeypatch, agent)
 
-        blocked = await tools.save_agent(agent_id=11, model="new-model", _context=_ctx())
+        result = await tools.update_agent(agent_id=11, model="new-model", _context=_ctx())
 
-        assert blocked["success"] is False
-        assert "overwrite" in blocked["message"]
-        assert agent.model == "old-model"
-        tools.gtAgentManager.batch_save_agents.assert_not_called()
+        assert result["success"] is True, result
+        assert agent.model == "new-model"
+        tools.gtAgentManager.batch_save_agents.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_omitted_fields_keep_current_values(self, monkeypatch):
@@ -353,8 +360,8 @@ class TestP1bSaveAgentPatch:
         agent.i18n = {"display_name": {"zh-CN": "爱丽丝"}}
         self._patch(monkeypatch, agent)
 
-        result = await tools.save_agent(
-            agent_id=11, overwrite=True, model="new-model", _context=_ctx()
+        result = await tools.update_agent(
+            agent_id=11, model="new-model", _context=_ctx()
         )
 
         assert result["success"] is True, result
@@ -373,9 +380,8 @@ class TestP1bSaveAgentPatch:
         agent.allow_skills = ["frontend-design"]
         self._patch(monkeypatch, agent)
 
-        result = await tools.save_agent(
+        result = await tools.update_agent(
             agent_id=11,
-            overwrite=True,
             clear_fields=["model", "allow_tools", "allow_skills"],
             _context=_ctx(),
         )
@@ -391,7 +397,7 @@ class TestP1bSaveAgentPatch:
         agent = _agent(11, "alice", model="old-model")
         self._patch(monkeypatch, agent)
 
-        result = await tools.save_agent(
+        result = await tools.update_agent(
             agent_id=11, model="new-model", clear_fields=["model"], _context=_ctx()
         )
 
@@ -406,7 +412,7 @@ class TestP1bSaveAgentPatch:
         agent = _agent(11, "alice")
         self._patch(monkeypatch, agent)
 
-        result = await tools.save_agent(agent_id=11, clear_fields=["driver"], _context=_ctx())
+        result = await tools.update_agent(agent_id=11, clear_fields=["driver"], _context=_ctx())
 
         assert result["success"] is False
         assert result["error_code"] == "invalid_clear_field"
@@ -420,24 +426,25 @@ class TestP1bSaveAgentPatch:
         agent = _agent(11, "alice")
         self._patch(monkeypatch, agent)
 
-        result = await tools.save_agent(agent_id=11, clear_fields=5, _context=_ctx())
+        result = await tools.update_agent(agent_id=11, clear_fields=5, _context=_ctx())
 
         assert result["success"] is False
         assert result["error_code"] == "invalid_clear_field"
         assert "int" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_create_still_requires_role_template_at_runtime(self, monkeypatch):
-        """新建时 `role_template_name` 仍必填 —— 只是校验收到了运行时（schema 已放开）。"""
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent_by_id", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "batch_save_agents", AsyncMock())
+    async def test_create_agent_requires_role_template_in_signature(self):
+        """新建成员时 `role_template_name` 是**签名级必填**（变化 a）。
 
-        result = await tools.save_agent(name="newbie", _context=_ctx())
+        改前：`save_agent(name="newbie")` 能进函数，靠运行时校验返回「必须提供」；
+        改后：`create_agent(name=...)` 直接 `TypeError`（缺必填参数），schema 里也标 required。
+        """
+        import inspect
 
-        assert result["success"] is False
-        assert "role_template_name" in result["message"]
-        tools.gtAgentManager.batch_save_agents.assert_not_called()
+        signature = inspect.signature(tools.create_agent)
+        assert signature.parameters["role_template_name"].default is inspect.Parameter.empty
+        with pytest.raises(TypeError):
+            await tools.create_agent(name="newbie", _context=_ctx())
 
 
 class TestP1bSaveDeptPatch:
@@ -451,18 +458,15 @@ class TestP1bSaveDeptPatch:
         monkeypatch.setattr(deptService, "get_dept_tree", AsyncMock(return_value=None))
 
     @pytest.mark.asyncio
-    async def test_update_by_id_requires_overwrite(self, monkeypatch):
-        """按 ID 更新已有组织同样必须显式 `overwrite=true`（防止误覆盖）。"""
+    async def test_update_by_id_needs_no_overwrite(self, monkeypatch):
+        """按 ID 更新已有组织**不再需要 overwrite**（变化 a）；同名新建由 create_dept 拒。"""
         child = _dept(2, "child", parent_id=1, manager_id=2)
         self._patch(monkeypatch, child, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        blocked = await tools.save_dept(
-            dept_id=2, responsibility="新职责", _context=_ctx()
-        )
+        result = await tools.update_dept(dept_id=2, responsibility="新职责", _context=_ctx())
 
-        assert blocked["success"] is False
-        assert "overwrite" in blocked["message"]
-        deptService.upsert_dept.assert_not_awaited()
+        assert result["success"] is True, result
+        deptService.upsert_dept.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_omitted_parent_keeps_existing_parent(self, monkeypatch):
@@ -471,8 +475,8 @@ class TestP1bSaveDeptPatch:
         child = _dept(2, "child", parent_id=1, manager_id=2)
         self._patch(monkeypatch, child, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_dept(
-            dept_id=2, overwrite=True, responsibility="新职责", _context=_ctx()
+        result = await tools.update_dept(
+            dept_id=2, responsibility="新职责", _context=_ctx()
         )
 
         assert result["success"] is True, result
@@ -490,14 +494,14 @@ class TestP1bSaveDeptPatch:
         agents = [_agent(1, "alice"), _agent(2, "bob")]
 
         self._patch(monkeypatch, root, agents=agents)
-        on_root = await tools.save_dept(
-            dept_id=1, overwrite=True, clear_fields=["parent_name"], _context=_ctx()
+        on_root = await tools.update_dept(
+            dept_id=1, clear_fields=["parent_name"], _context=_ctx()
         )
 
         self._patch(monkeypatch, child, agents=agents)
         deptService.upsert_dept.reset_mock()
-        on_child = await tools.save_dept(
-            dept_id=2, overwrite=True, clear_fields=["parent_name"], _context=_ctx()
+        on_child = await tools.update_dept(
+            dept_id=2, clear_fields=["parent_name"], _context=_ctx()
         )
 
         assert on_root["success"] is True, on_root
@@ -506,18 +510,19 @@ class TestP1bSaveDeptPatch:
         deptService.upsert_dept.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_create_requires_all_fields_at_runtime(self, monkeypatch):
-        """新建缺字段 ⇒ 文案**一次列全**缺失项（不是缺一个报一个）。"""
-        monkeypatch.setattr(deptService.gtDeptManager, "get_dept_by_name", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[]))
-        monkeypatch.setattr(deptService, "upsert_dept", AsyncMock())
+    async def test_create_dept_required_fields_are_in_signature(self):
+        """新建组织时 `responsibility` / `manager_name` / `parent_name` 是签名级必填（变化 a）。
 
-        result = await tools.save_dept(name="newdept", _context=_ctx())
+        `member_names` 仍是可选：函数内默认 `[]`（设计 §2.2 第 1 条），不需要调用方给。
+        """
+        import inspect
 
-        assert result["success"] is False
-        for field in ("responsibility", "manager_name", "member_names"):
-            assert field in result["message"], (field, result["message"])
-        deptService.upsert_dept.assert_not_called()
+        signature = inspect.signature(tools.create_dept)
+        for field in ("responsibility", "manager_name", "parent_name"):
+            assert signature.parameters[field].default is inspect.Parameter.empty, field
+        assert signature.parameters["member_names"].default is None
+        with pytest.raises(TypeError):
+            await tools.create_dept(name="newdept", _context=_ctx())
 
 
 class TestP1bSaveRoomPatch:
@@ -536,18 +541,15 @@ class TestP1bSaveRoomPatch:
         )
 
     @pytest.mark.asyncio
-    async def test_update_by_id_requires_overwrite(self, monkeypatch):
-        """按 ID 更新已有房间同样必须显式 `overwrite=true`（防止误覆盖）。"""
+    async def test_update_by_id_needs_no_overwrite(self, monkeypatch):
+        """按 ID 更新已有房间**不再需要 overwrite**（变化 a）；同名新建由 create_room 拒。"""
         room = self._room()
         self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        blocked = await tools.save_room(
-            room_id=5, max_rounds=3, _context=_ctx()
-        )
+        result = await tools.update_room(room_id=5, max_rounds=3, _context=_ctx())
 
-        assert blocked["success"] is False
-        assert "overwrite" in blocked["message"]
-        roomService.upsert_room.assert_not_awaited()
+        assert result["success"] is True, result
+        roomService.upsert_room.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_omitted_topic_keeps_current_value(self, monkeypatch):
@@ -555,7 +557,7 @@ class TestP1bSaveRoomPatch:
         room = self._room()
         self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_room(room_id=5, overwrite=True, max_rounds=3, _context=_ctx())
+        result = await tools.update_room(room_id=5, max_rounds=3, _context=_ctx())
 
         assert result["success"] is True, result
         kwargs = roomService.upsert_room.await_args.kwargs
@@ -569,7 +571,7 @@ class TestP1bSaveRoomPatch:
         room = self._room()
         self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_room(room_id=5, overwrite=True, clear_fields=["initial_topic"], _context=_ctx())
+        result = await tools.update_room(room_id=5, clear_fields=["initial_topic"], _context=_ctx())
 
         assert result["success"] is True, result
         assert roomService.upsert_room.await_args.kwargs["initial_topic"] == ""
@@ -580,22 +582,20 @@ class TestP1bSaveRoomPatch:
         room = self._room()
         self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_room(room_id=5, overwrite=True, clear_fields=["max_rounds"], _context=_ctx())
+        result = await tools.update_room(room_id=5, clear_fields=["max_rounds"], _context=_ctx())
 
         assert result["success"] is True, result
         assert roomService.upsert_room.await_args.kwargs["max_rounds"] is None
 
     @pytest.mark.asyncio
-    async def test_create_requires_member_names_at_runtime(self, monkeypatch):
-        monkeypatch.setattr(tools.gtRoomManager, "get_room_by_team_and_name", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[]))
-        monkeypatch.setattr(roomService, "upsert_room", AsyncMock())
+    async def test_create_room_requires_member_names_in_signature(self):
+        """新建房间时 `member_names` 是签名级必填（变化 a）。"""
+        import inspect
 
-        result = await tools.save_room(name="newroom", _context=_ctx())
-
-        assert result["success"] is False
-        assert "member_names" in result["message"]
-        roomService.upsert_room.assert_not_called()
+        signature = inspect.signature(tools.create_room)
+        assert signature.parameters["member_names"].default is inspect.Parameter.empty
+        with pytest.raises(TypeError):
+            await tools.create_room(name="newroom", _context=_ctx())
 
 
 # =========================================================================== #
@@ -762,101 +762,76 @@ class TestP1cRoomDryRun:
 # =========================================================================== #
 
 
-class TestP1dRequiredMovedToRuntime:
-    """schema 的 `required` 变空之后，新建缺参数仍必须被拒（不是静默建出无名对象）。"""
+class TestP1dRequiredMovedToSignature:
+    """「缺必填」在 P0 后是**签名级**契约（设计 §2.1）。
+
+    旧版守的是「schema 的 required 变空之后，运行时仍必须拦住」——那套前提是
+    `save_*` 混装 create/update、必填只能放开成 Optional 再由运行时兜。P0 把新建与更新
+    拆开后，必填项直接回到签名（无默认值），校验由签名本身承担。新判据钉两件事：
+    ① 定位/必填参数确实无默认值；② 少了它调用直接 `TypeError` —— 不存在「静默建出
+    无名对象」的路径，也就无从触发裸数据库约束错误。
+    """
+
+    @pytest.mark.parametrize(
+        "tool_name,param",
+        [
+            ("update_agent", "agent_id"),
+            ("update_dept", "dept_id"),
+            ("update_room", "room_id"),
+            ("create_agent", "name"),
+            ("create_dept", "name"),
+            ("create_room", "name"),
+        ],
+    )
+    def test_required_param_has_no_default(self, tool_name, param):
+        parameter = inspect.signature(getattr(tools, tool_name)).parameters[param]
+        assert parameter.default is inspect.Parameter.empty, (
+            f"{tool_name}.{param} 必须有签名级必填（无默认值），否则「必填」只能靠运行时兜"
+        )
 
     @pytest.mark.asyncio
-    async def test_save_agent_without_name_or_id_is_rejected(self, monkeypatch):
-        """既没 agent_id 也没 name ⇒ 拒绝并**点名这两个参数**，不写库。"""
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent_by_id", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "batch_save_agents", AsyncMock())
-
-        result = await tools.save_agent(model="gpt-4o-mini", _context=_ctx())
-
-        assert result["success"] is False
-        assert "agent_id" in result["message"] and "name" in result["message"]
-        tools.gtAgentManager.batch_save_agents.assert_not_called()
+    async def test_missing_required_param_raises_type_error_not_db_error(self):
+        """少必填参数 ⇒ `TypeError`（Python 层），不会走到写库、更不会冒出裸数据库错误。"""
+        with pytest.raises(TypeError):
+            await tools.update_agent(model="gpt-4o-mini", _context=_ctx())
+        with pytest.raises(TypeError):
+            await tools.create_dept(name="newdept", _context=_ctx())
+        with pytest.raises(TypeError):
+            await tools.create_room(name="newroom", _context=_ctx())
 
     @pytest.mark.asyncio
-    async def test_save_dept_without_name_or_id_is_rejected(self, monkeypatch):
-        monkeypatch.setattr(deptService.gtDeptManager, "get_dept_by_name", AsyncMock(return_value=None))
-        monkeypatch.setattr(deptService, "upsert_dept", AsyncMock())
+    async def test_no_naked_db_constraint_error_ever_surfaces(self):
+        """模型面（`run_tool_call`）缺参时统一返回 `invalid_tool_args`，不含裸数据库措辞。
 
-        result = await tools.save_dept(responsibility="x", _context=_ctx())
-
-        assert result["success"] is False
-        assert "dept_id" in result["message"] and "name" in result["message"]
-        deptService.upsert_dept.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_save_room_without_name_or_id_is_rejected(self, monkeypatch):
-        monkeypatch.setattr(tools.gtRoomManager, "get_room_by_team_and_name", AsyncMock(return_value=None))
-        monkeypatch.setattr(roomService, "upsert_room", AsyncMock())
-
-        result = await tools.save_room(max_rounds=3, _context=_ctx())
-
-        assert result["success"] is False
-        assert "room_id" in result["message"] and "name" in result["message"]
-        roomService.upsert_room.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_no_naked_db_constraint_error_ever_surfaces(self, monkeypatch):
-        """`NOT NULL constraint failed` 绝不能浮到用户面前（硬条件 1 的原话）。
-
-        这条不只测 save_agent 一条路径：把「缺参数」的各种组合扫一遍，任何一个返回体
-        里出现裸数据库措辞即红 —— 那说明校验真的漏了、写库被尝试过。
+        走的是第 2 跳真实入口：schema 校验在函数执行前拦下，因此连"写库被尝试过"都不会发生。
         """
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent_by_id", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "batch_save_agents", AsyncMock())
-        monkeypatch.setattr(deptService.gtDeptManager, "get_dept_by_name", AsyncMock(return_value=None))
-        monkeypatch.setattr(deptService, "upsert_dept", AsyncMock())
-        monkeypatch.setattr(tools.gtRoomManager, "get_room_by_team_and_name", AsyncMock(return_value=None))
-        monkeypatch.setattr(roomService, "upsert_room", AsyncMock())
-        # `save_room` 在定位之后会先读一次名册（PATCH 语义反查名字），不 patch 会真去连库。
-        monkeypatch.setattr(tools.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[]))
-
-        calls = [
-            tools.save_agent(_context=_ctx()),
-            tools.save_agent(name="newbie", _context=_ctx()),          # 缺 role_template_name
-            tools.save_dept(_context=_ctx()),
-            tools.save_dept(name="d", _context=_ctx()),                # 缺 4 项
-            tools.save_room(_context=_ctx()),
-            tools.save_room(name="r", _context=_ctx()),                # 缺 member_names
+        funcCore.load_func_tools()  # 真实入口依赖注册表已装配（生产由 startup 完成）
+        cases = [
+            ("update_agent", {}),
+            ("update_dept", {}),
+            ("update_room", {}),
+            ("create_agent", {"name": "newbie"}),
+            ("create_dept", {"name": "d"}),
+            ("create_room", {"name": "r"}),
         ]
-        for result in await asyncio.gather(*calls):
-            assert result["success"] is False, result
-            assert "constraint failed" not in result["message"].lower(), result
-            assert "IntegrityError" not in result["message"], result
+        for tool_name, args in cases:
+            result = await funcCore.run_tool_call(json.dumps(args), _ctx(tool_name))
+            assert result["success"] is False, (tool_name, result)
+            assert result["error_code"] == "invalid_tool_args", (tool_name, result)
+            assert "constraint failed" not in str(result["message"]).lower(), (tool_name, result)
 
-        tools.gtAgentManager.batch_save_agents.assert_not_called()
-        deptService.upsert_dept.assert_not_called()
-        roomService.upsert_room.assert_not_called()
-
-
-# =========================================================================== #
-# P1e：运行时校验的「错误码等效于 schema 层」（小马哥 12:02 / 12:16 阻塞项）
-#
-# 为什么单列一组：`error_code` 是**程序分支键**，不是措辞。文案点名只解决「人读得懂」，
-# 若码是 `None`，「参数缺失（补参数重试）」与「业务失败（换操作）」在机器层面不可辨。
-# 上一版这里 5 条路径全是 `None` —— 小马哥判为违反硬条件 1 的「等效」要求。
-#
-# ⚠️ 判据是**正向断言两条**：① 必须有 `error_code == "invalid_tool_args"`；
-# ② 必须与业务失败（「已存在需 overwrite」）的码取值**不同**。
-# 反例见 `test_no_naked_db_constraint_error_ever_surfaces`：它只断言「不得出现某串」
-# ——否定式断言在功能未发生时恒真，删掉运行时校验它照样 passed，故不计入本组覆盖。
-# =========================================================================== #
 
 
 class TestP1eRuntimeLocatorErrorCode:
-    """五个「缺定位参数」入口都必须给出与 schema 层同码的 `invalid_tool_args`。"""
+    """「缺定位参数」的两种口径，按工具契约分别钉住。
+
+    - `delete_dept` / `delete_room`：两个定位参数都可选（`<id>` 或 `--name`），因此
+      「都不给」只能在运行时拒，且必须与 schema 层**同码**（`invalid_tool_args`）；
+    - `update_*`：定位参数是签名级必填（变化 a），「不给」根本进不了函数 ——
+      由 `TestP1dRequiredMovedToSignature` 覆盖。
+    """
 
     def _patch_empty(self, monkeypatch) -> None:
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[]))
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent_by_id", AsyncMock(return_value=None))
-        monkeypatch.setattr(tools.gtAgentManager, "batch_save_agents", AsyncMock())
         monkeypatch.setattr(deptService.gtDeptManager, "get_dept_by_name", AsyncMock(return_value=None))
         monkeypatch.setattr(deptService, "upsert_dept", AsyncMock())
         monkeypatch.setattr(tools.gtRoomManager, "get_room_by_team_and_name", AsyncMock(return_value=None))
@@ -866,9 +841,6 @@ class TestP1eRuntimeLocatorErrorCode:
     @pytest.mark.parametrize(
         "invoke",
         [
-            pytest.param(lambda: tools.save_agent(_context=_ctx()), id="save_agent"),
-            pytest.param(lambda: tools.save_dept(_context=_ctx()), id="save_dept"),
-            pytest.param(lambda: tools.save_room(_context=_ctx()), id="save_room"),
             pytest.param(lambda: tools.delete_dept(_context=_ctx()), id="delete_dept"),
             pytest.param(lambda: tools.delete_room(_context=_ctx()), id="delete_room"),
         ],
@@ -881,32 +853,29 @@ class TestP1eRuntimeLocatorErrorCode:
 
         assert result["success"] is False, result
         assert result["error_code"] == "invalid_tool_args", result
-        # 同码之外仍点名参数：机器可分支、人可照着补。
         assert "name" in result["message"], result
 
     @pytest.mark.asyncio
-    async def test_missing_locator_code_is_distinguishable_from_business_failure(self, monkeypatch):
-        """「参数缺失」与「同名已存在需 overwrite」的码**取值不同**，调用方能选对下一步。
+    async def test_create_conflict_code_differs_from_signature_error(self, monkeypatch):
+        """「同名已存在」（业务失败）与「缺参数」（签名/校验失败）必须可区分。
 
-        两条路径都在工具层、都 `success=False`；若都返回 `None`（上一版的状态），
-        调用方无法凭返回体判断「补参数重试」还是改传 `overwrite=true`。
+        改前：两条路径都在工具层、都 `success=False`，靠 `overwrite` 提示区分；
+        改后：同名已存在 ⇒ `invalid_tool_args` + 明确指向 `update_agent`；
+        缺参数 ⇒ 签名层 `TypeError`（模型面是 `invalid_tool_args` 但 message 不同）。
         """
-        self._patch_empty(monkeypatch)
         existing = _agent(11, "alice", model="old-model")
-        monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=existing))
         monkeypatch.setattr(
-            tools.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[existing])
+            tools.gtAgentManager, "get_team_agents_by_names", AsyncMock(return_value=[existing])
         )
 
-        missing = await tools.save_agent(_context=_ctx())
-        business = await tools.save_agent(name="alice", role_template_name="writer", _context=_ctx())
+        business = await tools.create_agent(name="alice", role_template_name="writer", _context=_ctx())
 
-        assert missing["success"] is False and business["success"] is False
-        assert missing["error_code"] == "invalid_tool_args", missing
-        # 取值写出来（不是「不相同」三个字）：业务失败这一档当前**不带** error_code。
-        assert "error_code" not in business, business
-        assert business.get("error_code") is None, business
-        assert "overwrite" in business["message"], business
+        assert business["success"] is False, business
+        assert business["error_code"] == "invalid_tool_args", business
+        assert "update_agent" in business["message"], business
+        with pytest.raises(TypeError):
+            await tools.update_agent(_context=_ctx())
+
 
 
 class TestP1ePatchEchoName:
@@ -927,8 +896,8 @@ class TestP1ePatchEchoName:
             AsyncMock(side_effect=AssertionError("PATCH 不得触发改名（删容器）")),
         )
 
-        result = await tools.save_agent(
-            agent_id=11, overwrite=True, model="new-model", _context=_ctx()
+        result = await tools.update_agent(
+            agent_id=11, model="new-model", _context=_ctx()
         )
 
         assert result["success"] is True, result

@@ -63,7 +63,7 @@ def test_default_tools_exclude_container_tools():
     """`get_tools()` 默认**不含**容器工具（Native / Claude SDK 行为零变化）。"""
     names = {tool.function.name for tool in funcToolService.get_tools()}
 
-    assert not (names & set(funcToolService.CONTAINER_TOOL_NAMES))
+    assert not (names & set(funcToolService.container_tool_names()))
 
 
 def test_include_container_tools_adds_exactly_the_model_visible_ones():
@@ -80,8 +80,8 @@ def test_include_container_tools_adds_exactly_the_model_visible_ones():
         for tool in funcToolService.get_tools(include_container_tools=True)
     }
 
-    assert len(funcToolService.CONTAINER_TOOL_NAMES) == 6
-    assert with_containers - base == set(funcToolService.CONTAINER_TOOL_NAMES) - {
+    assert len(funcToolService.container_tool_names()) == 6
+    assert with_containers - base == set(funcToolService.container_tool_names()) - {
         "update_container_note"
     }
     assert "update_container_note" not in with_containers, (
@@ -117,7 +117,7 @@ async def test_container_tool_executes_through_run_tool_call(monkeypatch, contai
 
 def test_every_advertised_container_tool_is_resolvable_by_name():
     """所有下发给模型的容器工具名，都必须能在执行注册表里按同名找到。"""
-    for tool_name in funcToolService.CONTAINER_TOOL_NAMES:
+    for tool_name in funcToolService.container_tool_names():
         assert funcToolService.get_func_tool(tool_name) is not None, tool_name
 
 

@@ -118,7 +118,7 @@ async def test_native_driver_root_leader_gets_admin_tools(mock_host: MagicMock) 
     """is_root_leader=True 的 native agent 应获得 ADMIN 类工具。"""
     send_tool = _make_tool("send_chat_msg")
     finish_tool = _make_tool("finish_action")
-    admin_tool = _make_tool("save_agent")   # ADMIN 类
+    admin_tool = _make_tool("create_agent")   # ADMIN 类
 
     driver = NativeAgentDriver(
         mock_host,
@@ -129,7 +129,7 @@ async def test_native_driver_root_leader_gets_admin_tools(mock_host: MagicMock) 
         await driver.startup()
 
     exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
-    assert "save_agent" in exported_names
+    assert "create_agent" in exported_names
     assert "send_chat_msg" in exported_names
 
 
@@ -138,7 +138,7 @@ async def test_native_driver_non_root_leader_no_admin_tools(mock_host: MagicMock
     """is_root_leader=False（默认）的 native agent 不应获得 ADMIN 类工具。"""
     send_tool = _make_tool("send_chat_msg")
     finish_tool = _make_tool("finish_action")
-    admin_tool = _make_tool("save_agent")   # ADMIN 类
+    admin_tool = _make_tool("create_agent")   # ADMIN 类
 
     driver = NativeAgentDriver(
         mock_host,
@@ -149,5 +149,5 @@ async def test_native_driver_non_root_leader_no_admin_tools(mock_host: MagicMock
         await driver.startup()
 
     exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
-    assert "save_agent" not in exported_names
+    assert "create_agent" not in exported_names
     assert "send_chat_msg" in exported_names
