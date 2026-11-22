@@ -49,8 +49,11 @@ pub fn init(log_dir: &Path) -> Result<(), String> {
 pub fn log(tag: &str, message: impl std::fmt::Display) {
     let elapsed_ms = started_at().elapsed().as_millis();
     let line = format!("+{}ms [{}] {}\n", elapsed_ms, tag, message);
-    // 同时输出到终端，`tauri dev` 时可直接观察
-    print!("{}", line);
+    // 同时输出到终端，`tauri dev` 时可直接观察。
+    // release 在 Windows 上以 windows_subsystem="windows" 启动、没有控制台，
+    // stdout 句柄可能无效；`print!` 写失败会直接 panic，让外壳启动即崩溃，
+    // 所以这里显式忽略写入错误。
+    let _ = std::io::stdout().write_all(line.as_bytes());
 
     let mut guard = LOGGER
         .lock()

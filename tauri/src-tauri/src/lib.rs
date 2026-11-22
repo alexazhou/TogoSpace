@@ -348,7 +348,9 @@ pub fn run() {
             std::fs::create_dir_all(&storage_root)?;
             let log_dir = storage_root.join("logs").join("desktop");
             if let Err(error) = logger::init(&log_dir) {
-                eprintln!("logger init failed: {}", error);
+                // 同上：无控制台的 Windows release 里 eprintln! 会 panic
+                use std::io::Write as _;
+                let _ = writeln!(std::io::stderr(), "logger init failed: {}", error);
             }
             logger::log(
                 "shell",
