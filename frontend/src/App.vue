@@ -504,6 +504,14 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
+/*
+ * macOS 覆盖式标题栏：`#app` 已为原生红绿灯预留 28px，
+ * 这里不能再叠加 8px 顶边距，否则红绿灯下方会明显比上方空。
+ */
+html.macos-overlay-titlebar .shell {
+  padding-top: 0;
+}
+
 .shell-settings {
   overflow-x: auto;
 }
