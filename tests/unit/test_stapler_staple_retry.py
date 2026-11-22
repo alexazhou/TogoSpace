@@ -41,6 +41,7 @@ import importlib.util
 import inspect
 import os
 import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -50,12 +51,24 @@ _SCRIPT = os.path.join(_REPO_ROOT, "tauri", "scripts", "build_desktop.py")
 
 
 def _load_build_desktop():
-    """按路径加载 build_desktop.py（该目录不是包）。"""
-    spec = importlib.util.spec_from_file_location("build_desktop_under_test", _SCRIPT)
-    assert spec is not None and spec.loader is not None, f"无法加载 {_SCRIPT}"
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """按路径加载 build_desktop.py（该目录不是包）。
+
+    脚本正常执行时 Python 会把脚本目录放进 `sys.path`，`build_desktop.py`
+    才能 `import build_common`；这里按路径加载绕过了这一步，需要手动补上。
+    """
+    script_dir = os.path.dirname(_SCRIPT)
+    added = script_dir not in sys.path
+    if added:
+        sys.path.insert(0, script_dir)
+    try:
+        spec = importlib.util.spec_from_file_location("build_desktop_under_test", _SCRIPT)
+        assert spec is not None and spec.loader is not None, f"无法加载 {_SCRIPT}"
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if added:
+            sys.path.remove(script_dir)
 
 
 @pytest.fixture()
