@@ -27,7 +27,6 @@ import pytest
 
 from exception import ForwardToolCall
 from service.agentService import toolRegistry
-from service.funcToolService import consoleCommands as cc
 from service.funcToolService import consoleRegistry
 from service.funcToolService import toolSpec
 from service.funcToolService import core as funcCore
@@ -238,7 +237,9 @@ def test_container_note_is_the_only_new_container_command():
     之外触发，绕开 Driver 的执行环境管理。
     """
     container_actions = sorted(
-        spec.action for spec in cc.COMMAND_SPECS if spec.resource == "container"
+        spec.primary_action
+        for spec in consoleRegistry.get_table().specs
+        if spec.resource == "container"
     )
     assert container_actions == ["note"], container_actions
 
@@ -271,7 +272,9 @@ def test_no_console_command_exceeds_one_positional_except_container_note():
     这里会提醒他「多位置参数现在是受支持的通用能力，但每加一条都该在命令表里显式声明」。
     """
     multi = sorted(
-        spec.key for spec in cc.COMMAND_SPECS if spec.max_args > 1 and not spec.accepts_input
+        spec.key
+        for spec in consoleRegistry.get_table().specs
+        if spec.max_pos > 1 and not spec.payload
     )
     assert multi == ["container note"], multi
 

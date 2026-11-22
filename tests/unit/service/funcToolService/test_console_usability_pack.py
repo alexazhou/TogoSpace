@@ -27,7 +27,6 @@ from typing import Any
 import pytest
 
 from exception import ForwardToolCall
-from service.funcToolService import consoleCommands as cc
 from service.funcToolService import consoleParsing as cp
 from service.funcToolService import consoleTool as ct
 from service.funcToolService.consoleTool import console
@@ -271,7 +270,10 @@ class TestTaskCreateForwarding:
             "dept create --name x --responsibility y --manager-name alice --parent-name 总部"
         )
         assert post_process is None
-        assert cc.COMMAND_INDEX["dept create"].success_hint == ""
+        # P1 删表后命令表不再有 `success_hint` 字段（那句提醒归 `create_task` 自己的
+        # 返回体），对照组改成查：同一句提示不会从别的 create 命令漏出来。
+        dept_help = _run("help dept create")["help"]
+        assert "不会唤醒执行人" not in dept_help, dept_help
 
 
 # --------------------------------------------------------------------------- #

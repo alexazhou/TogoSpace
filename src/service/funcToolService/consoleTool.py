@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, NoReturn, Optional, cast
+from typing import Any, NoReturn, Optional
 
 from constants import ALLOWED_CLEAR_FIELDS, ToolVisibility
 from exception import ForwardToolCall
@@ -633,10 +633,10 @@ def _build_call_args(
     那类缺陷。所以这里只允许有一份实现，谓词与执行都调用它，判据钉「`cp._parse_options`
     在本模块只出现一次」。
     """
-    # `ResolvedCommand` 按契约兼容 `CommandSpec` 的选项面（见其类 docstring），但两者没有
-    # 共享基类/Protocol，静态检查只能显式 cast；真正的约束由 `consoleRegistry.build()`
-    # 的 fail-fast 校验兜住（选项面不合规的命令根本建不出表）。
-    positional, options, input_source = cp._parse_options(cast(Any, cmd), rest)
+    # `ResolvedCommand` 结构化满足解析层声明的 `CommandSpecLike`（见 `consoleParsing`），
+    # 所以这里直接传，静态检查无需 cast；真正的约束由 `consoleRegistry.build()` 的
+    # fail-fast 校验兜住（选项面不合规的命令根本建不出表）。
+    positional, options, input_source = cp._parse_options(cmd, rest)
     pos_args, inline_payload = _resolve_positionals(cmd, positional, options)
     opt_args = _option_args(cmd, options)
     payload_args = _resolve_payload(cmd, inline_payload, input_source, payload)

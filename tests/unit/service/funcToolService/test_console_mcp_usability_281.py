@@ -24,7 +24,7 @@ from container_db_schema import migrate_all
 from model.dbModel.base import bind_database, unbind_database
 from service import mcpRegistryService  # noqa: F401  (确保模块可导入)
 from service.agentService import toolRegistry
-from service.funcToolService import consoleCommands as cc
+from service.funcToolService import consoleRegistry
 from service.funcToolService import consoleParsing as cp
 from service.funcToolService import mcpTool
 from service.funcToolService.consoleTool import console
@@ -39,7 +39,7 @@ from service.funcToolService.consoleParsing import ConsoleError
 
 def _parse_error(command_spec: str, tokens: list[str]) -> ConsoleError:
     """通用命令表的解析层（**只对非 mcp 命令有效**：#291 起 mcp 子树不走 spec）。"""
-    spec = cc.COMMAND_INDEX[command_spec]
+    spec = consoleRegistry.get_table().by_path[command_spec]
     with pytest.raises(ConsoleError) as caught:
         cp._parse_options(spec, tokens)
     return caught.value
@@ -308,8 +308,7 @@ async def test_p4_no_suggestion_when_kind_explicit_or_not_url(mcp_db, leader_ctx
 @pytest.mark.parametrize("command_spec", ["task ls", "dept get", "agent wake", "room rm"])
 def test_non_mcp_unknown_option_not_polluted(command_spec: str):
     """P1 的硬边界：`unknown_option` 是通用码，非 mcp 命令不得弹出 MCP 文案。"""
-    spec = cc.COMMAND_INDEX[command_spec]
-    assert spec.example == "", f"{command_spec} 不该声明示例（示例只挂 mcp call）"
+    spec = consoleRegistry.get_table().by_path[command_spec]
     exc = _parse_error(command_spec, ["--bogus", "x"])
     assert exc.code == "unknown_option"
     assert "MCP" not in exc.message, f"{command_spec} 被 MCP 文案污染：{exc.message!r}"

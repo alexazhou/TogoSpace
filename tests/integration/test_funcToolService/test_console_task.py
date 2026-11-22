@@ -34,7 +34,7 @@ from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
 from service import funcToolService
 from service.agentService.toolRegistry import AgentToolRegistry, build_runtime_allow_specs
-from service.funcToolService import consoleCommands as cc
+from service.funcToolService import consoleRegistry
 from service.funcToolService import core as func_tool_core
 from service.roomService import ToolCallContext
 from util.llmApiUtil import OpenAIToolCall
@@ -575,7 +575,7 @@ class TestConsoleTaskCommand(ServiceTestCase):
         from service.funcToolService import consoleTool as ct
 
         # ---- ① 数组型：聚合 + 去重保序（解析层先钉住形状）----
-        update_spec = cc.COMMAND_INDEX["task update"]
+        update_spec = consoleRegistry.get_table().by_path["task update"]
         _pos, options, _src = ct.cp._parse_options(
             update_spec, ["187", "--remove-field", "reviewer_id", "--remove-field", "title"]
         )
@@ -583,7 +583,7 @@ class TestConsoleTaskCommand(ServiceTestCase):
             f"数组型重复应聚合为两次出现的有序列表，实际 {options['remove-field']!r}"
             "（若为 'title'，是 #187-④ 的旧覆盖语义回来了）"
         )
-        ls_spec = cc.COMMAND_INDEX["task ls"]
+        ls_spec = consoleRegistry.get_table().by_path["task ls"]
         _pos, ls_options, _src = ct.cp._parse_options(
             ls_spec, ["--status", "DONE", "--status", "TODO", "--status", "DONE"]
         )
@@ -659,7 +659,7 @@ class TestConsoleTaskCommand(ServiceTestCase):
         """
         from service.funcToolService import consoleTool as ct
 
-        update_spec = cc.COMMAND_INDEX["task update"]
+        update_spec = consoleRegistry.get_table().by_path["task update"]
         _pos, options, _src = ct.cp._parse_options(
             update_spec,
             ["187", "--remove-field", "reviewer_id", "--clear_fields", "reviewer_id"],
@@ -669,7 +669,7 @@ class TestConsoleTaskCommand(ServiceTestCase):
         )
         assert ct._split_csv(options["remove-field"]) == ["reviewer_id"]
 
-        time_spec = cc.COMMAND_INDEX["time get"]
+        time_spec = consoleRegistry.get_table().by_path["time get"]
         with pytest.raises(ct.ConsoleError) as exc:
             ct.cp._parse_options(time_spec, ["--tz", "UTC", "--timezone", "Asia/Shanghai"])
         assert exc.value.code == "duplicate_option", (
@@ -725,7 +725,7 @@ class TestConsoleTaskCommand(ServiceTestCase):
 
     def test_task_commands_are_in_command_specs(self):
         """task 三条必须真的在 `COMMAND_SPECS` 里（这就是 M3 变异要咬的地方）。"""
-        keys = {s.key for s in cc.COMMAND_SPECS}
+        keys = {s.key for s in consoleRegistry.get_table().specs}
         assert {"task ls", "task get", "task update"} <= keys, (
             f"task 命令缺失，当前命令表：{sorted(keys)}"
         )
@@ -823,8 +823,9 @@ class TestConsoleTaskCommand(ServiceTestCase):
 
     async def test_task_create_is_in_command_index(self):
         """A6 的注册面：`task create` 必须在命令表里（变异删掉这一行即红）。"""
-        assert "task create" in cc.COMMAND_INDEX
-        assert cc.COMMAND_INDEX["task create"].legacy_tool == "create_task"
+        table = consoleRegistry.get_table()
+        assert "task create" in table.by_path
+        assert table.by_path["task create"].tool_name == "create_task"
 
     # ==================================================================
     # #222 A3：`task ls --status TODO` 自动补 `--scope self`（真入口）

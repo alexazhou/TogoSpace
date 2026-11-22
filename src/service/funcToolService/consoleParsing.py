@@ -8,29 +8,62 @@
 
 3. **路由**在 `consoleTool`：它只负责「命令 → 目标工具 + 参数」。
 
-选项白名单与「哪些选项是不带值的开关」**不在这里手写**（#196 P2）：两者都从
-`CommandSpec` 派生，而 `CommandSpec` 又从被转发工具的 JSON Schema 派生
-（`consoleSchema`）。`--dry-run` 这类新增布尔参数因此自动成为开关，不会被解析器
-当成「需要值的选项」把下一个 token 吃掉。
+选项白名单与「哪些选项是不带值的开关」**不在这里手写**（#196 P2）：两者都从命令对象
+（`ResolvedCommand`）派生，而它又从被转发工具的 JSON Schema 派生（`consoleSchema`）。
+`--dry-run` 这类新增布尔参数因此自动成为开关，不会被解析器当成「需要值的选项」把下一
+个 token 吃掉。
 
-选项名支持**双轨**（真名 + 别名，见 `consoleCommands._OPTION_ALIASES`）：白名单
-同时认两者，但 `options` 字典里**存用户写下的原名**。原因是既有用例把
-`options["remove-field"]` 当契约钉住了；归一（别名 → 工具参数名）只在
-`consoleTool` 组装转发参数时做。
+选项名支持**双轨**（真名 + 别名，见 `Arg.alias`）：白名单同时认两者，但 `options` 字典
+里**存用户写下的原名**。原因是既有用例把 `options["remove-field"]` 当契约钉住了；归一
+（别名 → 工具参数名）只在 `consoleTool` 组装转发参数时做。
 
 **权限校验不在这里**（#160 起）：`console` 自己不再重算一遍权限，而是把调用
 转发给等价的原工具，由唯一执行入口 `AgentToolRegistry.execute_tool_call` 做鉴权。
 这样「原工具调不了、console 却能调」的错位在结构上不可能出现——判定只有一份实现。
-`consoleCommands` 里每条命令仍然声明 `legacy_tool`，它是**转发目标**（也是
-`CATEGORY_CONFIG` 里那一行对应的工具），不是「权限查表的键」。
+命令的转发目标由工具声明承载（`ToolSpec.console` 的 `ConsoleCommand` + 函数签名），
+不是「权限查表的键」。
 """
 
 from __future__ import annotations
 
 import shlex
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from . import consoleCommands as cc
+
+
+class CommandSpecLike(Protocol):
+    """解析层用得到的命令面（结构匹配 `consoleRegistry.ResolvedCommand`）。
+
+    为什么不直接 import `ResolvedCommand`：`consoleRegistry` 顶层就 import
+    `consoleCommands`，解析层再反向依赖注册表会把包内 import 方向搞成环。P0 之后真正
+    流进解析层的是 `ResolvedCommand`（它按契约兼容原 `CommandSpec` 的选项面，见其
+    类 docstring），所以这里只声明**用得上的那几个成员**——两边不必为一个共同基类
+    互相拉扯，mypy 用结构匹配就能对上（`consoleTool` 因此不再需要 `cast(Any, cmd)`）。
+    """
+
+    @property
+    def key(self) -> str: ...
+
+    @property
+    def example(self) -> str: ...
+
+    @property
+    def option_tip(self) -> str: ...
+
+    @property
+    def options(self) -> tuple[str, ...]: ...
+
+    @property
+    def boolean_options(self) -> frozenset[str]: ...
+
+    @property
+    def option_kinds(self) -> dict[str, str]: ...
+
+    @property
+    def positional_param_names(self) -> frozenset[str]: ...
+
+    def normalize_option(self, name: str) -> str: ...
 
 # ---------------------------------------------------------------------------
 # 解析
@@ -67,32 +100,6 @@ def _tokenize(command: str) -> list[str]:
         ) from exc
 
 
-class ParsedCommand:
-    """解析结果。`options` 是 `--key value` 或布尔开关。"""
-
-    def __init__(
-        self,
-        spec: cc.CommandSpec,
-        *,
-        positional: list[str],
-        options: dict[str, Any],
-        input_source: str | None,
-        raw_tokens: list[str],
-    ) -> None:
-        self.spec = spec
-        self.key = spec.key
-        self.resource = spec.resource
-        self.action = spec.action
-        self.positional = positional
-        self.options = options
-        self.input_source = input_source
-        self.raw_tokens = raw_tokens
-
-    @property
-    def target(self) -> str | None:
-        return self.positional[0] if self.positional else None
-
-
 #: 全局「请求帮助」开关（#196 P2 D12）：`--help` / `-h` 可以出现在**任何位置**，
 #: 命中即短路返回该命令的 help，且不占用选项白名单（否则每条命令都要在 schema 里
 #: 造一个并不存在的 `help` 参数）。
@@ -124,7 +131,7 @@ def parse_boolean_value(raw: str, *, name: str, command: str) -> bool:
     )
 
 
-def _unknown_option_error(spec: cc.CommandSpec, name: str) -> ConsoleError:
+def _unknown_option_error(spec: CommandSpecLike, name: str) -> ConsoleError:
     """未知选项 / 「位置参数被写成选项」的**唯一**构造点（#281 P1 + P2）。
 
     message 是「一行可以直接复制去执行的正确调用」，而不是「可用选项」清单：
@@ -132,7 +139,7 @@ def _unknown_option_error(spec: cc.CommandSpec, name: str) -> ConsoleError:
         未知选项：--library-name。MCP 工具的参数请放进 --args。正确调用：
           mcp call <名称> --tool <工具名> --args '{"键":"值"}'
 
-    示例与领域说明都来自命令自己（`CommandSpec.example` / `option_tip`）——**没有
+    示例与领域说明都来自命令自己（`ResolvedCommand.example` / `option_tip`）——**没有
     example 的命令只报「未知选项：--x。」**，绝不借用别的命令的文案：`unknown_option`
     是 dept/agent/room/task 共用的通用码，MCP 专属那句话若全局套上，`task ls --bogus`
     会弹出「MCP 工具的参数请放进 --args」（#281 单的污染判据）。
@@ -151,7 +158,9 @@ def _unknown_option_error(spec: cc.CommandSpec, name: str) -> ConsoleError:
     )
 
 
-def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], dict[str, Any], str | None]:
+def _parse_options(
+    spec: CommandSpecLike, tokens: list[str]
+) -> tuple[list[str], dict[str, Any], str | None]:
     """把 token 拆成 (位置参数, 选项, 输入来源)。
 
     `--from` 是输入来源选择器，单独提取，不进 `options`（它不在 `spec.options` 里，
@@ -296,7 +305,7 @@ def _resolve_input_payload(
     """按 D1 与 CC3 解析配置输入，返回最终的 JSON object。
 
     `config_tokens` 是**已经剥掉 target** 的位置参数（create 的全部、update 的第 1 位
-    之后）；调用方负责切分，本函数不再需要构造一个临时的 `ParsedCommand` 来「跳过
+    之后）；调用方负责切分，本函数不再需要构造一个临时的包装对象来「跳过
     target」——那层克隆只是把同一件事又描述了一遍。
 
     四种情形**必须严格区分**（含糊报「解析失败」等于让模型没法自查）：
@@ -392,23 +401,6 @@ def _require_json_object(data: Any) -> dict[str, Any]:
     return data
 
 
-def _input_payload_for(parsed: ParsedCommand, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """create/update 用：位置参数里「配置」占第几位。
-
-    - `create <json>`：第 0 位是配置。
-    - `update <target> <json>`：第 0 位是 target，第 1 位是配置。
-    """
-    if not parsed.spec.accepts_input:
-        return {}
-    config_tokens = parsed.positional[1:] if parsed.spec.needs_target else parsed.positional
-    return _resolve_input_payload(
-        config_tokens,
-        payload,
-        input_source=parsed.input_source,
-        command_key=parsed.key,
-    )
-
-
-# 目标定位全部由 `CommandSpec.locator` 声明、`consoleTool._locator_args` 一处翻译成
-# 工具参数；同名消歧已下沉到 `tools.save_agent`（工具层对直接调用同样生效）。
+# 目标定位全部由 `Arg.positional` / `Target` 声明、`consoleTool` 的流水线一处翻译成
+# 工具参数；同名消歧已下沉到 `tools.update_agent`（工具层对直接调用同样生效）。
 # `console*` 四个模块自此不再 import `dal`。

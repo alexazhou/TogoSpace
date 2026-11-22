@@ -69,7 +69,7 @@ class TestToKebab:
         不如派生时炸。`reload` 这类无参数命令派生为空是合法的（没有选项可冲突），
         空表只对「有 schema 参数的命令」才算异常。
         """
-        for spec in cc.COMMAND_SPECS:
+        for spec in cr.get_table().specs:
             if not spec.param_names and not spec.alias_map:
                 continue  # reload 等无选项命令：无可冲突面
             # command_options_map 派生含冲突检测；有冲突会直接 ValueError。
@@ -84,39 +84,39 @@ class TestToKebab:
 class TestNormalize:
     def test_kebab_and_legacy_and_alias_converge(self) -> None:
         """`--title-keyword` / `--title_keyword` / `--kw` → 同一个真名 title_keyword。"""
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = cr.get_table().by_path["task ls"]
         assert spec.normalize_option("title-keyword") == "title_keyword"
         assert spec.normalize_option("title_keyword") == "title_keyword"  # 兼容期旧名
         assert spec.normalize_option("kw") == "title_keyword"
 
     def test_whitelist_accepts_all_three_forms(self) -> None:
         """白名单（解析层判定）三种形态都在，兼容期内旧名放行。"""
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = cr.get_table().by_path["task ls"]
         for form in ("title-keyword", "title_keyword", "kw", "open-only", "open_only"):
             assert form in spec.options, f"{form!r} 不在 task ls 白名单（解析层会误报未知选项）"
 
     def test_display_options_hide_legacy_names(self) -> None:
         """展示清单（报错 hint / help）不含旧名，但含 kebab 与短别名。"""
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = cr.get_table().by_path["task ls"]
         display = set(spec.display_options)
         assert "title-keyword" in display and "kw" in display
         assert "title_keyword" not in display, "旧名不该进展示清单（M3 反向护栏）"
 
     def test_boolean_flag_in_both_forms(self) -> None:
         """布尔开关 kebab/旧名两形态都命中（否则 --dry-run 会被当带值选项吃掉下一个 token）。"""
-        spec = cc.COMMAND_INDEX["dept rm"]
+        spec = cr.get_table().by_path["dept rm"]
         assert "dry-run" in spec.boolean_options and "dry_run" in spec.boolean_options
 
     def test_boolean_and_kinds_resolve_in_kebab_form(self) -> None:
         """option_kinds 的 kebab 键必须命中真名的 kind（否则静默退化 string）。"""
-        spec = cc.COMMAND_INDEX["dept rm"]
+        spec = cr.get_table().by_path["dept rm"]
         kinds = spec.option_kinds
         assert kinds["dry-run"] == "boolean" == kinds["dry_run"]
         assert kinds["recursive"] == "boolean"
 
     def test_parse_layer_kebab_and_legacy_agree(self) -> None:
         """解析层：kebab 与旧名产出的 options 归一目标一致（_store 归一键相同）。"""
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = cr.get_table().by_path["task ls"]
         _p1, o1, _ = cp._parse_options(spec, ["--title-keyword", "登录"])
         _p2, o2, _ = cp._parse_options(spec, ["--title_keyword", "登录"])
         assert spec.normalize_option("title-keyword") in (o2 | o1) or (
@@ -125,12 +125,12 @@ class TestNormalize:
 
     def test_mixed_forms_aggregate_to_one_key(self) -> None:
         """kebab 与旧名混写同一数组型选项 ⇒ 同一聚合键（#218 语义不被名字形态破坏）。"""
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = cr.get_table().by_path["task ls"]
         _pos, options, _src = cp._parse_options(
             spec, ["--status", "TODO", "--status", "DONE"]
         )
         # status 无下划线；用 role ls 的 keywords（别名 kw）与真名混写验证归一聚合
-        spec2 = cc.COMMAND_INDEX["role ls"]
+        spec2 = cr.get_table().by_path["role ls"]
         _pos2, options2, _src2 = cp._parse_options(
             spec2, ["--keywords", "a", "--kw", "b"]
         )
@@ -213,7 +213,7 @@ class TestHelpShowsKebabOnly:
         3. 没有 `example` 的命令只报名字——`task ls` 未被 MCP 文案污染（#281 污染判据），
            且 `example` 字段仍带命令名（返回体里还能看到怎么写）。
         """
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = cr.get_table().by_path["task ls"]
         assert spec.example == "", "task ls 不该有示例文案（示例只挂在确有正确调用形态的 mcp call 上）"
         with pytest.raises(cp.ConsoleError) as caught:
             cp._parse_options(spec, ["--title_keyword_typo", "x"])

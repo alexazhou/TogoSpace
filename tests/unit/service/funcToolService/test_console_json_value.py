@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from service.funcToolService import consoleCommands as cc
+from service.funcToolService import consoleRegistry
 from service.funcToolService import consoleParsing as cp
 from service.funcToolService import consoleSchema as cs
 from service.funcToolService import consoleTool as ct
@@ -189,7 +189,7 @@ class TestScalarDuplicateNoSuggestion:
         #218 无条件拼 `--x a,b`，把不可执行的写法塞给了 integer/object（实测必报
         invalid_target / invalid_option_value）。变异「改回无条件拼」在这条必红。
         """
-        spec = cc.COMMAND_INDEX["task update"]
+        spec = consoleRegistry.get_table().by_path["task update"]
         with pytest.raises(cp.ConsoleError) as caught:
             cp._parse_options(spec, ["187", "--note", "第一次", "--note", "第二次"])
         exc = caught.value
@@ -206,7 +206,7 @@ class TestScalarDuplicateNoSuggestion:
 
     def test_scalar_duplicate_message_says_scalar_once(self) -> None:
         """integer 同样走「只能给一次」的提示，而不是任何逗号建议。"""
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = consoleRegistry.get_table().by_path["task ls"]
         with pytest.raises(cp.ConsoleError) as caught:
             cp._parse_options(spec, ["--assignee", "a", "--assignee", "b"])
         exc = caught.value
@@ -227,7 +227,7 @@ class TestBooleanLastExplicitValue:
         #218 原判据只断言 `success is True`、没读回值（A/B/C 全同集时判据恒真）。
         这里在解析/转换层直钉「末次显式值」：变异「首次值生效」会让本条得 True ⇒ 红。
         """
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = consoleRegistry.get_table().by_path["task ls"]
         _pos, opts, _src = cp._parse_options(
             spec, ["--assignee", "X", "--open_only", "--open_only=false"]
         )
@@ -237,7 +237,7 @@ class TestBooleanLastExplicitValue:
 
     def test_bare_flag_is_true_and_single_false_is_false(self) -> None:
         """单向：裸开关 ⇒ True；单次显式 false ⇒ False（同集没分开时的常红/恒绿防护）。"""
-        spec = cc.COMMAND_INDEX["task ls"]
+        spec = consoleRegistry.get_table().by_path["task ls"]
         _pos, opts, _src = cp._parse_options(spec, ["--assignee", "X", "--open_only"])
         assert opts["open_only"] is True
         _pos, opts, _src = cp._parse_options(spec, ["--assignee", "X", "--open_only=false"])
