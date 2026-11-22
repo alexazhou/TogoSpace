@@ -593,6 +593,50 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert any(entry["name"] == "cc1_room_rm" for entry in result["deleted"]), result
         assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room_rm") is None
 
+    async def test_cc1_forward_target_executes_exactly_once(self, monkeypatch):
+        """`task ls` 走完整链路（console → 注册表第 2 跳）：目标工具**只执行 1 次**。
+
+        这条是「删除 `TestHandleListForwardsExactlyOnce`」的替代物，粒度说清楚：
+        - 原判据把 `_forward` 换成「返回而不抛」的 stub 数**抛出次数**，钉的是 console
+          内部的 if/else 分支不重复调用；
+        - `_handle_list` 随 P0 删除后，模块内 `ForwardToolCall(` 只剩**一个**构造点
+          （`_dispatch`），由结构判据 `test_p165_b_...` 咬住「双抛」这一类失效；
+        - 行为面还剩一个真实症状要钉：**目标工具被执行两次**（重复执行会写两次库）。
+          这里用「可观察的外部计数」——注册表第 2 跳实际调到目标函数的次数 == 1。
+
+        计数桩只替换目标函数本体，`get_func_tool` 返回的 `FuncTool` 保留真工具的
+        基准可见性（`BOTH`），否则命令会在解析期被判为不可用，计数恒 0 变成假判据。
+        """
+        from constants import ToolVisibility
+        from service.funcToolService.funcToolType import FuncTool
+
+        calls: list[dict] = []
+        original_get = func_tool_core.get_func_tool
+
+        def _spy(**kwargs):
+            calls.append(kwargs)
+            return {"success": True, "tasks": [], "count": 0, "total": 0}
+
+        def _spy_get(name):
+            if name == "list_tasks":
+                return FuncTool("list_tasks", _spy, visibility=ToolVisibility.BOTH)
+            return original_get(name)
+
+        monkeypatch.setattr(func_tool_core, "get_func_tool", _spy_get)
+
+        result = await self._call("task ls --status TODO", _context=self._ctx())
+
+        assert result["success"] is True, result
+        assert len(calls) == 1, f"目标工具被执行了 {len(calls)} 次（双转发会写两次库）：{calls}"
+        # 转发参数只有调用方给的过滤项（补参已归工具层，见单测 TestTaskLsForwardsRaw）。
+        assert calls[0].get("status") == ["TODO"], calls[0]
+        assert "scope" not in calls[0], calls[0]
+
+        # 量具自证（判据九问第 1/8 条）：计数器必须随调用次数增长，
+        # 否则「== 1」可能只是「列表永远只收一条」的假绿。
+        _spy()
+        assert len(calls) == 2, "计数器不自增 ⇒ 上面的 == 1 没有判别力"
+
     async def test_cc1_reload_forwards_and_predicate_matches(self):
         """reload_team ↔ `reload`：**无条件转发 + 自中断判定**可测；真中断路径不可在进程内测。
 

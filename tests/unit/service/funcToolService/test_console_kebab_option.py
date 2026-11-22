@@ -164,6 +164,32 @@ class TestHelpShowsKebabOnly:
         assert "--member-names" in summary
         assert "--member_names" not in summary
 
+    def test_no_underscore_option_anywhere_in_help_surface(self) -> None:
+        """help 的**全部**输出面（摘要 + 28 条详情 + 命令表 help_lines）零下划线形选项。
+
+        为什么单独一条：`test_help_detail_lines_are_kebab` 只扫 HELP_DETAIL，而
+        `test_help_summary_is_kebab` 只钉 `--member-names` 一个例子。改判据时最容易漏的
+        正是「摘要里还留着一条 `--xxx_yyy`」或「命令表 help_lines 与 HELP_DETAIL 不同源」
+        ——所以这里把三个面一起按同一条正则扫，**命中数必须是 0**（不是「某条为例」）。
+        """
+        pattern = re.compile(r"--[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+")
+        hits: list[str] = []
+
+        def _scan(where: str, text: str) -> None:
+            for line in text.splitlines():
+                found = pattern.search(line)
+                if found:
+                    hits.append(f"{where}: {found.group(0)}（{line.strip()[:80]}）")
+
+        _scan("HELP_SUMMARY", ct.HELP_SUMMARY)
+        for key, detail in ct.HELP_DETAIL.items():
+            _scan(f"HELP_DETAIL[{key}]", detail)
+        table = cr.get_table()
+        for cmd in table.specs:
+            _scan(f"help_lines[{cmd.key}]", "\n".join(cmd.help_lines))
+
+        assert not hits, "help 面混入下划线形选项：\n" + "\n".join(hits)
+
     def test_underscore_param_names_render_as_kebab(self) -> None:
         """形参名是 snake_case（`parent_name`），help 里必须渲染成 `--parent-name`。
 
