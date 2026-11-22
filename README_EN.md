@@ -102,7 +102,7 @@ Different agents can use different models: let the expensive model be the manage
 
 ### 💻 Runs wherever you need it
 
-- **Desktop app** (macOS, Apple Silicon / Intel): native Tauri window, double-click to launch, stays in the tray when closed.
+- **Desktop app** (macOS, Apple Silicon / Intel; Windows x64 builds locally): native Tauri window, double-click to launch, stays in the tray when closed.
 - **One-command Docker deployment**: great for servers, NAS, or team sharing.
 - **Run from source**: web console (Vue 3) + terminal UI (Textual TUI).
 - Chinese & English UI, team export/import, HTTP token authentication.

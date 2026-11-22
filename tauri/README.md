@@ -38,8 +38,9 @@ npm install
 npm run dev          # 启动 Vite(8181) + Tauri 窗口 + Python 后端（debug 构建直接跑 src/desktopEntry.py）
 ```
 
-debug 构建下后端命令为 `.venv/bin/python3 src/desktopEntry.py`；release 构建下为
-`Resources/backend/Togobot-backend`。
+debug 构建下后端命令为 `.venv/bin/python3 src/desktopEntry.py`（Windows 为
+`.venv\Scripts\python.exe`）；release 构建下为 `Resources/backend/Togobot-backend`
+（Windows 为 `backend\Togobot-backend.exe`）。
 
 ## 构建
 
@@ -58,6 +59,48 @@ python3 tauri/scripts/build_desktop.py --action check
 # 指定架构（PyInstaller 不支持交叉编译，目标架构需要对应的 Python 环境）
 python3 tauri/scripts/build_desktop.py --arch x86_64
 ```
+
+### Windows
+
+前置：Rust MSVC 工具链（`x86_64-pc-windows-msvc` target）、Node.js、仓库 x64 `.venv`。
+NSIS 3.13 工具集由 Tauri 首次构建时自动下载到 `%LOCALAPPDATA%\tauri\NSIS`；
+网络不通时可手动准备（目录必须齐全，否则 Tauri 会删掉缓存重建）：
+
+1. 下载 [nsis-3.13.zip](https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.13/nsis-3.13.zip)，
+   解压后把内层 `nsis-3.13/` 的内容放到 `%LOCALAPPDATA%\tauri\NSIS`（`makensis.exe` 在根目录）；
+2. 下载 [nsis_tauri_utils.dll](https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll)，
+   放到 `%LOCALAPPDATA%\tauri\NSIS\Plugins\x86-unicode\additional\`（缺这个文件会触发反复重下载）。
+
+```powershell
+# 创建虚拟环境并安装依赖（含 PyInstaller）
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+
+# 全流程：前端 → 后端（PyInstaller）→ Tauri 外壳 → NSIS 安装包
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --arch x86_64
+
+# 分步
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --action frontend
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --action backend
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --action app
+
+# 跨架构（例如在 ARM64 机器上打 x64 包）：PyInstaller 不能交叉编译，
+# 需要用目标架构的解释器打包后端
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --arch x86_64 `
+    --python .venv-x64\Scripts\python.exe
+```
+
+- 产物：`build/TogoSpace_<version>_x64-setup.exe`（未签名），安装后自带 Python 后端
+  sidecar，不依赖系统 Python。
+- **在 ARM64 Windows 上也建议构建 x64 产物**：`gtsp` 只提供 `gtsp-windows-amd64.exe`，
+  且部分依赖（如 `cryptography`）没有 Windows ARM64 轮子；x64 程序在 ARM64 上以模拟
+  方式运行，由 `appPaths._process_arch()` 按进程自身架构挑选 gtsp。
+- 签名/公证/检查（`sign` / `zip` / `notarize` / `check`）仅支持 macOS；Windows 产物
+  为未签名安装包，首次运行会触发 SmartScreen 提示。
+- **Windows 路径长度**：解压/安装受 `MAX_PATH=260` 限制。`scripts/togo_desktop.spec`
+  的 `EXCLUDE_PATTERNS` 在 Windows 上做了分隔符归一（否则含 `/` 的规则永远不命中，
+  litellm 的 guardrails 测试数据会打出 180+ 字符的路径）；`build_backend.py` 在相对
+  路径超过 200 字符时会告警，提示补充排除规则。
 
 - 前端只构建一次：`frontend/dist` 给 Tauri，`assets/frontend` 给后端浏览器形态，脚本做哈希一致性校验。
 - 版本号唯一来源：`src/version.py`。`tauri.conf.json` / `Cargo.toml` / `tauri/package.json` 等版本必须与其一致，
@@ -99,7 +142,9 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
 [TOGO] ERROR code=<n> message=<text>
 ```
 
-`NotStarted → Starting → (Migrating → Starting)* → Ready`，15 秒未就绪进入 `Failed`。
+`NotStarted → Starting → (Migrating → Starting)* → Ready`，60 秒未就绪进入 `Failed`。
+冷启动要过杀软扫描、依赖导入与数据库迁移，Windows 首次启动实测约 20 秒，因此超时预算
+按 60 秒设置；超时后即使后端迟到 READY 也会被状态机忽略。
 启动画面（`frontend/splash.html`）由 `backend-migration-start/end`、`backend-error` 事件驱动。
 
 ### 进程生命周期
@@ -146,4 +191,5 @@ cd frontend && npm run test:run
 ## 平台状态
 
 - macOS：完整支持（开发、构建、签名、公证、DMG）。
-- Windows / Linux：`sys/` 分支与构建入口已预留，本期不作为发布门槛。
+- Windows：支持开发与构建 NSIS 安装包（x64，未签名）；签名与公证流程不适用。
+- Linux：`sys/` 分支与构建入口已预留，本期不作为发布门槛。
