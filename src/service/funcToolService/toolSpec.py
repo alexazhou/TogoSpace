@@ -9,7 +9,7 @@
 | D2 收敛归属 | `consoleCommands.LEGACY_CONVERGED_TOOLS` | 同上（D2 关闭时所有 `BOTH` 统一降级） |
 | 分组（默认 / 容器） | `core.CONTAINER_TOOL_NAMES` | `ToolSpec.group` |
 | 自中断 | driver 里 `fn_name == "reload_team"` + `core._SELF_INTERRUPT_PREDICATES` | `ToolSpec.self_interrupt` / `self_interrupt_predicate` |
-| console 绑定与 help 补充 | `consoleCommands.COMMAND_SPECS` / `_OPTION_ALIASES` / `_HELP_OVERLAY` | `ToolSpec.console` / `ToolSpec.help` |
+| console 绑定与 help 补充 | `consoleCommands.COMMAND_SPECS` / `_OPTION_ALIASES` | `ToolSpec.console` / `ToolSpec.help`（`_HELP_OVERLAY` 残余条目的口径见该常量注释） |
 
 **模块顶层只依赖 `constants` 与标准库**（设计 §4.1 C-c）：`tools.py` 直接 import 本模块
 挂装饰器，因此这里绝不能反过来 import `tools` / `core` / `consoleRegistry`，否则会与

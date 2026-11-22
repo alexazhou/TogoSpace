@@ -233,11 +233,6 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     return [agent_map[aid] for aid in agent_ids if aid in agent_map]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 写入方法
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
     """批量保存成员：有 id 则更新，无 id 则插入。"""
     if len(agents) == 0:

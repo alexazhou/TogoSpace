@@ -14,8 +14,9 @@
 2. **错误格式**（`ConsoleError` 的 code / message / example）；
 3. **类型转换**（正整数收敛、CSV 拆分、JSON 字面量解析、布尔解析）。
 
-`_HELP_OVERLAY` 仍是手写补充说明：按设计 §6，它的「收拢与去重」属 P2，P0 只保证
-它的内容不再与命令表冲突（拆掉 `save_*` 后逐条改掉已失效的 `--overwrite` 说法）。
+`_HELP_OVERLAY` 仍是手写补充说明（P2 #317 已逐条收拢过）：**它的判定口径、剩余条目
+为什么不搬进 `@tool(help=...)` / `ConsoleCommand(help=...)`、以及「复述」按什么口径判
+—— 全部见该常量定义处的注释**，本模块与 `toolSpec` 都不再讲第二遍。
 """
 
 from __future__ import annotations
@@ -93,30 +94,52 @@ def _build_help_summary(specs: Optional[tuple[registry.ResolvedCommand, ...]] = 
 _CLEAR_FIELDS_PLACEHOLDER = "{ALLOWED_CLEAR_FIELDS}"
 
 
-#: 手写补充说明（只有「参数清单之外」的话才该出现在这里）。
+#: 手写补充说明：**只放「命令级事实」** —— 参数清单 / 用法行 / 用途行里推不出来的那些。
 #:
-#: 为什么仍然需要 overlay：schema 的 `description` 说明「这个参数是什么」，但说不出
-#: 「这条命令整体的语义」——例如 `dept update` 是 PATCH、`dept rm` 会被
-#: `DEPT_HAS_CHILDREN` 拒绝。这些是命令级事实，schema 里没有对应字段可派生。
+#: 判定口径（P2 收拢时逐条过的，来源：设计 §5.3 + 审计报告 §7 + #317 报告 §2）：
+#: 1. **参数清单已经标注的**（必填/可选、参数名、类型、形态、别名、参数级语义）⇒ 不复述。
+#:    「是否重复」以**渲染出来的 help 文本**为准，不是以语义等价为准：例如 `dept create`
+#:    的四个必填参数在清单里已标（必填），overlay 再写「新建必须给 --name / …」就是把同一
+#:    件事说两遍；反过来 `dept update` / `agent update` 的数组参数描述只说「省略表示保持
+#:    现值」，「出现即全量替换」这句在它们的渲染文本里并没有出现过，所以保留。
+#: 2. **命令级语义**（错误码、服务层拒绝条件、PATCH 之外的副作用）⇒ 保留：schema 里没有
+#:    对应字段，命令表也推不出来。
+#: 3. **跨命令指引**（「改已有 X 请用 Y」）⇒ 保留：它描述的是命令之间的关系，不属于任何
+#:    单条 schema。
+#: 4. **全局规则**（重复选项、CSV / JSON 等价）⇒ 正本在 `help` 摘要（见
+#:    `_build_help_summary`），本表**不再重复**。
+#:    例外：判定不是纯语义题，还要看**已有契约**——`task update` 的「数组型选项可重复
+#:    出现 / 标量重复报 duplicate_option」虽与摘要重复，但 `test_console_meta` 钉着它
+#:    必须出现在该命令的 help 里（#187-④），删了就红；同理 `task create` 的「返回体
+#:    hint 会再提醒一次」被 `test_console_usability_pack` 钉着。这类冲突以用例为准，
+#:    要删先改用例（本单不碰）。
+#:
+#: 剩余条目为什么不搬进 `@tool(help=...)` / `ConsoleCommand(help=...)`：设计 §5.3 给了那个
+#: 归宿，但剩下这些要么横跨同一工具的多条命令（`dept ls` / `dept get` 共用
+#: `get_dept_info`），要么描述服务层行为（`DEPT_HAS_CHILDREN`、`no_update_action`），
+#: 按「命令 key 索引」放在一张表里比拆散进十几处工具声明更贴它们的实际归属。两种落点对
+#: help 输出没有差别（同一段文本换个存放位置，渲染顺序也不变），所以本单没有为此搬迁：
+#: 搬到 `@tool(help=...)` 要改十几处工具声明，收益只是「按设计放到名义上更对的地方」。
 #:
 #: **只许放「补充」，不许放参数清单**：放进去就等于又抄了一份事实。
-#: P0 只做必要更正：`save_*` 拆成 `create_* / update_*` 后，原来「用 --overwrite true
-#: 才能覆盖」的说法已不成立（本设计删掉了 `overwrite`），按新契约改写；收拢与去重留给 P2。
 _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
+    # 服务层拒绝条件 + 跨命令指引（后者见口径 3）。
     "dept create": (
-        "新建必须给 --name / --responsibility / --manager-name / --parent-name；同部门已存在会被直接拒绝。",
+        "同名部门已存在会被直接拒绝。",
         "改已有部门请用 `dept update <id>`（定位只接受正整数 ID）。",
     ),
     "agent create": (
-        "新建必须给 --name / --role-template-name；同名成员已存在会被直接拒绝。",
+        "同名成员已存在会被直接拒绝。",
         "改已有成员请用 `agent update <id>`（同名成员不再产生歧义）。",
     ),
     "room create": (
-        "新建必须给 --name / --member-names（至少 2 人）；同名房间已存在会被直接拒绝。",
+        "同名房间已存在会被直接拒绝。",
         "改已有房间请用 `room update <id>`。",
     ),
+    # 定位约束与「不许静默成功」都是命令级语义（口径 2）；`member_names` 的全量替换语义
+    # 在 dept update 的参数描述里**没有**（描述只有「部门成员名称列表」），故保留。
     "dept update": (
-        "PATCH 语义：只改出现的字段；member_names 出现即全量替换。",
+        "member_names 出现即全量替换。",
         "定位只接受正整数 <id>（不接受按名称定位），--name 表示改成的新名称。",
         "没有任何字段可改时返回 no_update_action（不许静默成功）。",
     ),
@@ -125,23 +148,20 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "加 --dry-run 只预演（跑完全部校验，不写库），返回体里是 would_delete。",
     ),
     "agent update": (
-        "PATCH 语义：只改出现的字段；数组出现即全量替换。",
+        "数组出现即全量替换。",
         "定位只接受 agent_id（同名成员不再歧义），--name 表示改成的新名称。",
         "没有任何字段可改时返回 no_update_action（不许静默成功）。",
     ),
     "agent get": (
         "按名字查询走运行时列表：离职成员报 member_not_on_board，在职未加载报 agent_runtime_not_loaded。",
     ),
-    "agent dm": ("与成员发起私聊；已有房间则直接返回。",),
+    "agent dm": ("已有房间则直接返回。",),
     "room update": (
-        "PATCH 语义：只改出现的字段。",
         "定位只接受 room_id，--name 表示改成的新名称。",
         "没有任何字段可改时返回 no_update_action（不许静默成功）。",
     ),
     "room rm": ("DEPT 房间与运行中的房间不允许删除。",),
-    "role update": (
-        "PATCH 语义：只改出现的字段（type/soul/i18n 省略即保持现值）；目标模板必须已存在。",
-    ),
+    "role update": ("目标模板必须已存在。",),
     "role create": ("只能创建 USER 类型；SYSTEM 内置模板只读。",),
     "role rm": ("只能删除 USER 类型且当前未被任何成员使用的模板。",),
     "task ls": (
@@ -156,7 +176,7 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "建议用 --from payload 传，避免引号被 shell 拆坏。",
     ),
     "task update": (
-        "配置字段：new_status / note / reviewer_id。撤销验收人用 --remove-field reviewer_id。",
+        "撤销验收人用 --remove-field reviewer_id。",
         "可清除的字段：" + _CLEAR_FIELDS_PLACEHOLDER + "（白名单外的字段会被拒绝并列出候选）。",
         "⚠️ 数组型选项可重复出现（按出现顺序聚合、去重保序）："
         "--remove-field a --remove-field b 等价于 --remove-field a,b；"
@@ -164,6 +184,9 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "不传 note 不会清空已有 note（参数默认空串，不会覆盖）。",
         "既没有配置输入也没有 --remove-field 时返回 no_update_action（不许静默成功）。",
     ),
+    # 「会中断当前行动」是必然性表述（`ToolSpec.self_interrupt`）；工具 docstring 写的是
+    # 「可能中断团队内正在执行的任务」，两处措辞不一致属既有事实，本单只报不改（改
+    # docstring 会进模型 schema，那是行为面）。
     "reload": ("重载团队运行时；**会中断当前行动**。",),
 }
 

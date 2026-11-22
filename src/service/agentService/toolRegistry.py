@@ -326,11 +326,9 @@ class AgentToolRegistry:
     async def execute_tool_call(self, tool_call: llmApiUtil.OpenAIToolCall, context: ToolCallContext) -> ToolExecutionResult:
         """执行一次工具调用；工具可抛 `ForwardToolCall` 把调用转交给另一个工具（#160）。
 
-        转发循环存在的理由：`console` 的每条子命令都等价于一个原工具（`create_agent` / `update_agent`
-        / `get_dept_info` …）。改造前它自己重算一遍权限（`consoleParsing._assert_permitted`），
-        于是同一个判定有了两份实现，一旦 `CATEGORY_CONFIG` 或运行时 spec 口径变化，
-        就会出现「原工具调不了、console 却能调」（或反过来）。改造后 console 只抛
-        `ForwardToolCall`，**鉴权与执行都回到这里**，只有一份实现。
+        为什么这件事用异常而不是返回值、为什么 `console` 不许自己重算权限（「鉴权与
+        执行只有一份实现」）：正本在 `exception.ForwardToolCall` 的 docstring，本处
+        不复述。
 
         循环上限固定 2 跳（`MAX_FORWARD_HOPS`）：第 1 跳是入口工具（`console`），
         第 2 跳是它等价的原工具。第 2 跳再抛说明实现跑偏，直接返回明确错误，

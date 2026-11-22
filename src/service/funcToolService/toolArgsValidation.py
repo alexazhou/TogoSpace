@@ -315,7 +315,8 @@ def _is_ignorable_null(error: ValidationError, schema: Dict[str, Any]) -> bool:
     ### H1：根节点漏网（38 首次打回）
     只判 `instance is None` 时，根节点的 `type: object` 错误（`path=[]`、`instance=None`）
     落到 `return True` 被豁免 ⇒ `func(**None)` ⇒ 英文原话 + 无 `error_code`。
-    实测修前 `get_tools(include_container_tools=True)` 的 **37 个工具喂 `'null'` 全漏**。
+    实测修前 `get_tools(include_container_tools=True)` 的 **37 个工具喂 `'null'` 全漏**
+    （历史口径：写这段时工具数是 37，现值 49，见 `_drop_variadic_params` docstring 的实测行）。
 
     ### H2：元素级漏网（38 二次打回）
     修 H1 时只补了 `if not path`，**`path` 长度 ≥2 仍落到 `return True`**：
@@ -327,7 +328,8 @@ def _is_ignorable_null(error: ValidationError, schema: Dict[str, Any]) -> bool:
     收到**恰为长度 1**，而不是再逐个补 `len(path)==1` / `len(path)==2` 的分支。
 
     ### 为什么不会误杀（#195 前的实测，外部 schema 路径现在仍适用）
-    真实 37 个工具里 `object` 型参数只有 4 个（`save_agent.i18n` 等），它们的 schema
+    真实 37 个工具里 `object` 型参数只有 4 个（`save_agent.i18n` 等；历史口径，工具数与
+    参数面现值见 `_drop_variadic_params` docstring 的实测行），它们的 schema
     **都没有嵌套 `properties`**，`array` 也没有 `items.type == object` 的用例 ⇒
     本项目不存在「嵌套对象内的非必填字段传 null 且应被允许」的合法签名。
     反向对照：`{"timezone": null}`、`{"depends_on": null}`（字段整体 null）仍放行。
