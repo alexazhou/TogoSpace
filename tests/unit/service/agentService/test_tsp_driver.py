@@ -5,7 +5,6 @@ import shutil
 import uuid
 import asyncio
 from dataclasses import dataclass, field
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -28,10 +27,7 @@ if os.name == "posix" and sys.platform == "darwin":
 
 def test_build_gtsp_command_uses_default_binary_and_workdir_flag() -> None:
     cmd = build_gtsp_command(None, workdir="/tmp/team-a")
-    # 默认产物在 assets/execute/gtsp 下；路径分隔符随平台变化，不能直接比字符串
-    binary = Path(cmd[0])
-    assert binary.parent.name == "gtsp"
-    assert binary.parent.parent.name == "execute"
+    assert os.path.join("assets", "execute", "gtsp") in cmd[0]
     assert "--mode" in cmd
     assert "stdio" in cmd
     assert "--workdir" in cmd
