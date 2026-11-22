@@ -3893,6 +3893,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tokio",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

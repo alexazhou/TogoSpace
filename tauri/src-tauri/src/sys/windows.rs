@@ -70,3 +70,92 @@ pub fn set_dock_visibility(_app: &tauri::AppHandle, _visible: bool) {}
 pub fn handle_run_event(_app: &tauri::AppHandle, _event: &tauri::RunEvent) -> bool {
     false
 }
+
+/// 无边框窗口创建后的初始化：去掉 DWM 残留边框，并按默认深色主题绘制。
+///
+/// 前端挂载后会调用 [`set_titlebar_theme`] 按实际主题纠正。
+pub fn init_window_style(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let hwnd = hwnd.0 as isize as HWND;
+    let dark_mode: i32 = 1;
+
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR as u32,
+            &DWMWA_COLOR_NONE as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            &dark_mode as *const i32 as *const core::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}
+
+/// 把应用主题色同步到 Windows 无边框窗口的 DWM 属性。
+///
+/// 窗口没有原生标题栏，`DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` 用来去掉 DWM 残留边框；
+/// `DWMWA_USE_IMMERSIVE_DARK_MODE` 同步深浅色，保证系统阴影/边框的观感一致。
+/// `DWMWA_CAPTION_COLOR` / `DWMWA_TEXT_COLOR` 在没有原生标题栏时不直接可见，一并设置作为兜底。
+///
+/// Windows 10 不支持部分属性，`DwmSetWindowAttribute` 返回错误时保持系统默认外观；
+/// 颜色解析失败同样直接跳过，避免影响窗口显示。
+pub fn set_titlebar_theme(
+    window: &tauri::WebviewWindow,
+    background: &str,
+    foreground: &str,
+    dark: bool,
+) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_COLOR_NONE,
+        DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let hwnd = hwnd.0 as isize as HWND;
+    let (Some(background), Some(foreground)) =
+        (parse_hex_color(background), parse_hex_color(foreground))
+    else {
+        return;
+    };
+
+    unsafe fn set_dword(hwnd: HWND, attribute: i32, value: u32) {
+        DwmSetWindowAttribute(
+            hwnd,
+            attribute as u32,
+            &value as *const u32 as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+
+    unsafe {
+        set_dword(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, u32::from(dark));
+        set_dword(hwnd, DWMWA_CAPTION_COLOR, background);
+        set_dword(hwnd, DWMWA_TEXT_COLOR, foreground);
+        set_dword(hwnd, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE);
+    }
+}
+
+/// `#RRGGBB` → Windows COLORREF（`0x00BBGGRR`，注意是 BGR 顺序）。
+fn parse_hex_color(value: &str) -> Option<u32> {
+    let hex = value.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let rgb = u32::from_str_radix(hex, 16).ok()?;
+    let (r, g, b) = ((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+    Some((b << 16) | (g << 8) | r)
+}

@@ -28,6 +28,8 @@ import { getToken } from './authStore';
 import QuickInitModal from './components/layout/QuickInitModal.vue';
 import TokenDialog from './components/ui/TokenDialog.vue';
 import TopBar from './components/layout/TopBar.vue';
+import WindowControls from './components/layout/WindowControls.vue';
+import WindowResizeHandles from './components/layout/WindowResizeHandles.vue';
 import { DEFAULT_SETTINGS_SECTION } from './components/settings/sections';
 import ConfirmDialog from './components/ui/ConfirmDialog.vue';
 import { useTeamAgents } from './realtime/selectors';
@@ -38,6 +40,11 @@ import { findTeamById, firstTeamId, loadTeams, preferredTeamId, setPreferredTeam
 import { displayName, formatConnectionState } from './utils';
 import { setFrontendLogBridgeEnabled } from './utils/frontendLogBridge';
 import { useLocalStorageState } from './composables/useLocalStorageState';
+import {
+  hasOverlayTitlebar,
+  hasWindowsCustomTitlebar,
+  syncWindowsTitlebarTheme,
+} from './utils/platform';
 
 type ThemeMode = 'dark' | 'light';
 
@@ -55,6 +62,8 @@ const themeStorage = useLocalStorageState<ThemeMode>(THEME_STORAGE_KEY);
 // （`:root:not([data-theme='light'])` 仍命中），但属性值变了就是行为变了，不能拿「今天看不出差别」
 // 当等价证据。
 const themeMode = ref<ThemeMode>(themeStorage.read() || 'dark');
+const overlayTitlebar = hasOverlayTitlebar();
+const windowsCustomTitlebar = hasWindowsCustomTitlebar();
 
 const teamIdFromRoute = computed<number | null>(() => {
   const raw = route.params.teamId;
@@ -316,6 +325,7 @@ watch(
   (mode) => {
     themeStorage.write(mode);
     applyTheme(mode);
+    syncWindowsTitlebarTheme(mode);
   },
   { immediate: true },
 );
@@ -354,6 +364,14 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="shell" :class="{ 'shell-console': isConsoleRoute, 'shell-settings': isSettingsRoute }">
+    <div
+      v-if="overlayTitlebar || windowsCustomTitlebar"
+      class="titlebar-drag-region"
+      :class="{ 'titlebar-drag-region--windows': windowsCustomTitlebar }"
+      data-tauri-drag-region
+    ></div>
+    <WindowControls v-if="windowsCustomTitlebar" />
+    <WindowResizeHandles v-if="windowsCustomTitlebar" />
     <div class="ambient ambient-left"></div>
     <div class="ambient ambient-right"></div>
 
@@ -492,6 +510,21 @@ onBeforeUnmount(() => {
 
 :global(html.bp-console-mobile) .shell-settings {
   overflow-x: auto;
+}
+
+/* macOS 覆盖式标题栏：顶部这条透明区域用于拖动窗口，同时让出红绿灯位置。 */
+.titlebar-drag-region {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--macos-titlebar-height, 28px);
+  z-index: 5;
+}
+
+/* Windows 无边框窗口：顶部同样是一条透明拖动区，右侧留给自绘窗口按钮。 */
+.titlebar-drag-region--windows {
+  height: var(--windows-titlebar-height, 32px);
 }
 
 .ambient {

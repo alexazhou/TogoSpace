@@ -2,8 +2,58 @@
  * 运行形态适配：桌面（Tauri）走原生能力，浏览器保持原有实现。
  */
 
+declare global {
+  interface Window {
+    /** Rust 通过 initialization_script 注入的运行时配置。 */
+    tgconfig?: {
+      /** 设置 TOGOSPACE_FRONTEND_DEBUG=1 时为 true，运行期修改也会即时生效。 */
+      frontendDebug?: boolean;
+      /** macOS 使用透明覆盖式标题栏时为 true，页面需要为原生红绿灯预留顶部空间。 */
+      overlayTitlebar?: boolean;
+      /** Windows 使用无边框窗口、由前端自绘标题栏时为 true。 */
+      windowsCustomTitlebar?: boolean;
+    };
+  }
+}
+
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** 是否为 macOS 覆盖式标题栏（页面背景需要铺到窗口顶部）。 */
+export function hasOverlayTitlebar(): boolean {
+  return isTauri() && window.tgconfig?.overlayTitlebar === true;
+}
+
+/** 是否为 Windows 无边框自绘标题栏（页面需要为窗口按钮预留顶部高度）。 */
+export function hasWindowsCustomTitlebar(): boolean {
+  return isTauri() && window.tgconfig?.windowsCustomTitlebar === true;
+}
+
+/**
+ * 把应用主题色同步到 Windows 无边框窗口的 DWM 属性。
+ * 颜色直接从当前 CSS 变量读取，避免 Rust 侧重复维护一份主题色板。
+ * 非 Windows 自绘标题栏为空操作。
+ */
+export function syncWindowsTitlebarTheme(mode: 'dark' | 'light'): void {
+  if (!hasWindowsCustomTitlebar()) {
+    return;
+  }
+
+  const styles = getComputedStyle(document.documentElement);
+  const background = styles.getPropertyValue('--surface-page').trim();
+  const foreground = styles.getPropertyValue('--text-primary').trim();
+  if (!background || !foreground) {
+    return;
+  }
+
+  void invokeTauri('sync_titlebar_theme', {
+    background,
+    foreground,
+    dark: mode === 'dark',
+  }).catch((error) => {
+    console.warn('syncWindowsTitlebarTheme failed:', error);
+  });
 }
 
 async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {

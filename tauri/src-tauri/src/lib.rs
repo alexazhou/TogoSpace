@@ -110,6 +110,8 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     sys::platform::set_dock_visibility(app, true);
 
     if let Some(window) = app.get_webview_window("main") {
+        // 托盘「显示窗口」时窗口可能还处于最小化状态，先还原再显示
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
         return;
@@ -122,6 +124,23 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
             .min_inner_size(960.0, 600.0)
             .resizable(true);
 
+    // macOS：标题栏改为透明覆盖层，让页面背景一直铺到窗口顶部，
+    // 避免系统标题栏与内容区出现两种底色。标题文字隐藏，避免系统主题与
+    // 应用主题不一致时看不清；顶部红绿灯留白由前端按 tgconfig 处理。
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+
+    // Windows：无边框窗口，窗口按钮、拖动区和缩放热区都由前端自绘，
+    // 页面背景直接铺到窗口顶部；保留系统阴影和圆角。
+    #[cfg(target_os = "windows")]
+    {
+        builder = builder.decorations(false).shadow(true);
+    }
+
     // 用 initialization_script 在页面脚本前注入，事后 eval 会晚于前端启动逻辑。
     // 统一挂在 window.tgconfig 下，便于后续扩展其他运行时配置。
     let debug_enabled = frontend_debug_enabled();
@@ -129,14 +148,28 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
         logger::log("shell", "frontend debug logging enabled");
     }
     builder = builder.initialization_script(format!(
-        "window.tgconfig = Object.assign(window.tgconfig || {{}}, {{ frontendDebug: {} }});",
-        debug_enabled
+        "window.tgconfig = Object.assign(window.tgconfig || {{}}, {{ frontendDebug: {}, overlayTitlebar: {}, windowsCustomTitlebar: {} }});",
+        debug_enabled,
+        cfg!(target_os = "macos"),
+        cfg!(target_os = "windows")
     ));
 
     let result = builder.build();
 
     match result {
-        Ok(_) => logger::log("shell", "main window created"),
+        Ok(window) => {
+            // 无边框窗口必须显式设置窗口图标，否则任务栏 / Alt-Tab 中可能是空白图标。
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
+                sys::platform::init_window_style(&window);
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = &window;
+            logger::log("shell", "main window created");
+        }
         Err(error) => logger::log("shell", format!("create main window failed: {:?}", error)),
     }
 }
@@ -296,6 +329,23 @@ fn log_to_rust(msg: String) {
     logger::log("frontend", msg);
 }
 
+/// 前端把当前主题色同步到 Windows 无边框窗口的 DWM 属性；其他平台无需处理。
+#[tauri::command]
+fn sync_titlebar_theme(
+    window: tauri::WebviewWindow,
+    background: String,
+    foreground: String,
+    dark: bool,
+) {
+    #[cfg(target_os = "windows")]
+    sys::platform::set_titlebar_theme(&window, &background, &foreground, dark);
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, background, foreground, dark);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -321,6 +371,7 @@ pub fn run() {
             save_text_file,
             exit_app,
             log_to_rust,
+            sync_titlebar_theme,
         ])
         .on_page_load(|webview, payload| {
             if webview.label() != "splashscreen" {

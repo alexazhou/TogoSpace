@@ -12,16 +12,6 @@
 
 import { isTauri } from './platform';
 
-declare global {
-  interface Window {
-    /** Rust 通过 initialization_script 注入的运行时配置。 */
-    tgconfig?: {
-      /** 设置 TOGOSPACE_FRONTEND_DEBUG=1 时为 true，运行期修改也会即时生效。 */
-      frontendDebug?: boolean;
-    };
-  }
-}
-
 /** 开发构建下临时打开 console.log 转发的 localStorage 开关。 */
 const DEBUG_FLAG_KEY = 'togospace.debug';
 

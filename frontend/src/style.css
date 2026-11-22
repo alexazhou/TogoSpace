@@ -10,6 +10,30 @@ body,
   overflow: hidden;
 }
 
+/*
+ * macOS 覆盖式标题栏：webview 铺满整个窗口，为原生红绿灯预留顶部高度；
+ * 该区域直接透出页面背景，与下方内容保持同一底色。
+ */
+html.macos-overlay-titlebar {
+  --macos-titlebar-height: 28px;
+}
+
+html.macos-overlay-titlebar #app {
+  padding-top: var(--macos-titlebar-height);
+}
+
+/*
+ * Windows 无边框窗口：页面为自绘窗口按钮和拖动区预留顶部高度；
+ * 该区域直接透出页面背景，与下方内容保持同一底色。
+ */
+html.windows-custom-titlebar {
+  --windows-titlebar-height: 32px;
+}
+
+html.windows-custom-titlebar #app {
+  padding-top: var(--windows-titlebar-height);
+}
+
 body {
   min-height: 100vh;
   background: var(--surface-page);

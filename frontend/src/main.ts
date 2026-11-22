@@ -4,7 +4,12 @@ import router from './router';
 import i18n, { syncLanguageFromBackend } from './i18n';
 import { setApiBaseUrl } from './api';
 import { setToken } from './authStore';
-import { isTauri } from './utils/platform';
+import {
+  hasOverlayTitlebar,
+  hasWindowsCustomTitlebar,
+  isTauri,
+  syncWindowsTitlebarTheme,
+} from './utils/platform';
 import { logDesktopMountedState, setupDesktopLogging } from './utils/desktopLog';
 import {
   frontendLogBridgeEnabledFromRuntimeConfig,
@@ -15,6 +20,19 @@ import '@fortawesome/fontawesome-free/css/fontawesome.min.css';
 import '@fortawesome/fontawesome-free/css/solid.min.css';
 import './theme/tokens.css';
 import './style.css';
+
+// macOS 覆盖式标题栏：尽早打标，避免首帧先按原生标题栏布局再跳变。
+if (hasOverlayTitlebar()) {
+  document.documentElement.classList.add('macos-overlay-titlebar');
+}
+
+// Windows 无边框窗口：尽早打标并同步主题色，避免首帧出现布局跳变和系统默认边框色。
+if (hasWindowsCustomTitlebar()) {
+  const mode = localStorage.getItem('theme-mode') === 'light' ? 'light' : 'dark';
+  document.documentElement.classList.add('windows-custom-titlebar');
+  document.documentElement.dataset.theme = mode;
+  syncWindowsTitlebarTheme(mode);
+}
 
 /** 桌面模式：挂载前注入后端地址与内存态 token。 */
 async function loadDesktopRuntime(): Promise<void> {
