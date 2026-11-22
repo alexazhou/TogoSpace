@@ -7,7 +7,7 @@
     "frontendDist": "../../frontend/dist",
     "devUrl": "http://127.0.0.1:8181",
     "beforeDevCommand": "cd ../frontend && npm run dev",
-    "beforeBuildCommand": "node scripts/build-backend.mjs"
+    "beforeBuildCommand": "cd .. && .venv/bin/python3 tauri/scripts/build_backend.py"
   },
   "app": {
     "windows": [

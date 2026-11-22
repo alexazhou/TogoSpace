@@ -310,7 +310,7 @@ def _verify_windows_sidecar_arch(backend_executable: str, arch: str) -> None:
             f"   请先用 --arch {arch} --python <{arch} 的解释器> --action backend 重新打包后端")
 
 
-def build_app(arch: str, python: str | None = None) -> None:
+def build_app(arch: str) -> None:
     print("\n--- app: tauri build ---")
     if not os.path.isfile(os.path.join(FRONTEND_DIST, "index.html")):
         raise SystemExit("❌ 前端尚未构建，请先执行 --action frontend")
@@ -323,11 +323,6 @@ def build_app(arch: str, python: str | None = None) -> None:
                 "APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID",
                 "APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH"):
         env.pop(key, None)
-    # 未提前执行 --action backend 时会触发 beforeBuildCommand（build-backend.mjs），
-    # 透传目标架构与解释器，避免跨架构构建时打出错架构 sidecar。
-    env["TOGOSPACE_BACKEND_ARCH"] = arch
-    if python:
-        env["TOGOSPACE_BACKEND_PYTHON"] = python
     backend_executable = os.path.join(
         BACKEND_DIR, "Togobot-backend.exe" if os.name == "nt" else "Togobot-backend")
     if os.path.isfile(backend_executable):
@@ -741,7 +736,7 @@ def main() -> int:
         elif action == "backend":
             build_backend(args.arch, args.python)
         elif action == "app":
-            build_app(args.arch, args.python)
+            build_app(args.arch)
         elif action == "sign":
             sign_app(args.arch)
         elif action == "zip":

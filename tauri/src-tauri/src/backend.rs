@@ -575,9 +575,9 @@ fn kill_process(pid: u32) {
     {
         use std::os::windows::process::CommandExt;
 
-        // /T 连同后端拉起的子进程（如 gtsp）一并结束；CREATE_NO_WINDOW 避免 GUI 下闪黑框
+        // CREATE_NO_WINDOW 避免 GUI 下闪黑框
         let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .args(["/F", "/PID", &pid.to_string()])
             .creation_flags(0x08000000)
             .output();
     }

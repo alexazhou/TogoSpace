@@ -3,11 +3,10 @@
   "private": true,
   "version": "0.5.2-beta5",
   "scripts": {
-    "dev": "node scripts/run-tauri.mjs dev",
-    "build": "node scripts/run-tauri.mjs build",
-    "tauri": "node scripts/run-tauri.mjs",
-    "icon": "node scripts/run-tauri.mjs icon",
-    "build:backend": "node scripts/build-backend.mjs"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "icon": "tauri icon"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
