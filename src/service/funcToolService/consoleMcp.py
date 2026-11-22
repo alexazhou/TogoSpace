@@ -65,22 +65,6 @@ EX_RESOURCE = "mcp resource <server-name> <resource-uri>"
 EX_SESSION = "mcp session start"
 EX_LEGACY_OPENAPI = "mcp ls <spec-path-or-url>   /   mcp call --kind openapi <spec-path-or-url> --tool <tool-name>"
 
-#: `mcp` 子树会转发的既有工具（**声明式清单**，`core._declared_visibility` 依赖它）。
-#:
-#: 为什么必须在这里声明：工具的基准可见性由「console 会不会转发到它」推导
-#: （`core._declared_visibility` → `BOTH`/`TOOL_ONLY`），而 `console_visible` 又是
-#: 第二跳转发前的门控。T0 删掉 6 条 mcp spec 后，这 5 个工具就不再出现在 spec 派生的
-#: 转发集合里 —— 如果子树仍转发它们，就会撞上「工具不支持通过 console 调用」。
-#: 所以子树的转发目标必须与 spec 一样被显式声明，两处合起来才是「console 的全部转发面」。
-FORWARD_TOOL_NAMES = frozenset(
-    {
-        "list_mcp_servers",
-        "save_mcp_server",
-        "delete_mcp_server",
-        "set_mcp_server_enabled",
-        # `mcp resource` / `mcp session` 走原生服务层（无对应工具），不在此列。
-    }
-)
 
 #: 布尔开关（出现即 True，不吞下一个 token）。
 _BOOL_FLAGS = frozenset({"schema", "brief", "all-parameters", "overwrite", "help"})

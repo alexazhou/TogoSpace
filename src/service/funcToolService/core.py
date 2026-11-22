@@ -12,59 +12,17 @@ from model.coreModel.serviceStatus import ServiceStatusInfo
 from service import serviceUtil
 from util import llmApiUtil
 from service.roomService import ToolCallContext
-from .consoleCommands import COMMAND_SPECS, ENV_KEEP_LEGACY_TOOLS, LEGACY_CONVERGED_TOOLS
-from .consoleMcp import FORWARD_TOOL_NAMES as MCP_CONSOLE_FORWARD_TOOL_NAMES
-from .consoleSpec import FORWARD_TOOL_NAMES as SPEC_CONSOLE_FORWARD_TOOL_NAMES
+from . import toolSpec
+from .toolSpec import (
+    ENV_KEEP_LEGACY_TOOLS,
+    keep_legacy_admin_tools,
+    resolve_effective_visibility,
+)
 from .toolArgsValidation import validate_tool_args
 from toolResult import error_result, invalid_json_args
 from .consoleTool import console, console_triggers_self_interrupt
 from .funcToolType import FuncTool
-from .tools import (
-    create_container,
-    create_task,
-    delete_container,
-    delete_dept,
-    delete_role_template,
-    delete_room,
-    enter_container,
-    exit_to_host,
-    finish_action,
-    get_agent_info,
-    get_dept_info,
-    get_role_template,
-    get_room_info,
-    get_task_detail,
-    get_task_event,
-    get_time,
-    list_containers,
-    list_role_templates,
-    list_task_events,
-    list_tasks,
-    load_skill,
-    delete_mcp_server,
-    graphql_call,
-    list_mcp_servers,
-    openapi_call,
-    set_mcp_server_enabled,
-    memory_create,
-    memory_list,
-    memory_read,
-    memory_search,
-    memory_update,
-    reload_team,
-    save_agent,
-    save_dept,
-    save_mcp_server,
-    start_chat,
-    save_role_template,
-    save_room,
-    send_chat_msg,
-    update_container_note,
-    update_task,
-    wake_up_agent,
-    web_search,
-    webfetch,
-)
+from . import tools as _tools  # noqa: F401 —— import 副作用：触发 49 个 @tool(...) 声明
 
 logger = logging.getLogger(__name__)
 
@@ -79,164 +37,63 @@ def build_tools(func_tools: Iterable[FuncTool]) -> list[llmApiUtil.OpenAITool]:
 _func_tools: dict[str, FuncTool] = {}
 
 
-def keep_legacy_admin_tools() -> bool:
-    """D2 单点开关：被 `console` 收敛的 16 个管理工具是否仍作为独立 Tool 暴露。
+def declared_visibility(name: str) -> ToolVisibility:
+    """某个已声明工具的静态基准可见性（未声明按 `NONE`，即「谁也别想调」）。
 
-    开关只影响**模型暴露面**（`ToolVisibility.tool_visible`）；注册面与 console 的
-    转发面不受影响（#166-A 已修）：
-
-    - 三个 Driver 用 `get_all_tools()` 全量注册，`console` 的第 2 跳因此总能找到目标；
-    - `get_tools()` / `export_openai_tools()` / Claude SDK 的工具列表只保留
-      `tool_visible` 的工具；
-    - `execute_tool_call` 第 1 跳要求 `tool_visible`，第 2 跳（console 转发）要求
-      `console_visible`。隐藏模式下已收敛工具的动态可见性是 `CONSOLE_ONLY`，
-      所以「模型看不到、console 调得到」。
-
-    口径用环境变量而不是模块常量：测 token 收益时要在**不改代码**的前提下对比两种
-    暴露面，常量得改文件、重启才生效。默认 = 保留；任何无法识别的值也按保留处理
-    ——「悄悄收走一批工具」的后果比「多暴露几个工具」严重得多。
+    可见性现在由工具自己声明（`@tool(visibility=...)`），这里只做查表 + fail-closed：
+    查不到就返回 `NONE`，而不是退回「BOTH」——「漏声明」变成「调不动」比
+    「漏声明」变成「意外全开」安全。
     """
-    raw = os.environ.get(ENV_KEEP_LEGACY_TOOLS, "")
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    spec = toolSpec.get_declared_spec(name)
+    return spec.visibility if spec is not None else ToolVisibility.NONE
 
 
-def resolve_effective_visibility(name: str, declared: ToolVisibility) -> ToolVisibility:
-    """把「静态基准可见性」解析成「当前环境下的实际可见性」。
+def container_tool_names() -> tuple[str, ...]:
+    """容器组工具名（由 `ToolSpec.group == "container"` 派生，取代手写 `CONTAINER_TOOL_NAMES`）。"""
+    return tuple(
+        declared.name for declared in toolSpec.declared_tools() if declared.spec.group == "container"
+    )
 
-    D2 开关只影响已收敛工具（`LEGACY_CONVERGED_TOOLS`）：保留时它们是 `BOTH`，
-    关闭时降为 `CONSOLE_ONLY`（独立 Tool 面隐藏、console 转发面保留）。其余工具
-    原样返回。注册表与暴露层都调用本函数，保证「同一个开关只有一处解释」。
+
+def _assemble(func_tools: Iterable[FuncTool]) -> tuple[dict[str, FuncTool], dict[str, FuncTool]]:
+    """把 `FuncTool` 按 `ToolSpec.group` 分成「默认」与「容器」两组（物理分离不变）。
+
+    分组的理由与之前一致：`get_tools()` 默认不带容器工具，Native / Claude SDK 的暴露面
+    零变化；容器工具只对 TspAgentDriver 暴露（§6.1 生效范围）。
     """
-    if (
-        declared == ToolVisibility.BOTH
-        and name in LEGACY_CONVERGED_TOOLS
-        and not keep_legacy_admin_tools()
-    ):
-        return ToolVisibility.CONSOLE_ONLY
-    return declared
+    default: dict[str, FuncTool] = {}
+    container: dict[str, FuncTool] = {}
+    for func_tool in func_tools:
+        spec = func_tool.spec
+        group = spec.group if spec is not None else "default"
+        (container if group == "container" else default)[func_tool.name] = func_tool
+    return default, container
 
 
-#: console 声明的全部转发目标（静态集合，用于推导基准可见性）。
-#:
-#: 两个来源缺一不可：① `COMMAND_SPECS` 里每条 spec 的 `legacy_tool`（通用命令表）；
-#: ② `mcpConsole.FORWARD_TOOL_NAMES`（`mcp` 子树的窄解析器——它不经过 spec 机制）。
-#: #291 T0 删掉 6 条 mcp spec 后，只按 ① 推导会让这 5 个工具掉成 `TOOL_ONLY`，
-#: 于是子树转发它们的第 2 跳被判「工具不支持通过 console 调用」（实测红线）。
-_CONSOLE_FORWARD_TARGETS: frozenset[str] = frozenset(
-    spec.legacy_tool for spec in COMMAND_SPECS if spec.legacy_tool
-) | MCP_CONSOLE_FORWARD_TOOL_NAMES | SPEC_CONSOLE_FORWARD_TOOL_NAMES
-
-#: 显式可见性覆盖：openapi_call / graphql_call 只作为 console `openapi`/`graphql` 的
-#: 第 2 跳转发靶子存在，不暴露给模型面板，也不允许模型第 1 跳直调。
-_EXPLICIT_VISIBILITY: dict[str, ToolVisibility] = {
-    "openapi_call": ToolVisibility.CONSOLE_ONLY,
-    "graphql_call": ToolVisibility.CONSOLE_ONLY,
-}
-
-
-def _declared_visibility(name: str) -> ToolVisibility:
-    """静态基准：显式覆盖优先，其次 console 会转发的工具 = BOTH，其余 = TOOL_ONLY。"""
-    if name in _EXPLICIT_VISIBILITY:
-        return _EXPLICIT_VISIBILITY[name]
-    return ToolVisibility.BOTH if name in _CONSOLE_FORWARD_TARGETS else ToolVisibility.TOOL_ONLY
+def _declared_func_tools() -> list[FuncTool]:
+    """按 `toolSpec` 收集列表装配 `FuncTool`（**唯一**装配来源）。"""
+    return [
+        FuncTool(
+            name=declared.name,
+            callable=declared.func,
+            visibility=declared.spec.visibility,
+            spec=declared.spec,
+        )
+        for declared in toolSpec.declared_tools()
+    ]
 
 
 def load_func_tools() -> dict[str, FuncTool]:
-    global _func_tools
-    _registry: dict[str, Any] = {
-        "get_time": get_time,
-        "web_search": web_search,
-        "webfetch": webfetch,
-        # OpenAPI / GraphQL（mcp2cli）：仅作为 console `openapi` / `graphql` 的内部转发靶子（CONSOLE_ONLY）。
-        "openapi_call": openapi_call,
-        "graphql_call": graphql_call,
-        # MCP 注册表（#224）：登记/删除/列举 + `mcp call` 的别名解析落点。
-        # console 会转发这三个工具 ⇒ `_declared_visibility` 推成 BOTH（设计稿 §3.7
-        # 接受模型同时直调；BASIC 直调会被 ADMIN 类目在 enabled 处以 admin_denied 拒）。
-        "save_mcp_server": save_mcp_server,
-        "delete_mcp_server": delete_mcp_server,
-        "list_mcp_servers": list_mcp_servers,
-        "set_mcp_server_enabled": set_mcp_server_enabled,
-        "send_chat_msg": send_chat_msg,
-        "finish_action": finish_action,
-        "get_dept_info": get_dept_info,
-        "get_room_info": get_room_info,
-        "get_agent_info": get_agent_info,
-        "wake_up_agent": wake_up_agent,
-        "start_chat": start_chat,
-        "reload_team": reload_team,
-        "list_role_templates": list_role_templates,
-        "get_role_template": get_role_template,
-        "save_agent": save_agent,
-        "save_dept": save_dept,
-        "delete_dept": delete_dept,
-        "save_room": save_room,
-        "delete_room": delete_room,
-        "save_role_template": save_role_template,
-        "delete_role_template": delete_role_template,
-        "create_task": create_task,
-        "update_task": update_task,
-        "get_task_detail": get_task_detail,
-        "list_task_events": list_task_events,
-        "get_task_event": get_task_event,
-        "list_tasks": list_tasks,
-        "load_skill": load_skill,
-        "memory_list": memory_list,
-        "memory_read": memory_read,
-        "memory_search": memory_search,
-        "memory_create": memory_create,
-        "memory_update": memory_update,
-        # 管理控制台（#154）：16 个管理工具收敛成这一条，与它们并存（D2 默认保留）。
-        # 注册名固定 `console`，schema 由 `console()` 的 docstring 生成。
-        "console": console,
-    }
-    _func_tools = {}
-    for name, func in _registry.items():
-        _func_tools[name] = FuncTool(name, func, visibility=_declared_visibility(name))
+    global _func_tools, _container_func_tools
+    _func_tools, _container_func_tools = _assemble(_declared_func_tools())
     return _func_tools
-
-
-# 容器工具单独一组：只对 TspAgentDriver 暴露（§6.1 生效范围）。
-# 放在这里而不是混进 `load_func_tools` 的注册表，是为了让「默认工具集」保持原样
-# ——`get_tools()` 不带容器工具，Native / Claude SDK 的行为零变化。
-CONTAINER_TOOL_NAMES = (
-    "create_container",
-    "enter_container",
-    "exit_to_host",
-    "list_containers",
-    "delete_container",
-    "update_container_note",
-)
-
-#: 容器工具组的**基准可见性**（不在此表里的一律 `TOOL_ONLY`，即随容器工具组整体
-#: 暴露给 TspAgentDriver 的模型面）。
-#:
-#: `update_container_note` 是 `CONSOLE_ONLY`（Operator 2026-11-13 需求）：它由
-#: `container note` 子命令转发执行，模型不该直接看见 —— 修改容器说明是**人**在
-#: 控制台做的整理动作，让模型自己也去改，等于给它一个随时能篡改自己「用途说明」
-#: 的口子（说明是给人看的历史信息，不是模型可自选的标签）。
-#:
-#: 显式声明而不是靠 `_declared_visibility`：后者只对 `_func_tools` 生效，容器工具组
-#: 走的是另一条装配路径，靠上去会静默退回 `TOOL_ONLY`（即模型可见），与本需求正好
-#: 相反 —— 这种「安全默认值恰好是最危险值」的地方必须显式写出来。
-_CONTAINER_TOOL_VISIBILITY: dict[str, ToolVisibility] = {
-    "update_container_note": ToolVisibility.CONSOLE_ONLY,
-}
-
-_container_func_tools: dict[str, FuncTool] = {}
 
 
 def load_container_func_tools() -> dict[str, FuncTool]:
     """加载容器工具（`startup` 时一并构建，避免每次 `get_tools` 现造）。"""
-    global _container_func_tools
-    _container_func_tools = {
-        name: FuncTool(
-            name,
-            globals()[name],
-            visibility=_CONTAINER_TOOL_VISIBILITY.get(name, ToolVisibility.TOOL_ONLY),
-        )
-        for name in CONTAINER_TOOL_NAMES
-    }
+    global _func_tools, _container_func_tools
+    if not _func_tools and not _container_func_tools:
+        load_func_tools()
     return _container_func_tools
 
 
@@ -246,22 +103,17 @@ def get_func_tool(name: str) -> FuncTool | None:
     return _func_tools.get(name) or _container_func_tools.get(name)
 
 
-#: 需要「按参数」而非「按注册名」判定是否自中断的工具（#154 D6 引入的机制）。
-#: `reload_team` 仍是静态自中断（driver 里直接传 `self_interrupt=True`），所以不在表里；
-#: 这里只登记参数相关的，避免把每次调用都变成一次 predicate 调用。
-_SELF_INTERRUPT_PREDICATES: dict[str, Any] = {
-    "console": console_triggers_self_interrupt,
-}
-
-
 def get_self_interrupt_predicate(name: str):
     """返回该工具的动态自中断判定器；没有则返回 None。
 
     三个 driver 注册本地工具时统一用
-    `funcToolService.get_self_interrupt_predicate(function_name)` 取值，
-    避免判定口径在三个 driver 里各抄一份后漂移。
+    `funcToolService.get_self_interrupt_predicate(function_name)` 取值，避免判定口径
+    在三个 driver 里各抄一份后漂移。判定器来自工具自己的声明
+    （`ToolSpec.self_interrupt_predicate`），不再是按名字索引的第二张表。
     """
-    return _SELF_INTERRUPT_PREDICATES.get(name)
+    func_tool = get_func_tool(name)
+    spec = func_tool.spec if func_tool is not None else None
+    return spec.self_interrupt_predicate if spec is not None else None
 
 
 def _reset() -> None:
@@ -309,7 +161,7 @@ def get_tools(include_container_tools: bool = False) -> list[llmApiUtil.OpenAITo
     """
     return [
         tool for tool in get_all_tools(include_container_tools=include_container_tools)
-        if resolve_effective_visibility(tool.function.name, tool.visibility).tool_visible
+        if resolve_effective_visibility(tool.visibility).tool_visible
     ]
 
 

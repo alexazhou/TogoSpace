@@ -9,7 +9,7 @@ from constants import (
     AgentClearField, ALLOWED_AGENT_CLEAR_FIELDS, ALLOWED_DEPT_CLEAR_FIELDS, ALLOWED_ROOM_CLEAR_FIELDS,
     AgentStatus, ScheduleJobType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
     ClearField, DeptClearField, DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomClearField,
-    RoomState, RoomType, SpecialAgent, TaskStatus,
+    RoomState, RoomType, SpecialAgent, TaskStatus, ToolVisibility,
 )
 from exception import TogoException
 from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamManager, gtAgentTaskManager, gtRoomMessageManager
@@ -24,6 +24,7 @@ import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
 from service.funcToolService import mcpTool, webFetchTool
+from .toolSpec import Arg, ConsoleCommand, Target, tool
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from service.agentService.prompts import (
     TODO_TASK_CANCEL_INSTRUCTION,
@@ -67,6 +68,12 @@ DEFAULT_EVENT_LIMIT = 3
 #   <其他字段>     — 结构化数据，字段名与语义一致，如 agents: list
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("time", "get", args=(Arg(Target("timezone"), alias="tz"),)),
+    ),
+)
 def get_time(timezone: Optional[str] = None) -> dict:
     """获取当前时间，返回格式化时间字符串。
 
@@ -85,6 +92,7 @@ def get_time(timezone: Optional[str] = None) -> dict:
         return {"success": True, "message": f"当前本地时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"}
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def web_search(query: str, _context: ToolCallContext = None) -> ThirdPartySearchResult:
     """通过已配置的三方服务执行网页搜索，并根据 API 返回结果自动提取来源链接。
 
@@ -95,6 +103,7 @@ async def web_search(query: str, _context: ToolCallContext = None) -> ThirdParty
     return await thirdPartyService.search(service_name, query)
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def webfetch(url: str, _context: ToolCallContext = None) -> dict:
     """读取一个网页并把正文转成 Markdown 返回，用于深入阅读搜索到的页面内容。
     只做一次 HTTP 请求（至多跟随 5 次重定向）拿服务端返回的 HTML 转成 Markdown，
@@ -197,6 +206,7 @@ async def _call_spec(
     return result
 
 
+@tool(visibility=ToolVisibility.CONSOLE_ONLY)
 async def openapi_call(
     target: str,
     action: str = "list",
@@ -225,6 +235,7 @@ async def openapi_call(
     )
 
 
+@tool(visibility=ToolVisibility.CONSOLE_ONLY)
 async def graphql_call(
     target: str,
     action: str = "list",
@@ -302,6 +313,7 @@ def _looks_like_http_url(target: str) -> bool:
 
 
 
+@tool(visibility=ToolVisibility.BOTH)
 async def save_mcp_server(
     name: Optional[str] = None,
     kind: str = "mcp",
@@ -365,6 +377,7 @@ async def save_mcp_server(
     }
 
 
+@tool(visibility=ToolVisibility.BOTH)
 async def delete_mcp_server(
     name: Optional[str] = None,
     _context: ToolCallContext = None,
@@ -394,6 +407,7 @@ async def delete_mcp_server(
     }
 
 
+@tool(visibility=ToolVisibility.BOTH)
 async def list_mcp_servers(
     name_or_target: Optional[str] = None,
     tool: Optional[str] = None,
@@ -465,6 +479,7 @@ async def list_mcp_servers(
     return body
 
 
+@tool(visibility=ToolVisibility.BOTH)
 async def set_mcp_server_enabled(
     name: Optional[str] = None,
     enable: bool = True,
@@ -677,6 +692,18 @@ def _clear_field_conflict(
     }
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("dept", "ls"),
+        ConsoleCommand("dept", "get", args=(
+            Arg(Target("dept_id", type=int), positional=True, required=True),
+        ), help=(
+            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `dept ls` 取 ID）；"
+            "同时传 `--name` 时按底层契约以 <id> 为准。",
+        )),
+    ),
+)
 async def get_dept_info(
     dept_id: Optional[int] = None,
     name: Optional[str] = None,
@@ -715,6 +742,18 @@ async def get_dept_info(
     return {"success": True, "dept": _serialize_dept_node(target, id_to_name)}
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("room", "ls"),
+        ConsoleCommand("room", "get", args=(
+            Arg(Target("room_id", type=int), positional=True, required=True),
+        ), help=(
+            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `room ls` 取 ID）；"
+            "同时传 `--name` 时按底层契约以 <id> 为准。",
+        )),
+    ),
+)
 async def get_room_info(
     room_id: Optional[int] = None,
     name: Optional[str] = None,
@@ -793,6 +832,14 @@ async def get_room_info(
     return {"success": True, "room": room_dict}
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("agent", "dm", args=(
+            Arg(Target("agent_name", type=str), positional=True, required=True),
+        )),
+    ),
+)
 async def start_chat(
     agent_name: str,
     _context: ToolCallContext = None,
@@ -867,6 +914,18 @@ async def start_chat(
     }
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("agent", "ls"),
+        ConsoleCommand("agent", "get", args=(
+            Arg(Target("agent_id", type=int), positional=True, required=True),
+        ), help=(
+            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `agent ls` 取 ID）；"
+            "同时传 `--name` 时按底层契约以 <id> 为准。",
+        )),
+    ),
+)
 async def get_agent_info(
     agent_id: Optional[int] = None,
     name: Optional[str] = None,
@@ -968,6 +1027,14 @@ async def get_agent_info(
     return {"success": True, "agent": await _build_agent_dict(target_agent, detail=True)}
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("agent", "wake", args=(
+            Arg(Target("agent_name", type=str), positional=True, required=True),
+        )),
+    ),
+)
 async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> dict:
     """唤醒处于 FAILED 状态的 Agent，使其重新进入调度循环。
 
@@ -992,6 +1059,11 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
     return {"success": True, "message": f"已成功唤醒 {agent_name}，该成员将重新进入调度循环。"}
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    self_interrupt=True,
+    console=(ConsoleCommand("reload"),),
+)
 async def reload_team(_context: ToolCallContext = None) -> dict:
     """重载当前团队的运行时，可能中断团队内正在执行的任务。
     成员、组织或房间的配置变更需重载后才生效。
@@ -1017,6 +1089,12 @@ async def reload_team(_context: ToolCallContext = None) -> dict:
 
     return {"success": False, "message": f"团队 {team.name} 重载已触发，等待 agent 重启后确认。"}
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("role", "ls", args=(Arg(Target("keywords"), alias="kw"),)),
+    ),
+)
 async def list_role_templates(keywords: list[str] | None = None, _context: ToolCallContext = None) -> dict:
     """查询全部角色模板列表。
     返回精简字段，不包含 soul；display_name 为当前语言下的名称。
@@ -1043,6 +1121,14 @@ async def list_role_templates(keywords: list[str] | None = None, _context: ToolC
     }
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("role", "get", args=(
+            Arg(Target("role_name", type=str), positional=True, required=True),
+        )),
+    ),
+)
 async def get_role_template(role_name: str, _context: ToolCallContext = None) -> dict:
     """按名称查询单个角色模板详情。
 
@@ -1055,7 +1141,75 @@ async def get_role_template(role_name: str, _context: ToolCallContext = None) ->
     return {"success": True, "role_template": template.to_json()}
 
 
-async def save_role_template(
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(ConsoleCommand("role", "create", payload=True),),
+)
+async def create_role_template(
+    name: str,
+    soul: str,
+    type: str | None = None,
+    i18n: dict | None = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """新建角色模板；只能创建 USER 类型（SYSTEM 内置模板只读）。
+
+    同名模板已存在时直接拒绝（不会再覆盖已有模板）——要改已有模板请用 update_role_template。
+
+    Args:
+        name: 角色模板名称，唯一标识，建议使用小写字母和下划线。
+        soul: 核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。
+        type: 角色模板类型，只允许 USER；省略默认 USER，传 SYSTEM 会被拒绝（内置模板只读）。
+        i18n: 多语言名称，如 {"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}}；省略为 {}。
+    """
+    if await gtRoleTemplateManager.get_role_template_by_name(name.strip()) is not None:
+        return {
+            "success": False,
+            "message": f"角色模板 {name.strip()} 已存在；如需修改请用 update_role_template。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+    return await _upsert_role_template(name=name, type=type, soul=soul, i18n=i18n, overwrite=False, _context=_context)
+
+
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("role", "update", payload=True, args=(
+            Arg(Target("name", type=str), positional=True, required=True),
+        )),
+    ),
+)
+async def update_role_template(
+    name: str,
+    soul: str | None = None,
+    type: str | None = None,
+    i18n: dict | None = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """按名称更新角色模板（PATCH：省略的字段保持现值）；只能改 USER 类型，且目标模板必须已存在。
+
+    Args:
+        name: 要更新的角色模板名称（定位用；本工具不支持改名）。
+        soul: 核心提示词；省略表示保持现值。
+        type: 角色模板类型，只允许 USER；省略表示保持现值（不允许改成 SYSTEM）。
+        i18n: 多语言名称；省略表示保持现值（不会清空已有名称）。
+    """
+    if all(field is None for field in (soul, type, i18n)):
+        return {
+            "success": False,
+            "error_code": "no_update_action",
+            "message": "update_role_template 没有可执行的动作：请至少给出 soul / type / i18n 之一。",
+        }
+    if await gtRoleTemplateManager.get_role_template_by_name(name.strip()) is None:
+        return {
+            "success": False,
+            "message": f"未找到角色模板: {name}；update_role_template 只更新已存在的模板（新建请用 create_role_template）。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+    return await _upsert_role_template(name=name, type=type, soul=soul, i18n=i18n, overwrite=True, _context=_context)
+
+
+async def _upsert_role_template(
     name: str,
     type: Optional[str] = None,
     soul: Optional[str] = None,
@@ -1139,7 +1293,118 @@ async def save_role_template(
     }
 
 
-async def save_agent(
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(ConsoleCommand("agent", "create", payload=True),),
+)
+async def create_agent(
+    name: str,
+    role_template_name: str,
+    model: str | None = None,
+    driver: Optional[str] = None,
+    allow_tools: list[str] | None = None,
+    allow_skills: list[str] | None = None,
+    i18n: dict | None = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """在当前团队中新建成员。
+
+    同名成员已存在时直接拒绝（不会再覆盖已有成员）——要改已有成员请用 update_agent。
+    `name` 与 `role_template_name` 是签名级必填，缺字段由调用方 schema 校验拦截，不再靠
+    「工具内看出参全空后猜意图」。
+
+    Args:
+        name: 成员名称；不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。
+        role_template_name: 要绑定的角色模板名称。
+        model: 可选模型覆盖；省略表示不覆盖模板或系统默认模型。
+        driver: 驱动类型，可选 native、claude_sdk、tsp；省略 = tsp。
+        allow_tools: 可见工具列表，元素为工具名或类别语法（如 "Category:Read"）；省略 = 默认授予 Basic、Read、Write、Execute。
+        allow_skills: 可见技能名称列表；省略 = 全部技能，[] = 不授权任何技能。
+        i18n: 多语言名称，如 {"display_name": {"zh-CN": "Alice", "en": "Alice"}}。
+    """
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "当前没有可用的团队上下文。"}
+    existing = await gtAgentManager.get_team_agents_by_names(team_id, [name.strip()])
+    if existing:
+        return {
+            "success": False,
+            "message": f"成员 {name.strip()} 已存在；如需修改请用 update_agent（同名多行时请按 agent_id 定位）。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+    return await _upsert_agent(
+        name=name,
+        role_template_name=role_template_name,
+        model=model,
+        driver=driver,
+        allow_tools=allow_tools,
+        allow_skills=allow_skills,
+        i18n=i18n,
+        overwrite=False,
+        agent_id=None,
+        _context=_context,
+    )
+
+
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("agent", "update", payload=True, args=(
+            Arg(Target("agent_id", type=int), positional=True, required=True),
+        )),
+    ),
+)
+async def update_agent(
+    agent_id: int,
+    name: str | None = None,
+    role_template_name: str | None = None,
+    model: str | None = None,
+    driver: Optional[str] = None,
+    allow_tools: list[str] | None = None,
+    allow_skills: list[str] | None = None,
+    i18n: dict | None = None,
+    clear_fields: Optional[list[AgentClearField]] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """按 agent_id 更新成员（PATCH：省略的字段保持现值；name 只表示改成的**新名称**）。
+
+    ⚠️ 定位只接受 `agent_id`：同名成员（离职后名字被复用）不再产生歧义，也不会出现
+    「按名字改到别人身上」。要把字段恢复成「没有这层覆盖」，用 clear_fields 显式声明。
+
+    Args:
+        agent_id: 成员 ID（必填正整数）；所有更新都以它为定位。
+        name: 要改成的新名称；省略表示不改名（改名会自动迁移 workdir）。
+        role_template_name: 要绑定的角色模板名称；省略表示保持现有绑定。
+        model: 可选模型覆盖；省略表示保持现值。
+        driver: 驱动类型（native / claude_sdk / tsp）；省略表示保持现值。
+        allow_tools: 可见工具列表；省略表示保持现值，clear_fields 含本字段 = 重置为默认授予。
+        allow_skills: 可见技能名称列表；省略表示保持现值，clear_fields 含本字段 = 重置为全部技能。
+        i18n: 多语言名称；省略表示保持现值。
+        clear_fields: 要清除（恢复默认）的字段名列表，可选 "model"、"allow_tools"、"allow_skills"；空数组 [] 视为未提供。
+    """
+    effective = (name, role_template_name, model, driver, allow_tools, allow_skills, i18n, clear_fields)
+    if all(value is None or value == [] or value == "" for value in effective):
+        return {
+            "success": False,
+            "error_code": "no_update_action",
+            "message": "update_agent 没有可执行的动作：请至少给出一个要改的字段，或用 clear_fields 指定要清除的字段。",
+        }
+    return await _upsert_agent(
+        name=name,
+        role_template_name=role_template_name,
+        model=model,
+        driver=driver,
+        allow_tools=allow_tools,
+        allow_skills=allow_skills,
+        i18n=i18n,
+        overwrite=True,
+        agent_id=agent_id,
+        clear_fields=clear_fields,
+        _context=_context,
+    )
+
+
+async def _upsert_agent(
     name: Optional[str] = None,
     role_template_name: Optional[str] = None,
     model: str | None = None,
@@ -1398,7 +1663,111 @@ def _collect_descendant_ids(node: GtDept) -> set[int]:
     return ids
 
 
-async def save_dept(
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(ConsoleCommand("dept", "create", payload=True),),
+)
+async def create_dept(
+    name: str,
+    responsibility: str,
+    manager_name: str,
+    parent_name: str,
+    member_names: list[str] | None = None,
+    i18n: dict | None = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """在当前团队中新建部门（负责人会自动加入成员列表）。
+
+    同名部门已存在时直接拒绝（不会再覆盖已有部门）——要改已有部门请用 update_dept。
+
+    Args:
+        name: 部门名称（不可重复）。
+        responsibility: 部门职责说明。
+        manager_name: 部门主管的成员名称；必须已存在。
+        parent_name: 上级部门名称；根部门用 root。
+        member_names: 部门成员名称列表；省略表示只含负责人（负责人自动入成员）。
+        i18n: 多语言名称，如 {"display_name": {"zh-CN": "研发部", "en": "R&D"}}。
+    """
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "当前没有可用的团队上下文。"}
+    if await gtDeptManager.get_dept_by_name(team_id, name.strip()) is not None:
+        return {
+            "success": False,
+            "message": f"部门 {name.strip()} 已存在；如需修改请用 update_dept。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+    # 默认值是**工具契约**（设计 §2.2）：`None` 在更新分支上表示「保持现值」，与
+    # 「新建一个只有负责人的部门」不是同一件事，所以默认 [] 落在函数内，而不是命令行层。
+    return await _upsert_dept(
+        name=name,
+        responsibility=responsibility,
+        manager_name=manager_name,
+        member_names=[] if member_names is None else member_names,
+        parent_name=parent_name,
+        i18n=i18n,
+        overwrite=False,
+        dept_id=None,
+        _context=_context,
+    )
+
+
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("dept", "update", payload=True, args=(
+            Arg(Target("dept_id", type=int), positional=True, required=True),
+        )),
+    ),
+)
+async def update_dept(
+    dept_id: int,
+    name: str | None = None,
+    responsibility: str | None = None,
+    manager_name: str | None = None,
+    member_names: list[str] | None = None,
+    parent_name: str | None = None,
+    i18n: dict | None = None,
+    clear_fields: Optional[list[DeptClearField]] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """按 dept_id 更新部门（PATCH：省略的字段保持现值；name 只表示改成的**新名称**）。
+
+    ⚠️ 定位只接受 `dept_id`，不再按名称定位：`name` 从此纯粹表示改名，既不会
+    「因为想改职责而顺手按名字找目标」，也不会撞上「改名后找不到自己」的麻烦。
+
+    Args:
+        dept_id: 部门 ID（必填正整数）；所有更新都以它为定位。
+        name: 要改成的新部门名称；省略表示不改名。
+        responsibility: 部门职责说明；省略表示保持现值。
+        manager_name: 部门主管的成员名称；省略表示保持现值。
+        member_names: 部门成员名称列表；出现即**全量替换**，省略表示保持现值。
+        parent_name: 上级部门名称；省略表示保持现值（移动部门）。
+        i18n: 多语言名称；省略表示保持现值。
+        clear_fields: 要清除的字段名列表；空数组 [] 视为未提供。
+    """
+    effective = (name, responsibility, manager_name, member_names, parent_name, i18n, clear_fields)
+    if all(value is None or value == [] or value == "" for value in effective):
+        return {
+            "success": False,
+            "error_code": "no_update_action",
+            "message": "update_dept 没有可执行的动作：请至少给出一个要改的字段，或用 clear_fields 指定要清除的字段。",
+        }
+    return await _upsert_dept(
+        name=name,
+        responsibility=responsibility,
+        manager_name=manager_name,
+        member_names=member_names,
+        parent_name=parent_name,
+        i18n=i18n,
+        overwrite=True,
+        dept_id=dept_id,
+        clear_fields=clear_fields,
+        _context=_context,
+    )
+
+
+async def _upsert_dept(
     name: Optional[str] = None,
     responsibility: Optional[str] = None,
     manager_name: Optional[str] = None,
@@ -1604,7 +1973,94 @@ async def save_dept(
     }
 
 
-async def save_room(
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(ConsoleCommand("room", "create", payload=True),),
+)
+async def create_room(
+    name: str,
+    member_names: list[str],
+    initial_topic: str | None = None,
+    max_rounds: int | None = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """新建房间；成员 2 人为单聊，3 人及以上为群聊。
+
+    同名房间已存在时直接拒绝（不会再覆盖已有房间）——要改已有房间请用 update_room。
+
+    Args:
+        name: 房间名称（团队内唯一）。
+        member_names: 房间成员名称列表，至少 2 人。
+        initial_topic: 初始话题；省略表示不带话题开场。
+        max_rounds: 最大轮次；省略表示使用系统默认。
+    """
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "当前没有可用的团队上下文。"}
+    if await gtRoomManager.get_room_by_team_and_name(team_id, name.strip()) is not None:
+        return {
+            "success": False,
+            "message": f"房间 {name.strip()} 已存在；如需修改请用 update_room。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
+    return await _upsert_room(
+        name=name,
+        member_names=member_names,
+        initial_topic=initial_topic,
+        max_rounds=max_rounds,
+        overwrite=False,
+        room_id=None,
+        _context=_context,
+    )
+
+
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("room", "update", payload=True, args=(
+            Arg(Target("room_id", type=int), positional=True, required=True),
+        )),
+    ),
+)
+async def update_room(
+    room_id: int,
+    name: str | None = None,
+    member_names: list[str] | None = None,
+    initial_topic: str | None = None,
+    max_rounds: int | None = None,
+    clear_fields: Optional[list[RoomClearField]] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """按 room_id 更新房间（PATCH：省略的字段保持现值；name 只表示改成的**新名称**）。
+
+    Args:
+        room_id: 房间 ID（必填正整数）；所有更新都以它为定位。
+        name: 要改成的新房间名称；省略表示不改名。
+        member_names: 房间成员名称列表；出现即全量替换，省略表示保持现值。
+        initial_topic: 初始话题；省略表示保持现值。
+        max_rounds: 最大轮次；省略表示保持现值。
+        clear_fields: 要清除的字段名列表；空数组 [] 视为未提供。
+    """
+    effective = (name, member_names, initial_topic, max_rounds, clear_fields)
+    if all(value is None or value == [] or value == "" for value in effective):
+        return {
+            "success": False,
+            "error_code": "no_update_action",
+            "message": "update_room 没有可执行的动作：请至少给出一个要改的字段，或用 clear_fields 指定要清除的字段。",
+        }
+    return await _upsert_room(
+        name=name,
+        member_names=member_names,
+        initial_topic=initial_topic,
+        max_rounds=max_rounds,
+        overwrite=True,
+        room_id=room_id,
+        clear_fields=clear_fields,
+        _context=_context,
+    )
+
+
+async def _upsert_room(
     name: Optional[str] = None,
     member_names: Optional[list[str]] = None,
     initial_topic: str | None = None,
@@ -1779,6 +2235,16 @@ async def save_room(
     }
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("room", "rm", args=(
+            Arg(Target("room_id", type=int), positional=True, required=False),
+        ), help=(
+            "位置参数 <id> 与 --name 二选一（至少给一个；同时给出时以 <id> 为准）。",
+        )),
+    ),
+)
 async def delete_room(
     name: Optional[str] = None,
     room_id: Optional[int] = None,
@@ -1834,6 +2300,16 @@ async def delete_room(
     }
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("dept", ("rm", "remove"), args=(
+            Arg(Target("dept_id", type=int), positional=True, required=False),
+        ), help=(
+            "位置参数 <id> 与 --name 二选一（至少给一个；同时给出时以 <id> 为准）。",
+        )),
+    ),
+)
 async def delete_dept(
     name: Optional[str] = None,
     dept_id: Optional[int] = None,
@@ -1899,6 +2375,14 @@ async def delete_dept(
     }
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("role", "rm", args=(
+            Arg(Target("role_name", type=str), positional=True, required=True),
+        )),
+    ),
+)
 async def delete_role_template(role_name: str, _context: ToolCallContext = None) -> dict:
     """删除指定的角色模板。注意：仅能删除由用户创建（USER 类型）且当前未被任何成员使用的模板。
 
@@ -1975,6 +2459,7 @@ async def _resolve_effective_immediate(
     return True, ""
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def send_chat_msg(
     room_name: str,
     msg: str,
@@ -2035,6 +2520,7 @@ async def send_chat_msg(
     return {"success": True, "message": f"消息已送达 {target_room.name}{downgrade_note}。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_action 结束行动。"}
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: bool = False) -> dict:
     """结束行动，把行动机会让给下一位成员；完成所有发言和工具调用后，或确认无需行动时调用。
 
@@ -2134,6 +2620,10 @@ finish 失败，你本次行动中，未在收到消息的房间【{room_name}�
 # Task 工具：协作任务管理（委托给 taskService）
 # ---------------------------------------------------------------------------
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(ConsoleCommand("task", "create", payload=True),),
+)
 async def create_task(
     title: str,
     assignee_id: int,
@@ -2169,7 +2659,7 @@ async def create_task(
     if not ok:
         return {"success": False, "message": "无法获取团队上下文"}
 
-    return await taskService.create_task(
+    result = await taskService.create_task(
         team_id=team_id,
         creator_id=_context.agent_id,  # type: ignore[union-attr]
         title=title,
@@ -2184,8 +2674,28 @@ async def create_task(
         status=status,
         note=note,
     )
+    # 建单**不会**唤醒执行人（设计 §2.2）：提示归工具自己，不再由 console 的
+    # `success_hint` 钩子追加 —— 直调工具与命令行两条入口说同一句话。
+    if isinstance(result, dict) and result.get("success"):
+        hint = "建单不会自动唤醒执行人：请另发 send_chat_msg 通知对方（本命令不会替你通知）。"
+        result = dict(result)
+        result["hint"] = hint
+        message = result.get("message")
+        result["message"] = f"{message}；{hint}" if message else hint
+    return result
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("task", "update", payload=True, args=(
+            Arg(Target("task_id", type=int), positional=True, required=True),
+            Arg(Target("new_status"), alias="status"),
+            Arg(Target("clear_fields"), alias="remove-field"),
+            Arg(Target("workflow_action"), alias="action"),
+        )),
+    ),
+)
 async def update_task(
     task_id: int,
     new_status: Optional[str] = None,
@@ -2242,6 +2752,14 @@ async def update_task(
     )
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("task", "get", args=(
+            Arg(Target("task_id", type=int), positional=True, required=True),
+        )),
+    ),
+)
 async def get_task_detail(
     task_id: int,
     event_limit: int = DEFAULT_EVENT_LIMIT,
@@ -2264,6 +2782,7 @@ async def get_task_detail(
     return await taskService.get_task(team_id=team_id, task_id=task_id, event_limit=event_limit)
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def get_task_event(
     event_id: int,
     _context: Optional[ToolCallContext] = None,
@@ -2282,6 +2801,7 @@ async def get_task_event(
     return await taskService.get_task_event(team_id=team_id, event_id=event_id)
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def list_task_events(
     task_id: int,
     limit: int = 50,
@@ -2309,6 +2829,12 @@ async def list_task_events(
     )
 
 
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("task", "ls", args=(Arg(Target("title_keyword"), alias="kw"),)),
+    ),
+)
 async def list_tasks(
     assignee: Optional[int] = None,
     reviewer: Optional[int] = None,
@@ -2346,14 +2872,15 @@ async def list_tasks(
     # 纯空白关键字不算过滤条件：`LIKE '%%'` 会匹配全部任务，等于静默取消过滤。
     title_keyword = (title_keyword or "").strip() or None
 
+    # 过滤项全缺时在**函数内**补 `scope="self"`（设计 §2.2）：这是「我的待办」这个
+    # 最常用口径，但补完必须显式说明（`auto_filled_filters` + message）——静默改口径
+    # 会让模型以为拿到的是全团队列表，比直接报错更贵。
+    auto_filled: dict[str, Any] = {}
     if assignee is None and reviewer is None and scope is None and title_keyword is None and not mine:
-        return {
-            "success": False,
-            "message": "请通过 assignee / reviewer / scope / title_keyword / mine 指定过滤条件（至少提供一个）",
-            "error_code": "missing_target",
-        }
+        scope = "self"
+        auto_filled["scope"] = "self"
 
-    return await taskService.list_tasks(
+    result = await taskService.list_tasks(
         team_id=team_id,
         assignee_id=assignee,
         reviewer_id=reviewer,
@@ -2368,8 +2895,19 @@ async def list_tasks(
         mine=mine,
         include_upcoming=include_upcoming,
     )
+    if auto_filled and isinstance(result, dict):
+        described = "、".join(f"--{name} {value}" for name, value in auto_filled.items())
+        note = (
+            f"过滤项（--assignee / --reviewer / --scope / --kw）全缺，已自动补 {described}；"
+            "其它过滤条件（如 --status）照旧生效，只列与我相关的任务。"
+        )
+        result = dict(result)
+        result["auto_filled_filters"] = dict(auto_filled)
+        result["message"] = f"{result.get('message')}；{note}" if result.get("message") else note
+    return result
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def load_skill(
     skill_name: str,
     _context: Optional[ToolCallContext] = None,
@@ -2451,6 +2989,7 @@ def _container_agent(_context: ToolCallContext | None):
     return agent
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY, group="container")
 async def create_container(
     image: Optional[str] = None,
     note: Optional[str] = None,
@@ -2500,6 +3039,7 @@ async def create_container(
         return {"success": False, "message": f"创建容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_CREATE_FAILED}
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY, group="container")
 async def enter_container(container_id: str, _context: ToolCallContext = None) -> dict[str, Any]:
     """把执行环境切换到指定的容器，之后所有命令都在容器内执行。
     容器可以是你自己用 create_container 创建的（会自动启动并进入），也可以是宿主机上已经在运行的其他容器（会借用进来执行，不影响它的原有进程）；如果容器当前不是运行中状态且不是你创建的，需要先自行启动它。
@@ -2582,6 +3122,7 @@ def _exit_to_host_message(prev_container: Optional[ContainerTarget], keep_alive:
     )
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY, group="container")
 async def exit_to_host(
     keep_alive: bool = False,
     _context: ToolCallContext = None,
@@ -2617,6 +3158,7 @@ async def exit_to_host(
         return {"success": False, "message": f"退出容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_ENTER_FAILED}
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY, group="container")
 async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
     """查看你自己创建的容器列表、它们的实时状态，以及当前所处的执行环境。
 
@@ -2649,6 +3191,16 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
         return {"success": False, "message": f"查询容器列表失败: {exc}", "error_code": containerService.ERROR_CONTAINER_ENTER_FAILED}
 
 
+@tool(
+    visibility=ToolVisibility.CONSOLE_ONLY,
+    group="container",
+    console=(
+        ConsoleCommand("container", "note", args=(
+            Arg(Target("container_id", type=str), positional=True, required=True),
+            Arg(Target("note", type=str), positional=True, required=True),
+        )),
+    ),
+)
 async def update_container_note(
     container_id: Optional[str] = None,
     note: Optional[str] = None,
@@ -2699,6 +3251,7 @@ async def update_container_note(
         }
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY, group="container")
 async def delete_container(
     container_id: Optional[str] = None,
     record_id: Optional[int] = None,
@@ -2760,6 +3313,7 @@ def _require_memory_context(_context: ToolCallContext | None) -> tuple[int, int]
     return _context.team_id, _context.agent_id
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def memory_list(
     include_archived: bool = False,
     _context: ToolCallContext = None,
@@ -2783,6 +3337,7 @@ async def memory_list(
         return _tool_error_result(exc)
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def memory_read(
     memory_id: int,
     _context: ToolCallContext = None,
@@ -2802,6 +3357,7 @@ async def memory_read(
         return _tool_error_result(exc)
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def memory_search(
     query: str,
     limit: int = 5,
@@ -2827,6 +3383,7 @@ async def memory_search(
         return _tool_error_result(exc)
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def memory_create(
     title: str,
     summary: str,
@@ -2864,6 +3421,7 @@ async def memory_create(
         return _tool_error_result(exc)
 
 
+@tool(visibility=ToolVisibility.TOOL_ONLY)
 async def memory_update(
     memory_id: int,
     title: Optional[str] = None,

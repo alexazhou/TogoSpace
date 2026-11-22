@@ -4,12 +4,15 @@ import inspect
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, get_type_hints
+from typing import TYPE_CHECKING, Any, Callable, Dict, get_type_hints
 
 from pydantic import TypeAdapter
 
 from constants import ToolVisibility
 from util import llmApiUtil
+
+if TYPE_CHECKING:  # 只为类型标注：`toolSpec` 顶层不许 import 本模块（设计 §4.1 C-c）
+    from .toolSpec import ToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +327,11 @@ class FuncTool:
     #: 静态基准可见性（`ToolVisibility`）。受 D2 开关控制的工具在 core 层按
     #: `resolve_effective_visibility()` 动态解析，这里只声明「设计上的基准」。
     visibility: ToolVisibility = ToolVisibility.TOOL_ONLY
+    #: 工具的完整声明（`@tool(...)` 挂上的 `ToolSpec`）：console 绑定、help 补充、
+    #: 自中断（静态标志与动态判定器）、分组都从这里读，不再有第二份按名字索引的表。
+    #: 允许为 `None` 只是为了让既有单测能构造「只关心 schema」的假工具；`core` 装配
+    #: 真实工具时必带声明（`toolSpec.spec_of` 对漏挂装饰器直接炸）。
+    spec: "ToolSpec | None" = None
 
     def to_openai_tool(self) -> llmApiUtil.OpenAITool:
         """将当前工具转换为 OpenAI 工具格式。"""

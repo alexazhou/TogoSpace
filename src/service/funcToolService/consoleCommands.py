@@ -24,50 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-# ---------------------------------------------------------------------------
-# 单点开关（#154 D2）：原 16 个工具是否保留。
-#
-# 为什么用环境变量而不是模块级常量：测 token 收益时要**在不改代码**的前提下对比
-# 两种暴露面，环境变量能让同一次构建跑两个配置。默认值 = 保留，切换主干暴露面
-# 由 Operator 决定，不在 #154 范围。
-#
-# 开关现在只影响**模型暴露面**：已收敛工具的动态可见性在 `BOTH` 与 `CONSOLE_ONLY`
-# 之间切换。三个 Driver 用 `get_all_tools()` 全量注册，console 的第 2 跳因此始终
-# 找得到转发目标（#166-A 已修）；`help` 与路由也按 `console_visible` 运行时过滤。
-# ---------------------------------------------------------------------------
-ENV_KEEP_LEGACY_TOOLS = "TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS"
-
-_CONSOLE_NAME = "console"
-
-#: 被 `console` 收敛的 16 个原工具名（draft §1 的清单，逐条对齐）。
-#:
-#: ⚠️ **本清单目前未包含任务三工具**（`list_tasks` / `get_task_detail` / `update_task`），
-#: 而 `task ls|get|update` 三条命令已经把这三者作为转发目标接进来了（#187）。
-#: 也就是说：D2 开关置假（隐藏原工具）时，task 三条命令**仍可达**——因为它们的转发
-#: 目标不在本清单里，不会被隐藏。
-#:
-#: 这不是「不自洽」，性质是**未完成的收敛**：本清单是 D2 开关的语义载体，一旦改动
-#: 就等于改变所有启用 console 的 Agent 的工具暴露面，属 draft §1 已定死的口径，
-#: 须 Operator 决策，不能由实现单方面扩表（#187 裁定②）。故此处**保持 16 项不动**，
-#: 只留注释与报告里的一条「只报不改」记录，供后续收敛时一并处理。
-LEGACY_CONVERGED_TOOLS: tuple[str, ...] = (
-    "get_dept_info",
-    "save_dept",
-    "delete_dept",
-    "get_agent_info",
-    "save_agent",
-    "wake_up_agent",
-    "start_chat",
-    "get_room_info",
-    "save_room",
-    "delete_room",
-    "list_role_templates",
-    "get_role_template",
-    "save_role_template",
-    "delete_role_template",
-    "get_time",
-    "reload_team",
-)
+from .toolSpec import resolve_effective_visibility
 
 
 InputSource = Literal["inline", "payload", "local", "heredoc"]
@@ -683,4 +640,4 @@ def command_console_visible(spec: CommandSpec) -> bool:
     # 工具尚未 `load_func_tools()`（部分单测直接调 console / 判定器）时按命令表声明
     # 的基准 BOTH 判定：不能因为「还没加载」把 reload 之类的命令误判成不可用。
     declared = func_tool.visibility if func_tool is not None else ToolVisibility.BOTH
-    return resolve_effective_visibility(spec.legacy_tool, declared).console_visible
+    return resolve_effective_visibility(declared).console_visible

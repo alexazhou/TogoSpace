@@ -84,12 +84,18 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "reload_team": ToolCategory.ADMIN,
     "list_role_templates": ToolCategory.ADMIN,
     "get_role_template": ToolCategory.ADMIN,
-    "save_agent": ToolCategory.ADMIN,
-    "save_dept": ToolCategory.ADMIN,
+    # `save_*` 已拆成 create_* / update_*（设计 §2.1）：8 个新工具全部 ADMIN。
+    # #CATEGORY_CONFIG 本期不改结构（设计 §7 第 6 条），只按新工具名逐条登记。
+    "create_agent": ToolCategory.ADMIN,
+    "update_agent": ToolCategory.ADMIN,
+    "create_dept": ToolCategory.ADMIN,
+    "update_dept": ToolCategory.ADMIN,
     "delete_dept": ToolCategory.ADMIN,
-    "save_room": ToolCategory.ADMIN,
+    "create_room": ToolCategory.ADMIN,
+    "update_room": ToolCategory.ADMIN,
     "delete_room": ToolCategory.ADMIN,
-    "save_role_template": ToolCategory.ADMIN,
+    "create_role_template": ToolCategory.ADMIN,
+    "update_role_template": ToolCategory.ADMIN,
     "delete_role_template": ToolCategory.ADMIN,
     # TSP tools
     "list_dir": ToolCategory.READ,
@@ -216,7 +222,7 @@ class RegisteredTool:
         """
         from service.funcToolService.core import resolve_effective_visibility
 
-        return resolve_effective_visibility(self.tool.function.name, self.visibility)
+        return resolve_effective_visibility(self.visibility)
 
     def triggers_self_interrupt(self, tool_call: Any) -> bool:
         """本次调用是否需要自中断（静态标志优先，其次看动态判定器）。"""

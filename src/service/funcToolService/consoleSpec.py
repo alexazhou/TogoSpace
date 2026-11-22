@@ -18,17 +18,6 @@ from service import mcpRegistryService as registry
 from . import consoleParsing as cp
 from .consoleParsing import ConsoleError
 
-#: 本模块会转发到的既有工具（`core._declared_visibility` 依赖它）。
-FORWARD_TOOL_NAMES = frozenset(
-    {
-        "openapi_call",
-        "graphql_call",
-        "list_mcp_servers",
-        "save_mcp_server",
-        "delete_mcp_server",
-        "set_mcp_server_enabled",
-    }
-)
 
 _BOOL_FLAGS = frozenset({"overwrite", "help"})
 _VALUE_FLAGS = frozenset({"args", "extra", "tool", "note", "config", "target", "output"})
