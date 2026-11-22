@@ -4,7 +4,7 @@ from typing import Any, Callable, Optional
 class ForwardToolCall(Exception):
     """「把这次调用转发给另一个工具」的信号（#160）。
 
-    为什么用异常而不是返回值：`console` 的每条子命令都等价于一个原工具（`save_agent`
+    为什么用异常而不是返回值：`console` 的每条子命令都等价于一个原工具（`create_agent` / `update_agent`
     / `get_dept_info` …），而**权限与执行只有一份实现**才是本单的目标。若 console 自己
     再算一遍权限（`_assert_permitted`），就必然出现「原工具调不了、console 却能调」这类
     错位。改成抛这个信号后，console 只负责「命令 → 目标工具 + 参数」，真正的鉴权与执行

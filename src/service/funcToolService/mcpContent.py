@@ -13,7 +13,7 @@ MCP 协议里 `CallToolResult.content[]` 是**多态数组**：
 | `resource_link` | `{type, uri, name, mimeType?}` |
 | `resource` | `{type, resource: {...}}` |
 
-改造前 `mcpConsole._content_text()` 只做「有 `text` 取 text，否则取 `data` 拼进去」，
+改造前 `consoleMcp._content_text()`（当时文件名是 `mcpConsole.py`）只做「有 `text` 取 text，否则取 `data` 拼进去」，
 `type` 与 `mimeType` **整段丢弃** ⇒ 带截图产出的工具（如 `take_screenshot` 不传
 `filePath`）会把近 1MB 裸 base64 灌进 Agent 上下文：LLM 不可读、纯占上下文，
 且没有任何「这是图片」的标记。

@@ -326,7 +326,7 @@ class AgentToolRegistry:
     async def execute_tool_call(self, tool_call: llmApiUtil.OpenAIToolCall, context: ToolCallContext) -> ToolExecutionResult:
         """执行一次工具调用；工具可抛 `ForwardToolCall` 把调用转交给另一个工具（#160）。
 
-        转发循环存在的理由：`console` 的每条子命令都等价于一个原工具（`save_agent`
+        转发循环存在的理由：`console` 的每条子命令都等价于一个原工具（`create_agent` / `update_agent`
         / `get_dept_info` …）。改造前它自己重算一遍权限（`consoleParsing._assert_permitted`），
         于是同一个判定有了两份实现，一旦 `CATEGORY_CONFIG` 或运行时 spec 口径变化，
         就会出现「原工具调不了、console 却能调」（或反过来）。改造后 console 只抛

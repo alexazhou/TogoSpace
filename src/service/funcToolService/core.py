@@ -153,7 +153,7 @@ def get_all_tools(include_container_tools: bool = False) -> list[llmApiUtil.Open
 def get_tools(include_container_tools: bool = False) -> list[llmApiUtil.OpenAITool]:
     """返回**模型暴露面**：当前 `tool_visible` 的工具列表（受 D2 开关影响）。
 
-    被 `console` 收敛的原 16 个工具在开关关闭时动态解析为 `CONSOLE_ONLY`，不再出现
+    被 `console` 收敛的 28 个 `BOTH` 工具在开关关闭时动态解析为 `CONSOLE_ONLY`，不再出现
     在这里；但它们在注册表里仍然存在，console 转发的第 2 跳只要求 `console_visible`。
 
     Args:

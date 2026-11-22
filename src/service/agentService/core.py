@@ -45,7 +45,7 @@ async def rename_agent_workdir(
 ) -> list[tuple[str, str]]:
     """按 team_id 重命名单个 Agent 的私有目录，返回实际执行的移动。
 
-    只做目录移动。改名前的容器清理由调用方负责（见 `save_agent`）：容器的
+    只做目录移动。改名前的容器清理由调用方负责（见 `update_agent`）：容器的
     bind mount 在创建时固化了 `<team>/agent/<old_name>` 这个绝对路径，目录一
     改名旧容器就指向不存在的路径，所以调用方必须在移动前清掉旧容器（§7）。
     """

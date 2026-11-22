@@ -355,11 +355,11 @@ ClearField = Literal["reviewer_id"]
 ALLOWED_CLEAR_FIELDS: frozenset[str] = frozenset(get_args(ClearField))
 
 
-# `save_agent / save_dept / save_room` 的 `clear_fields` 白名单（#196 PATCH 下沉）。
+# `update_agent / update_dept / update_room` 的 `clear_fields` 白名单（#196 PATCH 下沉）。
 #
 # 与上面 `ClearField` 同一套「Literal → frozenset 派生」口径，理由不再赘述。
 # 三张表**分开**而不是共用一个（如 `ClearField` 那样合并），是因为它们描述的是
-# **不同工具**的可清除面：合成一个大集合后，`save_agent(clear_fields=["max_rounds"])`
+# **不同工具**的可清除面：合成一个大集合后，`update_agent(clear_fields=["max_rounds"])`
 # 这种跨工具的错配就只能靠服务层各自再拦一遍，白名单就不再是「这一个工具能清什么」
 # 的事实源。分开后每个 Literal 就是该工具面上的完整答案。
 #

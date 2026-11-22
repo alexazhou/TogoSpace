@@ -567,8 +567,8 @@ def _tool_error_result(exc: BaseException) -> dict[str, Any]:
     """把异常转成工具层的结构化失败返回体。
 
     为什么不在 `run_tool_call` 一处兜底就完事：工具层自己 `except` 后 return 的分支
-    （`save_room` / `delete_room` / `delete_dept`）根本不会经过 `run_tool_call` 的
-    兜底 `except`，所以必须在这三处各自转换。
+    （`create_room` / `update_room` 共用的 `_upsert_room`、`delete_room`、`delete_dept`）
+    根本不会经过 `run_tool_call` 的兜底 `except`，所以必须在这三处各自转换。
 
     #189 起这里**不再自己拼**：形状与「取哪段文本、要不要带 error_code」的口径收敛到
     `toolResult.error_result`（唯一实现），本函数只保留名字供既有调用点/用例引用。
@@ -1500,7 +1500,7 @@ async def _upsert_agent(
         return {"success": False, "message": error_msg}
 
     clear_names, clear_error = _normalize_clear_fields(
-        clear_fields, ALLOWED_AGENT_CLEAR_FIELDS, "save_agent"
+        clear_fields, ALLOWED_AGENT_CLEAR_FIELDS, "update_agent"
     )
     if clear_error is not None:
         return clear_error
@@ -1508,7 +1508,7 @@ async def _upsert_agent(
     conflict = _clear_field_conflict(
         clearing,
         {"model": model, "allow_tools": allow_tools, "allow_skills": allow_skills},
-        "save_agent",
+        "update_agent",
     )
     if conflict is not None:
         return conflict
@@ -1525,7 +1525,7 @@ async def _upsert_agent(
             # （离职成员的名字允许被复用），而 `get_agent` 底层 `aio_get` 只取第一行、
             # 不校验唯一性。按名更新会静默改到离职成员，返回体仍是 success=True。
             # 之前这段保护在 `consoleParsing._resolve_agent_by_target` 里，只有 console
-            # 走得到；下沉到工具层后，直接调用 `save_agent(name=...)` 也受同一保护。
+            # 走得到；下沉到工具层后，直接调用 `update_agent(name=...)` 也受同一保护。
             # 只在「已存在」时查全量：新建时同名行数为 0，多查一次没有意义。
             same_name = [
                 agent
@@ -1559,7 +1559,7 @@ async def _upsert_agent(
         return {"success": False, "message": f"保留成员 {existing.name} 不允许通过工具创建或修改。"}
 
     # PATCH 语义：只给 agent_id 时 name 省略 = 不改名。回显/日志/改名判定都要有名字，
-    # 故这里补上现值（与 `save_dept` / `save_room` 同口径）——否则返回体是
+    # 故这里补上现值（与 `update_dept` / `update_room` 同口径）——否则返回体是
     # 「已更新成员 None」，脏文案会经 console 直达模型。
     if existing is not None and normalized_name is None:
         normalized_name = existing.name
@@ -1802,7 +1802,7 @@ async def _upsert_dept(
     """创建或更新组织（部门）。
 
     ⚠️ **更新已有组织时，省略某个字段 = 保持该字段现值**（不是重置）。这是 #196 的行为
-    变更，理由与 `save_agent` 同：省略与「没打算改」在调用方视角下无法区分。
+    变更，理由与 `update_agent` 同：省略与「没打算改」在调用方视角下无法区分。
 
     Args:
         name: 组织名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 dept_id 定位）。
@@ -1833,12 +1833,12 @@ async def _upsert_dept(
             return {"success": False, "message": "组织名称不能为空。"}
 
     clear_names, clear_error = _normalize_clear_fields(
-        clear_fields, ALLOWED_DEPT_CLEAR_FIELDS, "save_dept"
+        clear_fields, ALLOWED_DEPT_CLEAR_FIELDS, "update_dept"
     )
     if clear_error is not None:
         return clear_error
     clearing = set(clear_names)
-    conflict = _clear_field_conflict(clearing, {"parent_name": parent_name}, "save_dept")
+    conflict = _clear_field_conflict(clearing, {"parent_name": parent_name}, "update_dept")
     if conflict is not None:
         return conflict
 
@@ -2093,7 +2093,7 @@ async def _upsert_room(
     """创建或更新房间；成员 2 人为单聊，3 人及以上为群聊。
 
     ⚠️ **更新已有房间时，省略某个字段 = 保持该字段现值**（不是重置）。这是 #196 的行为
-    变更，理由与 `save_agent` 同。
+    变更，理由与 `update_agent` 同。
 
     Args:
         name: 房间名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 room_id 定位）。
@@ -2122,13 +2122,13 @@ async def _upsert_room(
             return {"success": False, "message": "房间名称不能为空。"}
 
     clear_names, clear_error = _normalize_clear_fields(
-        clear_fields, ALLOWED_ROOM_CLEAR_FIELDS, "save_room"
+        clear_fields, ALLOWED_ROOM_CLEAR_FIELDS, "update_room"
     )
     if clear_error is not None:
         return clear_error
     clearing = set(clear_names)
     conflict = _clear_field_conflict(
-        clearing, {"initial_topic": initial_topic, "max_rounds": max_rounds}, "save_room"
+        clearing, {"initial_topic": initial_topic, "max_rounds": max_rounds}, "update_room"
     )
     if conflict is not None:
         return conflict

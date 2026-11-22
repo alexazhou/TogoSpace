@@ -169,7 +169,7 @@ class TestConsoleTaskCommand(ServiceTestCase):
         """`task update <id> --remove-field reviewer_id` **真的把库里的 reviewer_id 置空**。
 
         这是本单最核心的一条：它同时覆盖
-        - 命令注册（`COMMAND_SPECS` 里有 task update）、
+        - 命令注册（工具声明派生出的命令表里有 task update，见下面 `test_task_commands_*`）、
         - 配置输入可选（没有配置输入也不会报 `missing_input_source`）、
         - `--remove-field` → `clear_fields` 的映射、
         - 第 2 跳权限与 `taskService` 的撤销分支、
@@ -723,8 +723,8 @@ class TestConsoleTaskCommand(ServiceTestCase):
     # 注册与 help 的静态一致性（漏注册的形态）
     # ==================================================================
 
-    def test_task_commands_are_in_command_specs(self):
-        """task 三条必须真的在 `COMMAND_SPECS` 里（这就是 M3 变异要咬的地方）。"""
+    def test_task_commands_are_in_the_derived_table(self):
+        """task 三条必须真的在 registry 派生出的命令表里（这就是 M3 变异要咬的地方）。"""
         keys = {s.key for s in consoleRegistry.get_table().specs}
         assert {"task ls", "task get", "task update"} <= keys, (
             f"task 命令缺失，当前命令表：{sorted(keys)}"
