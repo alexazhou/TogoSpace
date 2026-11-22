@@ -147,7 +147,6 @@ class TeamCreateHandler(BaseHandler):
         if working_directory:
             config["working_directory"] = working_directory
 
-        # 调用 service 创建 team
         team_id = await teamService.create_team(
             name=request.name,
             config=config,
@@ -286,7 +285,6 @@ class TeamDeleteHandler(BaseHandler):
 
         team_name = team.name
 
-        # 调用 service 删除 team
         await teamService.delete_team(team_name)
 
         self.return_json({"status": "deleted", "name": team_name})

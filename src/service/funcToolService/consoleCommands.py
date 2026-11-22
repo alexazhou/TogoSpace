@@ -23,16 +23,18 @@ P0（#315）起命令表**不再是手抄的**：命令由工具上的 `@tool(co
 
 from __future__ import annotations
 
-#: 选项别名 → 工具真名（#196 P2）。
+#: 选项别名与 kebab 归一（#196 P2；别名的落点 P0 #315 起改过一次）。
 #:
 #: 为什么需要别名：真名是从 schema 派生的（`title_keyword` / `timezone` /
 #: `clear_fields` / `keywords`），照抄到命令行上是**对模型最省心的形态**——schema 里
 #: 写什么，命令行就写什么，不需要第二张映射表。但既有 help 与用例里已有短别名
 #: （`--kw` / `--tz` / `--remove-field`），直接改名是破坏性变更且没带来收益。
 #:
-#: 所以「真名 + 别名」双轨：白名单同时认两者，**存储时保留用户写下的原名**
+#: 所以「真名 + 别名」双轨：命令的选项集合同时认两者，**存储时保留用户写下的原名**
 #: （`test_console_task` 对 `options["remove-field"]` 是按原名断言的），由
 #: `ResolvedCommand.normalize_option()` 只在需要落到工具参数时归一。
+#: 别名的**声明落点**从 P0 起不再是按命令 key 索引的 `_OPTION_ALIASES` 表，而是跟着
+#: 参数声明走的 `Arg.alias` —— `consoleRegistry` 由它派生「别名 → 真名」映射。
 #:
 #: **kebab-case（#220 A2，任务单 #221）**：命令行选项的展示形态统一 kebab
 #: （`--dry-run` / `--remove-field` / `--clear-fields`），schema 真名（下划线式，
@@ -41,8 +43,9 @@ from __future__ import annotations
 #:
 #: **兼容期与移除触发条件**（清单 §A2 建议：旧名保留整整一个版本）：旧下划线名
 #: 在解析层继续被接受（`--dry_run` ≡ `--dry-run`），但 help 只展示 kebab 形式。
-#: 移除触发：当 `src/version.py` 版本号进入 **0.6.0 及以后**（当前 0.5.2-beta1），
-#: 即从 `ResolvedCommand.command_options_map` 里删掉「真名 → 真名」这条兼容映射 ——
+#: 移除触发：当 `src/version.py` 的 `__version__` 进入 **0.6.0 及以后**（本条最初按
+#: 0.5.2-beta1 写，现值已是 **0.5.2-beta5**，仍未进入 0.6.0），即从
+#: `ResolvedCommand.command_options_map` 里删掉「真名 → 真名」这条兼容映射 ——
 #: 那时 `--dry_run` 会报 unknown_option，属预期行为。写在这里而不是 TODO：版本提升的
 #: 人一定会看到这条。
 def to_kebab(name: str) -> str:
