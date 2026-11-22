@@ -254,6 +254,38 @@ def build_backend(arch: str) -> None:
 # ── app ──────────────────────────────────────────────────────────────────────
 
 
+def set_medium_integrity(path: str, attempts: int = 5) -> None:
+    """Windows：把产物标成 Medium 完整性级别。
+
+    如果仓库目录被沙盒打了 `Mandatory Label\\Low` 标签，那么从该目录双击 exe 时，
+    Windows 会把进程降级为 Low 完整性，进程无法写 `%LOCALAPPDATA%` / `%USERPROFILE%`，
+    表现就是安装包报「无法打开要写入的文件 …TogoSpace.exe」或应用写不了数据目录。
+    重新打上 Medium 标签后，产物可以直接从 build/ 运行。
+
+    刚复制完的文件可能仍被杀软扫描占用，icacls 会偶发失败，这里做有限次重试。
+    """
+    if not is_windows() or not os.path.isfile(path):
+        return
+    result = None
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(
+            ["icacls", path, "/setintegritylevel", "Medium"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            print(f"🔖 已设置 Medium 完整性标签: {os.path.basename(path)}")
+            return
+        if attempt < attempts:
+            time.sleep(1)
+    print(f"⚠️  无法自动设置 Medium 完整性标签（构建进程被降级为 Low 时会出现）: {os.path.basename(path)}")
+    print("   请在资源管理器启动的普通终端里执行一次：")
+    print(f'   icacls "{path}" /setintegritylevel Medium')
+    if result is not None:
+        detail = f"{result.stdout.strip()} {result.stderr.strip()}".strip()
+        if detail:
+            print(f"   （icacls 输出：{detail}）")
+
+
 def build_app(arch: str) -> None:
     print("\n--- app: tauri build ---")
     if not os.path.isfile(os.path.join(FRONTEND_DIST, "index.html")):
@@ -296,6 +328,7 @@ def build_app(arch: str) -> None:
     shutil.copy2(artifact, target)
     size_mb = os.path.getsize(target) / (1024 * 1024)
     print(f"✅ 安装包已生成: {target} ({size_mb:.1f} MB)")
+    set_medium_integrity(target)
 
 
 # ── sign ─────────────────────────────────────────────────────────────────────
