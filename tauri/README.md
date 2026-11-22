@@ -85,14 +85,15 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe tauri\scripts\build_desktop.py --action app
 ```
 
-- 产物：`build/TogoSpace_<version>_x64-setup.exe`（未签名），安装后自带 Python 后端
+- 产物：`build/Togobot_<version>_x64-setup.exe`（本地构建未签名），安装后自带 Python 后端
   sidecar，不依赖系统 Python。
 - **ARM64 Windows**：用本机解释器构建 ARM64 产物（依赖需提供 win-arm64 轮子）；
   `gtsp` 只提供 `gtsp-windows-amd64.exe`，`appPaths.get_gtsp_binary_path()` 找不到
   `arm64` 产物时会自动回退到 `amd64`，运行时依赖系统的 x64 模拟。
 - Windows / Linux 不支持跨架构构建：产物架构跟随构建机 Python，`--arch` 必须与构建机一致。
-- 签名/公证/检查（`sign` / `zip` / `notarize` / `check`）仅支持 macOS；Windows 产物
-  为未签名安装包，首次运行会触发 SmartScreen 提示。
+- 签名/公证/检查（`sign` / `zip` / `notarize` / `check`）仅支持 macOS；本地构建的
+  Windows 产物为未签名安装包，首次运行会触发 SmartScreen 提示。CI 的 tag 构建会
+  通过 SignPath 签名后再进入 GitHub Release（#250）。
 - **Windows 路径长度**：解压/安装受 `MAX_PATH=260` 限制。`scripts/togo_desktop.spec`
   的 `EXCLUDE_PATTERNS` 在 Windows 上做了分隔符归一（否则含 `/` 的规则永远不命中，
   litellm 的 guardrails 测试数据会打出 180+ 字符的路径）；`build_backend.py` 在相对
@@ -111,13 +112,16 @@ py -3 -m venv .venv
 `.github/workflows/tauri.yml` 在推送到 `tauri_dev` 或手动触发时构建：
 
 - macOS 双架构 DMG，上传为 `macOS-dmg-arm64` / `macOS-dmg-x86_64`；
-- Windows x64 NSIS 安装包，上传为 `windows-nsis-x86_64`（未签名，首次运行会触发
+- Windows x64 NSIS 安装包，上传为 `windows-nsis-installer`（未签名，首次运行会触发
   SmartScreen 提示）。
 
-产物只上传为 workflow artifact，不创建 Release；GitHub Release 仍由 `release.yml` 负责
-（当前发布内容仅包含 macOS DMG）。配置了 Apple secrets 时 macOS 执行签名 + 公证；未配置时
-只构建未签名 DMG，用于验证构建链路。x86_64 在 Apple Silicon runner 上通过 Rosetta 2 + uv
-安装 x86_64 Python 依赖（PyInstaller 不支持交叉编译）。
+两个平台都通过可复用 workflow 复用同一套构建步骤：macOS 用 `build-desktop.yml`，
+Windows 用 `build-desktop-windows.yml`。分支 CI 的产物只上传为 workflow artifact，
+不创建 Release；GitHub Release 仍由 `release.yml` 负责，发布 macOS 双架构 DMG 与
+Windows x64 签名 NSIS 安装包。配置了 Apple secrets 时 macOS 执行签名 + 公证；未配置
+时只构建未签名 DMG，用于验证构建链路。Windows 在 tag 构建中由 SignPath 签名，缺少
+签名凭据时 release 不会执行（#250）。x86_64 在 Apple Silicon runner 上通过 Rosetta 2
++ uv 安装 x86_64 Python 依赖（PyInstaller 不支持交叉编译）。
 
 ## 运行时
 
