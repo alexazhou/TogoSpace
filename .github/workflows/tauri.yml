@@ -1,7 +1,8 @@
 name: Tauri Build
 
-# 分支 CI：构建 macOS Tauri 桌面安装包（.dmg），产物只上传为 workflow artifact。
-# tag 发版见 release.yml；两者共用 build-desktop.yml 的构建流程。
+# 分支 CI：构建 macOS（.dmg）与 Windows（NSIS .exe）Tauri 桌面安装包，
+# 产物只上传为 workflow artifact。tag 发版见 release.yml；
+# macOS 部分两者共用 build-desktop.yml 的构建流程。
 
 on:
   workflow_dispatch:
@@ -29,3 +30,72 @@ jobs:
       arch: ${{ matrix.arch }}
       target: ${{ matrix.target }}
     secrets: inherit
+
+  build-windows:
+    name: Build Windows App (x86_64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        token: ${{ secrets.GH_PAT }}
+        lfs: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: |
+          frontend/package-lock.json
+          tauri/package-lock.json
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: x86_64-pc-windows-msvc
+
+    # .cargo/config.toml 将 target-dir 指向 tauri/build/target
+    - name: Rust Cache
+      uses: swatinem/rust-cache@v2
+      with:
+        workspaces: './tauri/src-tauri -> ../build/target'
+        key: x86_64-pc-windows-msvc
+        cache-on-failure: true
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    # 仓库根目录的 .venv 同时供 PyInstaller 与 tauri.windows.conf.json 的
+    # beforeBuildCommand 使用
+    - name: Set up Python environment
+      run: |
+        python -m venv .venv
+        .venv\Scripts\python.exe -m pip install --upgrade pip
+        .venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+
+    - name: Install frontend dependencies
+      working-directory: frontend
+      run: npm ci
+
+    - name: Install Tauri CLI dependencies
+      working-directory: tauri
+      run: npm ci
+
+    # 前端 → 后端（PyInstaller）→ Tauri 外壳 → NSIS 安装包。
+    # 非 macOS 上 build_desktop.py 要求 --arch 与构建机一致，这里固定 x64。
+    - name: Build Tauri app
+      run: .venv\Scripts\python.exe tauri\scripts\build_desktop.py --arch x86_64
+
+    - name: Show artifact
+      run: Get-ChildItem build -Filter *-setup.exe | Format-Table Name,Length
+
+    - name: Upload NSIS installer artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-nsis-x86_64
+        path: build/*-setup.exe
+        if-no-files-found: error
+        retention-days: 30

@@ -108,13 +108,16 @@ py -3 -m venv .venv
 
 ### CI
 
-`.github/workflows/tauri.yml` 在 `v*` tag 和手动触发时构建 macOS 双架构 DMG：
+`.github/workflows/tauri.yml` 在推送到 `tauri_dev` 或手动触发时构建：
 
-- 产物上传为 workflow artifact（`macOS-dmg-arm64` / `macOS-dmg-x86_64`），不创建 Release；
-  GitHub Release 仍由 `release.yml` 负责。
-- 配置了 Apple secrets 时执行签名 + 公证；未配置时只构建未签名 DMG，用于验证构建链路。
-- x86_64 在 Apple Silicon runner 上通过 Rosetta 2 + uv 安装 x86_64 Python 依赖
-  （PyInstaller 不支持交叉编译）。
+- macOS 双架构 DMG，上传为 `macOS-dmg-arm64` / `macOS-dmg-x86_64`；
+- Windows x64 NSIS 安装包，上传为 `windows-nsis-x86_64`（未签名，首次运行会触发
+  SmartScreen 提示）。
+
+产物只上传为 workflow artifact，不创建 Release；GitHub Release 仍由 `release.yml` 负责
+（当前发布内容仅包含 macOS DMG）。配置了 Apple secrets 时 macOS 执行签名 + 公证；未配置时
+只构建未签名 DMG，用于验证构建链路。x86_64 在 Apple Silicon runner 上通过 Rosetta 2 + uv
+安装 x86_64 Python 依赖（PyInstaller 不支持交叉编译）。
 
 ## 运行时
 
