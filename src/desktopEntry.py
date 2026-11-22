@@ -19,6 +19,9 @@ import threading
 from dataclasses import dataclass
 from typing import Mapping, TextIO
 
+# litellm 在 import 时会同步请求远程价格表；backend_main 顶部已设置，这里提前设置作为防御。
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 import backend_main
 from util import configUtil
 

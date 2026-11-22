@@ -8,6 +8,10 @@ import sys
 from dataclasses import dataclass
 from typing import Callable
 
+# litellm 在 import 时会同步请求远程价格表（超时 5s）；这里改用包内自带副本。
+# 必须放在导入 util/service（会间接 import litellm）之前。
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 import tornado.httpserver
 
 from util import llmApiUtil, configUtil, logUtil
