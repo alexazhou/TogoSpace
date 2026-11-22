@@ -94,7 +94,7 @@ py -3 -m venv .venv
   sidecar，不依赖系统 Python。
 - **在 ARM64 Windows 上也建议构建 x64 产物**：`gtsp` 只提供 `gtsp-windows-amd64.exe`，
   且部分依赖（如 `cryptography`）没有 Windows ARM64 轮子；x64 程序在 ARM64 上以模拟
-  方式运行，由 `appPaths._process_arch()` 按进程自身架构挑选 gtsp。
+  方式运行，`appPaths.get_gtsp_binary_path()` 找不到 `arm64` 产物时会自动回退到 `amd64`。
 - 签名/公证/检查（`sign` / `zip` / `notarize` / `check`）仅支持 macOS；Windows 产物
   为未签名安装包，首次运行会触发 SmartScreen 提示。
 - **Windows 路径长度**：解压/安装受 `MAX_PATH=260` 限制。`scripts/togo_desktop.spec`

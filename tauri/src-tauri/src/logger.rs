@@ -13,7 +13,7 @@ const MAX_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_FILES: usize = 3;
 
 struct Logger {
-    file: File,
+    file: Option<File>,
     path: PathBuf,
     size: u64,
 }
@@ -41,7 +41,11 @@ pub fn init(log_dir: &Path) -> Result<(), String> {
     let mut guard = LOGGER
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *guard = Some(Logger { file, path, size });
+    *guard = Some(Logger {
+        file: Some(file),
+        path,
+        size,
+    });
     Ok(())
 }
 
@@ -68,14 +72,21 @@ impl Logger {
         if self.size >= MAX_BYTES {
             self.rotate();
         }
-        if self.file.write_all(line.as_bytes()).is_err() {
+        let Some(file) = self.file.as_mut() else {
+            return;
+        };
+        if file.write_all(line.as_bytes()).is_err() {
             return;
         }
         self.size += line.len() as u64;
     }
 
     fn rotate(&mut self) {
-        let _ = self.file.flush();
+        // 先关闭并释放当前文件句柄：Windows 上不允许重命名仍处于打开状态的文件。
+        if let Some(mut file) = self.file.take() {
+            let _ = file.flush();
+        }
+
         let base = self.path.to_string_lossy().to_string();
 
         // 丢弃最旧的一份：desktop.log.3
@@ -95,8 +106,43 @@ impl Logger {
         let _ = fs::rename(&base, format!("{}.1", base));
 
         if let Ok(file) = OpenOptions::new().create(true).append(true).open(&self.path) {
-            self.file = file;
-            self.size = 0;
+            self.size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+            self.file = Some(file);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotate_closes_handle_and_shifts_files() {
+        let dir = std::env::temp_dir().join(format!("togospace-logger-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir");
+
+        let path = dir.join("desktop.log");
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .expect("open log");
+        let mut logger = Logger {
+            file: Some(file),
+            path: path.clone(),
+            size: 0,
+        };
+
+        logger.write("first\n");
+        logger.rotate();
+        logger.write("second\n");
+
+        let rotated = dir.join("desktop.log.1");
+        assert_eq!(fs::read_to_string(&rotated).expect("read .1"), "first\n");
+        assert_eq!(fs::read_to_string(&path).expect("read current"), "second\n");
+        assert_eq!(logger.size, "second\n".len() as u64);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

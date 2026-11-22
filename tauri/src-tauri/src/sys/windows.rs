@@ -52,11 +52,13 @@ pub fn take_stdin(state: &mut PlatformState) -> Option<std::process::ChildStdin>
 
 pub fn copy_to_clipboard(text: &str) {
     use std::io::Write;
+    use std::os::windows::process::CommandExt;
 
     let mut command = Command::new("clip");
     command.stdin(std::process::Stdio::piped());
     command.stdout(std::process::Stdio::null());
     command.stderr(std::process::Stdio::null());
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     if let Ok(mut child) = command.spawn() {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());

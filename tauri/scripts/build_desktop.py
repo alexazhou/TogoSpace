@@ -37,6 +37,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 
@@ -184,11 +185,10 @@ def host_arch() -> str:
     """默认架构跟随当前解释器：PyInstaller 只能产出与解释器同架构的 sidecar。
 
     Windows on ARM 上 `platform.machine()` 依赖 PROCESSOR_ARCHITECTURE 环境变量，
-    x64 模拟进程里可能报成 ARM64，因此优先读 PE 头。
+    `sysconfig.get_platform()` 在编译解释器时确定（win-amd64 / win-arm64），不受其干扰。
     """
-    detected = _pe_arch(sys.executable)
-    if detected:
-        return detected
+    if sys.platform.startswith("win"):
+        return "arm64" if sysconfig.get_platform().lower().endswith(("arm64", "aarch64")) else "x86_64"
     return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
 
 
@@ -220,19 +220,25 @@ def app_bundle_path(arch: str) -> str:
 
 
 def installer_path(arch: str) -> str:
-    """定位 Windows 安装包（NSIS）或 Linux 安装包（deb）。"""
-    if platform_key() == "win32":
-        for base in bundle_dir_candidates(arch):
-            matches = sorted(glob.glob(os.path.join(base, "nsis", "*.exe")))
-            if matches:
-                return matches[0]
-        return os.path.join(bundle_dir_candidates(arch)[0], "nsis", "*.exe")
+    """定位 Windows 安装包（NSIS）或 Linux 安装包（deb）。
 
-    for base in bundle_dir_candidates(arch):
-        matches = sorted(glob.glob(os.path.join(base, "deb", "*.deb")))
-        if matches:
-            return matches[0]
-    return os.path.join(bundle_dir_candidates(arch)[0], "deb", "*.deb")
+    bundle 目录不会在每次构建前清空，跨版本构建后会残留旧版安装包；
+    优先按当前版本号匹配，并按修改时间降序取最新，避免误拷旧版本。
+    """
+    version = read_version()
+    if platform_key() == "win32":
+        subdir, ext = "nsis", "exe"
+    else:
+        subdir, ext = "deb", "deb"
+
+    patterns = [f"*_{version}_*.{ext}", f"*.{ext}"]
+    for pattern in patterns:
+        for base in bundle_dir_candidates(arch):
+            matches = glob.glob(os.path.join(base, subdir, pattern))
+            if matches:
+                matches.sort(key=os.path.getmtime, reverse=True)
+                return matches[0]
+    return os.path.join(bundle_dir_candidates(arch)[0], subdir, f"*_{version}_*.{ext}")
 
 
 def dmg_path(arch: str) -> str:
@@ -294,7 +300,17 @@ def build_backend(arch: str, python: str | None = None) -> None:
 # ── app ──────────────────────────────────────────────────────────────────────
 
 
-def build_app(arch: str) -> None:
+def _verify_windows_sidecar_arch(backend_executable: str, arch: str) -> None:
+    if platform_key() != "win32" or not os.path.isfile(backend_executable):
+        return
+    detected = _pe_arch(backend_executable)
+    if detected and detected != arch:
+        raise SystemExit(
+            f"❌ 后端 sidecar 架构 {detected} 与目标 {arch} 不一致: {backend_executable}\n"
+            f"   请先用 --arch {arch} --python <{arch} 的解释器> --action backend 重新打包后端")
+
+
+def build_app(arch: str, python: str | None = None) -> None:
     print("\n--- app: tauri build ---")
     if not os.path.isfile(os.path.join(FRONTEND_DIST, "index.html")):
         raise SystemExit("❌ 前端尚未构建，请先执行 --action frontend")
@@ -307,17 +323,17 @@ def build_app(arch: str) -> None:
                 "APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID",
                 "APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH"):
         env.pop(key, None)
+    # 未提前执行 --action backend 时会触发 beforeBuildCommand（build-backend.mjs），
+    # 透传目标架构与解释器，避免跨架构构建时打出错架构 sidecar。
+    env["TOGOSPACE_BACKEND_ARCH"] = arch
+    if python:
+        env["TOGOSPACE_BACKEND_PYTHON"] = python
     backend_executable = os.path.join(
         BACKEND_DIR, "Togobot-backend.exe" if os.name == "nt" else "Togobot-backend")
     if os.path.isfile(backend_executable):
         # beforeBuildCommand 里会再调一次 build_backend.py，已构建则跳过
         env["TOGOSPACE_SKIP_BACKEND_BUILD"] = "1"
-        # 跨架构构建时最容易打错的地方：sidecar 架构和外壳不一致，装完必然起不来
-        detected = _pe_arch(backend_executable) if platform_key() == "win32" else None
-        if detected and detected != arch:
-            raise SystemExit(
-                f"❌ 后端 sidecar 架构 {detected} 与目标 {arch} 不一致: {backend_executable}\n"
-                f"   请先用 --arch {arch} --python <{arch} 的解释器> --action backend 重新打包后端")
+        _verify_windows_sidecar_arch(backend_executable, arch)
 
     run_command(
         npm_command("run", "tauri", "--", "build",
@@ -325,6 +341,7 @@ def build_app(arch: str) -> None:
         cwd=TAURI_DIR,
         env=env,
     )
+    _verify_windows_sidecar_arch(backend_executable, arch)
 
     if platform_key() == "darwin":
         app_path = app_bundle_path(arch)
@@ -724,7 +741,7 @@ def main() -> int:
         elif action == "backend":
             build_backend(args.arch, args.python)
         elif action == "app":
-            build_app(args.arch)
+            build_app(args.arch, args.python)
         elif action == "sign":
             sign_app(args.arch)
         elif action == "zip":

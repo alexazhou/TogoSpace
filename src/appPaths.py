@@ -9,7 +9,6 @@
 """
 import os
 import platform
-import struct
 import sys
 
 _SRC = os.path.dirname(os.path.abspath(__file__))   # = repo/src/
@@ -69,31 +68,7 @@ CONFIG_DIR = STORAGE_ROOT
 PRESET_DIR = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
 
 
-def _process_arch() -> str | None:
-    """返回**当前进程自身**的架构（``amd64`` / ``arm64``），识别不了时返回 None。
-
-    Windows 上 ``platform.machine()`` 读的是 ``PROCESSOR_ARCHITECTURE`` 环境变量：
-    x64 程序跑在 ARM64 机器上（WOW64 模拟）时，该变量可能报成 ``ARM64``，于是
-    会去找并不存在的 ``gtsp-windows-arm64.exe``，桌面后端在启动阶段直接失败。
-    这里改为读可执行文件的 PE 头，拿到的才是「这个进程能执行什么架构」。
-    """
-    if sys.platform == "win32":
-        try:
-            with open(sys.executable, "rb") as file:
-                if file.read(2) == b"MZ":
-                    file.seek(0x3C)
-                    offset = struct.unpack("<I", file.read(4))[0]
-                    file.seek(offset + 4)
-                    machine = struct.unpack("<H", file.read(2))[0]
-                    mapped = {0x8664: "amd64", 0xAA64: "arm64"}.get(machine)
-                    if mapped:
-                        return mapped
-        except (OSError, struct.error):
-            pass
-    return None
-
-
-# 架构名归一：PE 头 / platform.machine() / 用户输入都可能用不同写法
+# 架构名归一：platform.machine() / 用户输入都可能用不同写法
 _ARCH_ALIASES = {
     "x86_64": "amd64",
     "amd64": "amd64",
@@ -106,16 +81,16 @@ _CONTAINER_ARCH_ALIASES = dict(_ARCH_ALIASES)
 
 
 def get_gtsp_binary_path() -> str:
-    """按当前进程架构返回 gtsp 可执行文件路径。
+    """按当前平台返回 gtsp 可执行文件路径。
 
     支持的平台：
     - macOS (darwin): amd64 / arm64
-    - Windows (windows): amd64（ARM64 上以 x64 模拟方式运行，官方只提供 amd64 产物）
+    - Windows (windows): 优先匹配当前架构，缺失时自动回退到 amd64（ARM64 上可运行 x64 产物）
     """
     system = platform.system().lower()
     machine = platform.machine().lower()
 
-    arch = _process_arch() or _ARCH_ALIASES.get(machine, machine)
+    arch = _ARCH_ALIASES.get(machine, machine)
 
     # 构建二进制文件名，Windows 使用 .exe 后缀，其他平台不加后缀
     suffix = ".exe" if system == "windows" else ""

@@ -17,9 +17,9 @@ import argparse
 import os
 import platform
 import shutil
-import struct
 import subprocess
 import sys
+import sysconfig
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TAURI_DIR = os.path.dirname(SCRIPT_DIR)
@@ -54,44 +54,35 @@ def _default_python() -> str:
     return sys.executable
 
 
-def _exe_arch(path: str) -> str | None:
-    """读取 Windows PE 头判断可执行文件架构；非 PE（macOS/Linux）返回 None。
+def _arch_from_sysconfig_platform(plat: str) -> str:
+    """把 `sysconfig.get_platform()` 的结果归一为 `arm64` / `x86_64`。
 
-    Windows on ARM 上 `platform.machine()` 依赖 PROCESSOR_ARCHITECTURE 环境变量，
-    在 x64 模拟进程里可能报成 ARM64，按它选架构会打出错误架构的 sidecar。
+    `sysconfig.get_platform()` 在编译 Python 解释器时确定（如 `win-amd64` / `win-arm64`），
+    不受 Windows on ARM 环境变量 `PROCESSOR_ARCHITECTURE` 干扰。
     """
-    try:
-        with open(path, "rb") as file:
-            if file.read(2) != b"MZ":
-                return None
-            file.seek(0x3C)
-            offset = struct.unpack("<I", file.read(4))[0]
-            file.seek(offset + 4)
-            machine = struct.unpack("<H", file.read(2))[0]
-    except (OSError, struct.error):
-        return None
-    return {0x8664: "x86_64", 0xAA64: "arm64"}.get(machine)
+    normalized = plat.strip().lower()
+    if normalized.endswith(("arm64", "aarch64")):
+        return "arm64"
+    return "x86_64"
 
 
 def _default_arch() -> str:
     # 默认跟随解释器架构：PyInstaller 只能产出与解释器同架构的产物。
-    detected = _exe_arch(sys.executable)
-    if detected:
-        return detected
+    if sys.platform.startswith("win"):
+        return _arch_from_sysconfig_platform(sysconfig.get_platform())
     return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
 
 
 def _python_arch(python: str) -> str:
     """读取解释器自身架构：PyInstaller 只能打包出与解释器同架构的产物。"""
-    if os.path.isfile(python):
-        detected = _exe_arch(python)
-        if detected:
-            return detected
+    resolved = shutil.which(python) or python
+    if os.path.abspath(resolved) == os.path.abspath(sys.executable):
+        return _default_arch()
     result = subprocess.run(
-        [python, "-c", "import platform; print(platform.machine())"],
+        [resolved, "-c", "import sysconfig; print(sysconfig.get_platform())"],
         capture_output=True, text=True, check=True,
     )
-    return "arm64" if result.stdout.strip().lower() in ("arm64", "aarch64") else "x86_64"
+    return _arch_from_sysconfig_platform(result.stdout)
 
 
 def _run(command: list[str], env: dict[str, str]) -> None:
@@ -115,13 +106,14 @@ def _sync_target_dir(source: str, target: str) -> None:
             if entry == ".gitkeep":
                 continue
             path = os.path.join(target, entry)
-            if os.path.isdir(path):
+            if os.path.isdir(path) and not os.path.islink(path):
                 shutil.rmtree(path)
             else:
                 os.remove(path)
     else:
         os.makedirs(target, exist_ok=True)
-    shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True)
+    # Windows 非管理员终端默认无创建符号链接权限，跳过 symlinks 保留避免 WinError 1314
+    shutil.copytree(source, target, dirs_exist_ok=True, symlinks=(os.name != "nt"))
 
 
 def _warn_on_long_paths(target: str, limit: int = 200) -> None:
@@ -184,11 +176,13 @@ def build_backend(python: str, arch: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 Tauri 桌面形态的 Python 后端")
-    parser.add_argument("--arch", choices=["arm64", "x86_64"], default=_default_arch())
+    parser.add_argument("--arch", choices=["arm64", "x86_64"], default=None)
     parser.add_argument("--python", default=_default_python(), help="用于运行 PyInstaller 的 Python")
     args = parser.parse_args()
 
-    build_backend(args.python, args.arch)
+    # 未显式指定 --arch 时：非 macOS 跟随最终选定的 --python 架构，避免系统 Python 与 .venv 架构不同导致自相冲突
+    arch = args.arch or (_default_arch() if sys.platform == "darwin" else _python_arch(args.python))
+    build_backend(args.python, arch)
     return 0
 
 

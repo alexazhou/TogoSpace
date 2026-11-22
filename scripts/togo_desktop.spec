@@ -24,7 +24,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 # 读取版本号
-_ver_src = open(os.path.join(REPO_ROOT, "src", "version.py")).read()
+_ver_src = open(os.path.join(REPO_ROOT, "src", "version.py"), encoding="utf-8").read()
 APP_VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _ver_src).group(1)
 
 # 从环境变量读取目标架构，默认为当前机器架构
@@ -122,7 +122,7 @@ EXCLUDE_PATTERNS = [
 ]
 
 # tcl/tk 动态库文件名
-TCLTK_BINARIES = ["libtcl8.6.dylib", "libtk8.6.dylib"]
+TCLTK_BINARIES = ["libtcl8.6.dylib", "libtk8.6.dylib", "tcl86t.dll", "tk86t.dll"]
 
 # 过滤 datas
 filtered_datas = []

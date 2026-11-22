@@ -17,17 +17,30 @@ const venvPython =
     ? path.join(repoRoot, ".venv", "Scripts", "python.exe")
     : path.join(repoRoot, ".venv", "bin", "python3");
 
-const python = existsSync(venvPython)
-  ? venvPython
-  : process.platform === "win32"
-    ? "python"
-    : "python3";
+const envPython = process.env.TOGOSPACE_BACKEND_PYTHON;
+const envArch = process.env.TOGOSPACE_BACKEND_ARCH;
 
-if (!existsSync(venvPython)) {
+const python = envPython
+  ? envPython
+  : existsSync(venvPython)
+    ? venvPython
+    : process.platform === "win32"
+      ? "python"
+      : "python3";
+
+if (!envPython && !existsSync(venvPython)) {
   console.warn(`⚠️  未找到仓库虚拟环境 ${venvPython}，回退到 PATH 中的 ${python}`);
 }
 
-const args = [path.join(repoRoot, "tauri", "scripts", "build_backend.py"), ...process.argv.slice(2)];
+const extraArgs = process.argv.slice(2);
+const args = [path.join(repoRoot, "tauri", "scripts", "build_backend.py")];
+if (envPython && !extraArgs.includes("--python")) {
+  args.push("--python", envPython);
+}
+if (envArch && !extraArgs.includes("--arch")) {
+  args.push("--arch", envArch);
+}
+args.push(...extraArgs);
 const result = spawnSync(python, args, { cwd: repoRoot, stdio: "inherit" });
 
 if (result.error) {
