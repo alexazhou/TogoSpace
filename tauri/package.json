@@ -3,10 +3,10 @@
   "private": true,
   "version": "0.5.2-beta5",
   "scripts": {
-    "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
-    "build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
-    "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
-    "icon": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri icon"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "icon": "tauri icon"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

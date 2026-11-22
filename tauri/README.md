@@ -38,8 +38,9 @@ npm install
 npm run dev          # 启动 Vite(8181) + Tauri 窗口 + Python 后端（debug 构建直接跑 src/desktopEntry.py）
 ```
 
-debug 构建下后端命令为 `.venv/bin/python3 src/desktopEntry.py`；release 构建下为
-`Resources/backend/Togobot-backend`。
+debug 构建下后端命令为 `.venv/bin/python3 src/desktopEntry.py`（Windows 为
+`.venv\Scripts\python.exe`）；release 构建下为 `Resources/backend/Togobot-backend`
+（Windows 为 `backend\Togobot-backend.exe`）。
 
 ## 构建
 
@@ -59,6 +60,45 @@ python3 tauri/scripts/build_desktop.py --action check
 python3 tauri/scripts/build_desktop.py --arch x86_64
 ```
 
+### Windows
+
+前置：Rust MSVC 工具链（`x86_64-pc-windows-msvc` target）、Node.js、仓库 x64 `.venv`。
+NSIS 3.13 工具集由 Tauri 首次构建时自动下载到 `%LOCALAPPDATA%\tauri\NSIS`；
+网络不通时可手动准备（目录必须齐全，否则 Tauri 会删掉缓存重建）：
+
+1. 下载 [nsis-3.13.zip](https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.13/nsis-3.13.zip)，
+   解压后把内层 `nsis-3.13/` 的内容放到 `%LOCALAPPDATA%\tauri\NSIS`（`makensis.exe` 在根目录）；
+2. 下载 [nsis_tauri_utils.dll](https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll)，
+   放到 `%LOCALAPPDATA%\tauri\NSIS\Plugins\x86-unicode\additional\`（缺这个文件会触发反复重下载）。
+
+```powershell
+# 创建虚拟环境并安装依赖（含 PyInstaller）
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
+
+# 全流程：前端 → 后端（PyInstaller）→ Tauri 外壳 → NSIS 安装包
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --arch x86_64
+
+# 分步
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --action frontend
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --action backend
+.venv\Scripts\python.exe tauri\scripts\build_desktop.py --action app
+```
+
+- 产物：`build/Togobot_<version>_x64-setup.exe`（本地构建未签名），安装后自带 Python 后端
+  sidecar，不依赖系统 Python。
+- **ARM64 Windows**：用本机解释器构建 ARM64 产物（依赖需提供 win-arm64 轮子）；
+  `gtsp` 只提供 `gtsp-windows-amd64.exe`，`appPaths.get_gtsp_binary_path()` 找不到
+  `arm64` 产物时会自动回退到 `amd64`，运行时依赖系统的 x64 模拟。
+- Windows / Linux 不支持跨架构构建：产物架构跟随构建机 Python，`--arch` 必须与构建机一致。
+- 签名/公证/检查（`sign` / `zip` / `notarize` / `check`）仅支持 macOS；本地构建的
+  Windows 产物为未签名安装包，首次运行会触发 SmartScreen 提示。CI 的 tag 构建会
+  通过 SignPath 签名后再进入 GitHub Release（#250）。
+- **Windows 路径长度**：解压/安装受 `MAX_PATH=260` 限制。`scripts/togo_desktop.spec`
+  的 `EXCLUDE_PATTERNS` 在 Windows 上做了分隔符归一（否则含 `/` 的规则永远不命中，
+  litellm 的 guardrails 测试数据会打出 180+ 字符的路径）；`build_backend.py` 在相对
+  路径超过 200 字符时会告警，提示补充排除规则。
+
 - 前端只构建一次：`frontend/dist` 给 Tauri，`assets/frontend` 给后端浏览器形态，脚本做哈希一致性校验。
 - 版本号唯一来源：`src/version.py`。`tauri.conf.json` / `Cargo.toml` / `tauri/package.json` 等版本必须与其一致，
   构建前会运行 `python3 scripts/verify_versions.py` 检查，不再自动覆写。
@@ -69,13 +109,19 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
 
 ### CI
 
-`.github/workflows/tauri.yml` 在 `v*` tag 和手动触发时构建 macOS 双架构 DMG：
+`.github/workflows/tauri.yml` 在推送到 `tauri_dev` 或手动触发时构建：
 
-- 产物上传为 workflow artifact（`macOS-dmg-arm64` / `macOS-dmg-x86_64`），不创建 Release；
-  GitHub Release 仍由 `release.yml` 负责。
-- 配置了 Apple secrets 时执行签名 + 公证；未配置时只构建未签名 DMG，用于验证构建链路。
-- x86_64 在 Apple Silicon runner 上通过 Rosetta 2 + uv 安装 x86_64 Python 依赖
-  （PyInstaller 不支持交叉编译）。
+- macOS 双架构 DMG，上传为 `macOS-dmg-arm64` / `macOS-dmg-x86_64`；
+- Windows x64 NSIS 安装包，上传为 `windows-nsis-installer`（未签名，首次运行会触发
+  SmartScreen 提示）。
+
+两个平台都通过可复用 workflow 复用同一套构建步骤：macOS 用 `build-desktop.yml`，
+Windows 用 `build-desktop-windows.yml`。分支 CI 的产物只上传为 workflow artifact，
+不创建 Release；GitHub Release 仍由 `release.yml` 负责，发布 macOS 双架构 DMG 与
+Windows x64 签名 NSIS 安装包。配置了 Apple secrets 时 macOS 执行签名 + 公证；未配置
+时只构建未签名 DMG，用于验证构建链路。Windows 在 tag 构建中由 SignPath 签名，缺少
+签名凭据时 release 不会执行（#250）。x86_64 在 Apple Silicon runner 上通过 Rosetta 2
++ uv 安装 x86_64 Python 依赖（PyInstaller 不支持交叉编译）。
 
 ## 运行时
 
@@ -99,7 +145,9 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
 [TOGO] ERROR code=<n> message=<text>
 ```
 
-`NotStarted → Starting → (Migrating → Starting)* → Ready`，15 秒未就绪进入 `Failed`。
+`NotStarted → Starting → (Migrating → Starting)* → Ready`，60 秒未就绪进入 `Failed`。
+冷启动要过杀软扫描、依赖导入与数据库迁移，Windows 首次启动实测约 20 秒，因此超时预算
+按 60 秒设置；超时后即使后端迟到 READY 也会被状态机忽略。
 启动画面（`frontend/splash.html`）由 `backend-migration-start/end`、`backend-error` 事件驱动。
 
 ### 进程生命周期
@@ -146,4 +194,5 @@ cd frontend && npm run test:run
 ## 平台状态
 
 - macOS：完整支持（开发、构建、签名、公证、DMG）。
-- Windows / Linux：`sys/` 分支与构建入口已预留，本期不作为发布门槛。
+- Windows：支持开发与构建 NSIS 安装包（x64，未签名）；签名与公证流程不适用。
+- Linux：`sys/` 分支与构建入口已预留，本期不作为发布门槛。

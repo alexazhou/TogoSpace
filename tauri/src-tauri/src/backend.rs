@@ -14,8 +14,19 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
-pub const START_TIMEOUT_MS: u64 = 15_000;
+// 冷启动预算：Windows 上 PyInstaller onedir（8000+ 文件）首次加载要过杀软扫描，
+// 之后还要导入 litellm、跑 21 个迁移、灌 preset 并拉起各 Agent 的 gtsp，
+// 实测 ARM64 机器首次 READY 需要 ~20s。15s 会在冷启动时误判失败，
+// 而失败后即使 READY 迟到也会被状态机忽略（splash 停在错误页）。
+pub const START_TIMEOUT_MS: u64 = 60_000;
 const MARKER_PREFIX: &str = "[TOGO] ";
+
+fn start_timeout_message() -> String {
+    format!(
+        "后端启动超时：{} 秒内没有收到就绪信号。",
+        START_TIMEOUT_MS / 1000
+    )
+}
 
 #[derive(Debug, Clone)]
 pub enum BackendError {
@@ -170,7 +181,10 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
         .env("TOGOSPACE_DESKTOP_TOKEN", &launch.token)
         .env("TOGOSPACE_PARENT_PID", std::process::id().to_string())
         // dev 模式下 Python 直接写管道，确保 marker 即时可见
-        .env("PYTHONUNBUFFERED", "1");
+        .env("PYTHONUNBUFFERED", "1")
+        // 外壳按 UTF-8 逐行解析 stdout/stderr；Windows 上 Python 默认用本地代码页
+        // （中文系统是 cp936）写管道，中文日志会产生非法 UTF-8 字节，行会整条丢失。
+        .env("PYTHONIOENCODING", "utf-8");
 
     // GUI 启动拿不到登录 shell 的 PATH；只注入 PATH，不覆盖上面的启动器变量。
     login_shell::inject_path(&mut command);
@@ -429,11 +443,10 @@ fn schedule_start_timeout(app: tauri::AppHandle) {
             return;
         }
 
+        let message = start_timeout_message();
         let timed_out = with_state(|state| {
             if state.is_starting() {
-                *state = BackendState::Failed(BackendError::Message(
-                    "后端启动超时：15 秒内没有收到就绪信号。".to_string(),
-                ));
+                *state = BackendState::Failed(BackendError::Message(message.clone()));
                 true
             } else {
                 false
@@ -445,7 +458,7 @@ fn schedule_start_timeout(app: tauri::AppHandle) {
         }
 
         logger::log("shell", "backend start timed out");
-        let _ = app.emit("backend-error", "后端启动超时：15 秒内没有收到就绪信号。");
+        let _ = app.emit("backend-error", message);
         crate::tray::refresh(&app);
     });
 }
@@ -560,8 +573,12 @@ fn kill_process(pid: u32) {
 
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
+
+        // CREATE_NO_WINDOW 避免 GUI 下闪黑框
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/PID", &pid.to_string()])
+            .creation_flags(0x08000000)
             .output();
     }
 }

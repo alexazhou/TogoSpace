@@ -16,6 +16,15 @@ from typing import Callable
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = REPO_ROOT / "src" / "version.py"
 
+# Windows 控制台在重定向/管道输出时默认用本地代码页（如 cp936），emoji 会让
+# print 抛 UnicodeEncodeError，直接打断构建前的版本校验。保留原编码，只把不可
+# 编码字符替换掉；交互式控制台走 WriteConsoleW，不受影响。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 CARGO_TOML = REPO_ROOT / "tauri" / "src-tauri" / "Cargo.toml"
 CARGO_LOCK = REPO_ROOT / "tauri" / "src-tauri" / "Cargo.lock"
 

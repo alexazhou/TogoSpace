@@ -1,7 +1,8 @@
 name: Tauri Build
 
-# 分支 CI：构建 macOS Tauri 桌面安装包（.dmg），产物只上传为 workflow artifact。
-# tag 发版见 release.yml；两者共用 build-desktop.yml 的构建流程。
+# 分支 CI：构建 macOS（.dmg）与 Windows（NSIS .exe）Tauri 桌面安装包，
+# 产物只上传为 workflow artifact。tag 发版见 release.yml；
+# 两个平台分别共用 build-desktop.yml / build-desktop-windows.yml 的构建流程。
 
 on:
   workflow_dispatch:
@@ -28,4 +29,9 @@ jobs:
     with:
       arch: ${{ matrix.arch }}
       target: ${{ matrix.target }}
+    secrets: inherit
+
+  build-windows:
+    name: Build Windows App (x86_64)
+    uses: ./.github/workflows/build-desktop-windows.yml
     secrets: inherit

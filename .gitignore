@@ -1,5 +1,6 @@
 .idea
-.venv
+# 虚拟环境：.venv 以及跨架构构建用的 .venv-arm64 等
+.venv*
 __pycache__
 .pyc
 .log
@@ -26,7 +27,9 @@ assets/frontend/
 assets/icon.icns
 .pyinstaller/
 dist/
-build/
+# 根目录构建产物（锚定根目录：未锚定的 build/ 会把 tauri/build/ 整棵也排除掉，
+# 导致下面保留后端资源占位的 ! 规则永远失效）
+/build/
 node_modules/
 .DS_Store
 workspace_root/

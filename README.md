@@ -102,7 +102,7 @@ OpenAI · Anthropic Claude · Google Gemini · DeepSeek · 阿里云通义千问
 
 ### 💻 多种形态，随处可用
 
-- **桌面应用**（macOS，Apple Silicon / Intel）：基于 Tauri 的原生窗口，双击即用，关窗驻留托盘。
+- **桌面应用**（macOS，Apple Silicon / Intel；Windows x64 支持本地构建）：基于 Tauri 的原生窗口，双击即用，关窗驻留托盘。
 - **Docker 一键部署**：适合服务器 / NAS / 团队共享。
 - **源码运行**：Web 控制台（Vue 3）+ 终端界面（Textual TUI）。
 - 中英文界面、团队导出导入、HTTP Token 鉴权。

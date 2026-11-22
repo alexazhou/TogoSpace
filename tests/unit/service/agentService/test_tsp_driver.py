@@ -27,7 +27,7 @@ if os.name == "posix" and sys.platform == "darwin":
 
 def test_build_gtsp_command_uses_default_binary_and_workdir_flag() -> None:
     cmd = build_gtsp_command(None, workdir="/tmp/team-a")
-    assert "assets/execute/gtsp" in cmd[0]
+    assert os.path.join("assets", "execute", "gtsp") in cmd[0]
     assert "--mode" in cmd
     assert "stdio" in cmd
     assert "--workdir" in cmd

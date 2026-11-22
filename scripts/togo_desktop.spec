@@ -15,14 +15,27 @@ import sys
 # SPECPATH 是 PyInstaller 内置变量，指向本 spec 文件所在目录
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
+# Windows 控制台重定向输出时默认用本地代码页（如 cp936），emoji 会抛
+# UnicodeEncodeError；保留编码，只替换不可编码字符。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 # 读取版本号
-_ver_src = open(os.path.join(REPO_ROOT, "src", "version.py")).read()
+_ver_src = open(os.path.join(REPO_ROOT, "src", "version.py"), encoding="utf-8").read()
 APP_VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _ver_src).group(1)
 
 # 从环境变量读取目标架构，默认为当前机器架构
-_default_arch = "arm64" if platform.machine() == "arm64" else "x86_64"
+_default_arch = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
 TARGET_ARCH = os.environ.get("TARGET_ARCH", _default_arch)
 print(f"ℹ️  target_arch: {TARGET_ARCH}")
+
+# PyInstaller 的 target_arch 只在 macOS 上有效（用于产 universal2 / 交叉架构）；
+# Windows / Linux 上它会因为本机 bootloader 与解释器架构固定而被忽略或直接报错，
+# 这两个平台的产物架构由解释器自身决定。
+EXE_ARCH_OPTIONS = {"target_arch": TARGET_ARCH} if sys.platform == "darwin" else {}
 
 # 获取 litellm 路径
 import litellm
@@ -109,16 +122,21 @@ EXCLUDE_PATTERNS = [
 ]
 
 # tcl/tk 动态库文件名
-TCLTK_BINARIES = ["libtcl8.6.dylib", "libtk8.6.dylib"]
+TCLTK_BINARIES = ["libtcl8.6.dylib", "libtk8.6.dylib", "tcl86t.dll", "tk86t.dll"]
 
 # 过滤 datas
 filtered_datas = []
 for item in a.datas:
     dest_path = item[0]
     src_path = item[1]
+    # PyInstaller 在 Windows 上给出的 dest_path 用反斜杠，而排除表统一写 /
+    # （POSIX 语义）。不归一化的话，所有含 / 的规则在 Windows 上永远不命中：
+    # litellm 的 guardrails 测试数据会被整棵打进包，产生 180+ 字符的路径，
+    # 用户用资源管理器解压 zip / NSIS 安装都会报「路径太长」。
+    dest_posix = dest_path.replace("\\", "/")
     excluded = False
     for pattern in EXCLUDE_PATTERNS:
-        if pattern in dest_path or fnmatch.fnmatch(os.path.basename(src_path), pattern):
+        if pattern in dest_posix or fnmatch.fnmatch(os.path.basename(src_path), pattern):
             print(f"🗑️ Excluding: {dest_path}")
             excluded = True
             break
@@ -160,7 +178,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=True,
     disable_windowed_traceback=False,
     **_EXE_MACOS_ONLY,
@@ -171,7 +189,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="Togobot-backend",
 )

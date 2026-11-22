@@ -2,24 +2,18 @@ name: Build Desktop (Windows)
 
 # Windows 桌面构建 + CI 内验证（#243）。
 #
-# 与 mac 链路**互不影响**：build-desktop.yml / tauri.yml / release.yml 三个文件零改动
-# （本 workflow 里有一步用 git diff 对基线 2debafad 自证），本文件是新增的独立 entry。
+# 由 tauri.yml（分支 CI）与 release.yml（tag 发版）通过 workflow_call 调用，
+# 避免两处维护同一套 Windows 构建步骤；也可手动 dispatch 单独验证。
+# macOS 构建链路仍由 build-desktop.yml 负责。
 #
 # 产物形态选 NSIS（而非 msi）：
 #   1) Tauri v2 在 Windows 上的默认打包器，单一 .exe 安装器；
 #   2) 不需要 WiX 工具链（msi 走 WiX，CI 里多一层下载依赖，历史上同类外部依赖最易碎）；
 #   3) 支持 `/S` 静默安装，正好用于「装完再验一遍」这一步。
-#
-# 触发方式：手动 dispatch（任意分支）/ push 到本单特性分支 feat/win-build。
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feat/win-build
-    # 发布 tag 也要跑：Windows 安装包在这里构建，签名只对 refs/tags/v* 生效（#250）。
-    tags:
-      - "v*"
+  workflow_call:
 
 concurrency:
   group: win-desktop-${{ github.ref }}
@@ -67,16 +61,25 @@ jobs:
         Write-Host "python   = $(python --version)"
         Write-Host "webview2 = $((Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue).pv)"
 
-    - name: Assert macOS workflows untouched
-      # 本单硬约束「不许破坏现有 macOS 构建」。mac 的三个 workflow 相对基线必须零改动；
-      # 这是可以在 CI 里当场自证的判据，不靠口头承诺。
+    - name: Assert macOS build chain intact
+      # macOS 构建链路必须保持可用。build-desktop.yml 相对基线零改动；
+      # tauri.yml / release.yml 现在只新增 Windows 接入，仍需保留 build-mac 对
+      # build-desktop.yml 的调用。
       run: |
-        git diff --exit-code 2debafad -- .github/workflows/build-desktop.yml .github/workflows/tauri.yml .github/workflows/release.yml
+        git diff --exit-code 2debafad -- .github/workflows/build-desktop.yml
         if ($LASTEXITCODE -ne 0) {
-          Write-Host "::error::mac 相关 workflow 相对基线 2debafad 被改动，违反本单边界"
+          Write-Host "::error::build-desktop.yml 相对基线 2debafad 被改动，违反本单边界"
           exit 1
         }
-        Write-Host "OK: build-desktop.yml / tauri.yml / release.yml 相对 2debafad 零改动"
+        foreach ($file in @('.github/workflows/tauri.yml', '.github/workflows/release.yml')) {
+          $hasMacJob = Select-String -Path $file -Pattern 'build-mac:' -Quiet
+          $usesDesktop = Select-String -Path $file -Pattern 'build-desktop.yml' -Quiet
+          if (-not $hasMacJob -or -not $usesDesktop) {
+            Write-Host "::error::$file 的 macOS 构建链路缺失"
+            exit 1
+          }
+        }
+        Write-Host "OK: macOS 构建链路完整（build-desktop.yml 零改动，tauri.yml / release.yml 仍调用 build-mac）"
         Write-Host "--- spec 的 mac 分支等价性（EXE kwargs 只在 darwin 上出现）---"
         Select-String -Path scripts/togo_desktop.spec -Pattern "_EXE_MACOS_ONLY|argv_emulation|target_arch"
 

@@ -68,45 +68,47 @@ CONFIG_DIR = STORAGE_ROOT
 PRESET_DIR = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
 
 
-def get_gtsp_binary_path() -> str:
-    """
-    根据当前平台返回 gtsp 可执行文件路径。
-
-    支持的平台：
-    - macOS (darwin): amd64 / arm64
-    """
-    system = platform.system().lower()
-    machine = platform.machine().lower()
-
-    # 映射架构名称
-    arch_map = {
-        "x86_64": "amd64",
-        "amd64": "amd64",
-        "arm64": "arm64",
-        "aarch64": "arm64",
-    }
-    arch = arch_map.get(machine, machine)
-
-    # 构建二进制文件名，Windows 使用 .exe 后缀，其他平台不加后缀
-    suffix = ".exe" if system == "windows" else ""
-    binary_name = f"gtsp-{system}-{arch}{suffix}"
-    binary_path = os.path.join(ASSETS_DIR, "execute", "gtsp", binary_name)
-
-    if not os.path.exists(binary_path):
-        raise FileNotFoundError(
-            f"gtsp binary not found for current platform: {binary_path}"
-        )
-
-    return binary_path
-
-
-# 容器内使用的 Linux 产物架构名（Docker image inspect 的 .Architecture 取值）
-_CONTAINER_ARCH_ALIASES = {
+# 架构名归一：platform.machine() / 用户输入都可能用不同写法
+_ARCH_ALIASES = {
     "x86_64": "amd64",
     "amd64": "amd64",
     "arm64": "arm64",
     "aarch64": "arm64",
 }
+
+# 容器内使用的 Linux 产物架构名（Docker image inspect 的 .Architecture 取值）
+_CONTAINER_ARCH_ALIASES = dict(_ARCH_ALIASES)
+
+
+def get_gtsp_binary_path() -> str:
+    """按当前平台返回 gtsp 可执行文件路径。
+
+    支持的平台：
+    - macOS (darwin): amd64 / arm64
+    - Windows (windows): 优先匹配当前架构，缺失时自动回退到 amd64（ARM64 上可运行 x64 产物）
+    """
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    arch = _ARCH_ALIASES.get(machine, machine)
+
+    # 构建二进制文件名，Windows 使用 .exe 后缀，其他平台不加后缀
+    suffix = ".exe" if system == "windows" else ""
+    candidates = [f"gtsp-{system}-{arch}{suffix}"]
+    if system == "windows" and arch != "amd64":
+        # Windows ARM64 可以直接执行 x64 产物；官方只发布 gtsp-windows-amd64.exe
+        candidates.append(f"gtsp-{system}-amd64{suffix}")
+
+    tried: list[str] = []
+    for binary_name in candidates:
+        binary_path = os.path.join(ASSETS_DIR, "execute", "gtsp", binary_name)
+        if os.path.exists(binary_path):
+            return binary_path
+        tried.append(binary_path)
+
+    raise FileNotFoundError(
+        f"gtsp binary not found for current platform: {', '.join(tried)}"
+    )
 
 
 def normalize_container_arch(arch: str) -> str | None:

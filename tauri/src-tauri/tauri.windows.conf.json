@@ -4,8 +4,11 @@
     "beforeBuildCommand": "cd .. && .venv\\Scripts\\python.exe tauri\\scripts\\build_backend.py"
   },
   "bundle": {
-    "targets": [
-      "nsis"
-    ]
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese", "English"]
+      }
+    }
   }
 }
