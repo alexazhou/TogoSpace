@@ -259,8 +259,9 @@ jobs:
       run: |
         $ref = "${{ github.ref }}"
         if ($ref.StartsWith('refs/tags/v')) {
-          Write-Host "本次是发布 tag 构建（$ref）：签名由后面的 sign-win job 执行（需要 SignPath 凭据）。"
-          "## ✍️ 签名状态：tag 构建，交由 sign-win job 处理（``$ref``）" >> $env:GITHUB_STEP_SUMMARY
+          # #318：tag 构建不再必然签名 —— 凭据齐备才签，缺失则 sign-win 跳过（不再阻断 Release）。
+          Write-Host "本次是发布 tag 构建（$ref）：签名由后面的 sign-win job 执行（凭据齐备才签，缺失则跳过、不阻断流水线；见 #318）。"
+          "## ✍️ 签名状态：tag 构建，交由 sign-win job 处理（``$ref``）；凭据缺失时跳过签名并用未签名安装包兜底（#318）" >> $env:GITHUB_STEP_SUMMARY
         } else {
           Write-Host "::warning::本 run 产物未签名，签名只发生在 tag：当前触发 ref = $ref 不是发布 tag；签名只对 refs/tags/v* 提交（SignPath 策略）。"
           "## ⏭️ 本 run 产物未签名，签名只发生在 tag`n`n原因：当前 ref = ``$ref``，不是发布 tag；签名只对 ``refs/tags/v*`` 提交（SignPath 策略）。`n`nartifact 名：``windows-nsis-installer``（UNSIGNED —— **不要当已签名的发布物使用**）。" >> $env:GITHUB_STEP_SUMMARY
@@ -337,13 +338,52 @@ jobs:
         "## ✅ Authenticode 判据自证 4/4：未签名⇒NotSigned / 同一文件 -Expect Valid 失败 / 真签名⇒Valid / 错主体⇒失败" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
         exit 0
 
-  # ── 签名阶段（#250）──────────────────────────────────────────────────────────
+  # ── 签名阶段（#250 / #318）──────────────────────────────────────────────────
   # 只在发布 tag 上跑：分支 push 不提交签名请求（SignPath 策略要求）。
   # 全部跑在 GitHub 托管 runner 上（SignPath OSS 硬要求，禁止 self-hosted）。
+  #
+  # 【#318 当前状态：签名不是 Release 的阻断项】
+  # 4 个 SignPath 凭据（1 secret + 3 vars）在本项目一直未配置，陈旧行为是
+  #   「preflight 判定缺项 ⇒ exit 1 ⇒ 本 job 红 ⇒ 调用方 build-windows 红 ⇒ Release 不执行」，
+  #   即整条发版流水线被签名卡死（run 45056195672 实测：三个构建 job 全绿，只有它 12 秒红）。
+  # 新行为：**凭据齐备 ⇒ 照原逻辑签（失败照样红）；凭据缺失 ⇒ 跳过签名、job/工作流保持绿**。
+  # 产物层面：未签名安装包 `windows-nsis-installer` 仍然照常上传（Operator 要拿它装机），
+  #   release.yml 改成「有签名产物就用、没有就用未签名兜底」，不再硬依赖签名产物。
+  #
+  # 【双保险判据：为什么 job 里有两处判定】
+  # 1) job 级 if 只判 3 个 vars —— GitHub 文档 Context availability 表里
+  #    `jobs.<job_id>.if` 可用的上下文是 github / needs / vars / inputs，
+  #    **没有 secrets、也没有 env**；secret 只能在 `jobs.<job_id>.env` 或步骤里读。
+  #    所以「3 个 vars 缺失」这一档在这里就整 job skip（连 runner 都不起）。
+  # 2) `secrets.SIGNPATH_API_TOKEN` 的判定放在第一个步骤 `Preflight`：它读 job env（那里能读
+  #    secrets），写 `ready` output；后续每个签名步骤都带
+  #    `if: steps.preflight.outputs.ready == 'true'`。vars 齐但 token 漏配时，本 job 会跑完
+  #    preflight 后干净跳过（绿色 + ::warning），不会红。
+  # 3) 两档都不使用 continue-on-error：凭据齐备时后续步骤没有任何「失败也算过」的修饰，
+  #    签名请求失败 / Authenticode 校验失败 / 产物上传失败都会让本 job 红（保住将来的真失败）。
+  #
+  # 【恢复路径（将来配好凭据后怎么装回去）】
+  # - 要配的 4 个值（Settings → Secrets and variables → Actions）：
+  #     secret `SIGNPATH_API_TOKEN`
+  #     var    `SIGNPATH_ORGANIZATION_ID`
+  #     var    `SIGNPATH_PROJECT_SLUG`
+  #     var    `SIGNPATH_SIGNING_POLICY_SLUG`
+  #     （另有可选 var `SIGNPATH_EXPECTED_SUBJECT`：签名主体期望片段，默认 SignPath Foundation）
+  # - 配齐后**本文件不需要再改**：job 级 if 与 preflight 都会自然放行，签名自动恢复。
+  #   若要彻底回到「缺凭据即红」的旧行为（不再兜底），删掉 job 级 if 里的 3 个
+  #   `vars.*!= ''` 条件、并把 preflight 的 `if ($missing.Count -gt 0)` 分支改回 exit 1。
+  # - 预期产物名：`windows-nsis-installer-signed`（SignPath 输出在 signed/ 子目录），
+  #   校验判据 = Authenticode Status=Valid 且签名主体含 SIGNPATH_EXPECTED_SUBJECT。
+  #   release.yml 会自动优先取这份产物（无需改动），未签名 `windows-nsis-installer` 只作兜底。
   sign-win:
     name: Sign Windows installer (SignPath)
     needs: build-win
-    if: startsWith(github.ref, 'refs/tags/v')
+    # tags/v* + 3 个 vars 齐备才起本 job（见上面「双保险判据」第 1 条）。
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') &&
+      vars.SIGNPATH_ORGANIZATION_ID != '' &&
+      vars.SIGNPATH_PROJECT_SLUG != '' &&
+      vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
     runs-on: windows-2022
     timeout-minutes: 40
     env:
@@ -353,12 +393,10 @@ jobs:
       SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
       SIGNPATH_EXPECTED_SUBJECT: ${{ vars.SIGNPATH_EXPECTED_SUBJECT }}
     steps:
-      - uses: actions/checkout@v6
-
-      # 红线（#250）：缺凭据时绝不允许「没签也报绿」。
-      # 这里选择「红」而不是「绿着跳过」：本 job 的 if 已经把非 tag 挡掉了，
-      # 能走到这里就说明「这是一次发布构建，本该签名」——此时缺凭据是配置事故，必须炸出来。
-      - name: "Preflight: signing credentials"
+      # 第一步必须是本步骤（不需要 checkout）：只读 job env（那里能读 secrets）判定凭据是否齐备，
+      # 把结论写成 `ready` output 供后续步骤门控 —— 见 job 注释「双保险判据」第 2 条。
+      - name: "Preflight: signing credentials（缺 ⇒ 跳过签名，不红 / #318）"
+        id: preflight
         shell: pwsh
         run: |
           $missing = @()
@@ -367,16 +405,27 @@ jobs:
           if (-not $env:SIGNPATH_PROJECT_SLUG)      { $missing += 'vars.SIGNPATH_PROJECT_SLUG' }
           if (-not $env:SIGNPATH_SIGNING_POLICY_SLUG) { $missing += 'vars.SIGNPATH_SIGNING_POLICY_SLUG' }
           if ($missing.Count -gt 0) {
-            $reason = "缺签名凭据：" + ($missing -join ', ')
-            Write-Host "::error::$reason"
-            "## ❌ 签名未执行`n`n$reason`n`n本次为 tag 构建，产物**未签名**，不得作为发布物。" >> $env:GITHUB_STEP_SUMMARY
-            exit 1
+            # #318：判据由「缺凭据 ⇒ 红」改为「缺凭据 ⇒ 跳过 + 显式告知」，不再阻断 Release。
+            # 这不是「失败也当通过」：本 job 没有 continue-on-error，凭据齐备时下面三步依旧是硬判定；
+            # 被跳过的只有「本来就不可能执行」的签名动作本身。
+            $reason = "签名凭据不全，本次跳过 Windows 签名：" + ($missing -join ', ')
+            Write-Host "::warning::$reason"
+            "ready=false" >> $env:GITHUB_OUTPUT
+            "## ⏭️ 本次跳过 Windows 签名（#318）`n`n$reason`n`n产物说明：本次 Windows 安装包是**未签名**的 ``windows-nsis-installer``（照常产出，可用于内部装机），**不得当作已签名的发布物**；release.yml 按「有签名产物就用、没有就用未签名兜底」处理。`n`n恢复方式：配好这 4 个凭据后本 job 自动恢复签名，见 ``.github/workflows/build-desktop-windows.yml`` 中 ``sign-win`` 上方的「恢复路径」注释。" >> $env:GITHUB_STEP_SUMMARY
+            exit 0
           }
           Write-Host "签名凭据齐备：org=$($env:SIGNPATH_ORGANIZATION_ID) project=$($env:SIGNPATH_PROJECT_SLUG) policy=$($env:SIGNPATH_SIGNING_POLICY_SLUG)"
+          "ready=true" >> $env:GITHUB_OUTPUT
           "## ✍️ 签名请求将提交`n`nproject=$($env:SIGNPATH_PROJECT_SLUG) policy=$($env:SIGNPATH_SIGNING_POLICY_SLUG)" >> $env:GITHUB_STEP_SUMMARY
 
+      - uses: actions/checkout@v6
+        if: steps.preflight.outputs.ready == 'true'
+
+      # 以下三步 = 改动前的签名链路原样保留（无 continue-on-error）：
+      # 凭据齐备时任一环节失败都会让本 job 红、Release 随之不执行 —— #250 的红线不变。
       - name: Submit signing request to SignPath
         id: signpath
+        if: steps.preflight.outputs.ready == 'true'
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ env.SIGNPATH_API_TOKEN }}
@@ -388,6 +437,7 @@ jobs:
           output-artifact-directory: signed
 
       - name: "Verify Authenticode signature (Status=Valid + 签名主体)"
+        if: steps.preflight.outputs.ready == 'true'
         shell: pwsh
         run: |
           $exe = Get-ChildItem -Path signed -Filter *.exe -Recurse | Select-Object -First 1
@@ -404,6 +454,9 @@ jobs:
           exit 0
 
       - name: Upload signed installer
+        # 只有真签成功才上传这份产物：跳过签名时它不该存在，
+        # release.yml 的「有就用、没有就兜底」正是靠这个产物是否存在来判定的。
+        if: steps.preflight.outputs.ready == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: windows-nsis-installer-signed

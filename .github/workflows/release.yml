@@ -5,8 +5,10 @@ name: Release Desktop
 # build-desktop-windows.yml；tag 形如 v0.3.12，-beta tag 只构建不发布。
 # 正式 tag 的 Release 默认建为 **draft**，需人工检查产物后手动发布。
 #
-# Windows 安装包在 tag 构建中由 SignPath 签名（#250）；缺少签名凭据时
-# build-windows 会失败，release job 不会执行。
+# Windows 安装包在 tag 构建中尽量由 SignPath 签名（#250）；但自 #318 起**签名不再阻断发版**：
+# 凭据缺失时 build-windows 里 sign-win 会跳过（工作流保持绿），本文件按「有签名产物就用、
+# 没有就用未签名 `windows-nsis-installer` 兜底」处理，并在 run summary 里标明安装包来源。
+# （签名一旦恢复，本文件无需改动，会自动优先取 signed 产物。）
 
 on:
   push:
@@ -16,6 +18,10 @@ on:
 
 permissions:
   contents: write
+  # #318：release job 用 `gh api …/actions/runs/<id>/artifacts` 判定签名产物是否存在。
+  # 声明了 permissions 之后未列出的权限一律为 none，缺这一条会 403 —— 而 403 会让 Release 红，
+  # 等于把「签名不阻断」换成「探测失败阻断」，所以这里必须显式给 actions: read。
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -50,9 +56,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    # 只取需要的产物：macOS DMG 与签名后的 Windows 安装包。
-    # 不下载 build-win 的未签名 artifact，避免同名安装包互相覆盖；签名产物由
-    # windows-nsis-installer-signed 提供（SignPath 输出在 signed/ 子目录下）。
+    # 只取需要的产物：macOS DMG 与 Windows 安装包（签名优先、未签名兜底，见 #318）。
+    # 两条下载路径分开落盘，绝不 merge 到同一目录：签名产物与未签名产物里是**同名**的
+    # `*-setup.exe`，混在一起会互相覆盖（谁后写谁赢），等于把未签名包当签名包发出去。
     - name: Download macOS DMGs
       uses: actions/download-artifact@v7
       with:
@@ -60,23 +66,64 @@ jobs:
         path: build
         merge-multiple: true
 
+    # ── Windows 安装包：先探测签名产物在不在（#318「有就用、没有不挡」）─────────────
+    # 为什么用 gh api 探测而不是直接下载：actions/download-artifact 在 pattern 无匹配时
+    # 直接让步骤失败，会把「签名缺失」又变回一个硬阻断；而 continue-on-error 属于被禁止的
+    # 「失败也当通过」写法。用 run artifacts 列表自己判存在性，命中才下载，两档分支都是干净的。
+    - name: Detect signed Windows installer artifact
+      id: detect-signed
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        count=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+                  --jq '[.artifacts[] | select(.name == "windows-nsis-installer-signed")] | length')
+        echo "windows-nsis-installer-signed 命中数：${count}"
+        if [ "${count}" -gt 0 ]; then
+          echo "present=true"  >> "$GITHUB_OUTPUT"
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Download signed Windows installer
+      if: steps.detect-signed.outputs.present == 'true'
       uses: actions/download-artifact@v7
       with:
         pattern: 'windows-nsis-installer-signed'
-        path: build-windows
+        path: build-windows/signed
         merge-multiple: true
 
-    - name: Flatten signed Windows installer
+    - name: "Download unsigned Windows installer (签名缺失时的兜底)"
+      if: steps.detect-signed.outputs.present != 'true'
+      uses: actions/download-artifact@v7
+      with:
+        name: 'windows-nsis-installer'
+        path: build-windows/unsigned
+
+    - name: "Flatten Windows installer（优先签名产物，缺失则用未签名兜底）"
       run: |
         set -euo pipefail
-        installer=$(find build-windows -type f -name '*-setup.exe' | head -n 1)
+        installer=""
+        source=""
+        # 注意用 if 而不是 `[ -n ... ] && source=...`：后者在 set -e 下，条件为假时整条语句返回 1
+        # 会直接结束脚本（没有任何 ::error 就退出，日志里看不出原因）。同理 find 用 -print -quit，
+        # 避免 `| head -n 1` 在 pipefail 下偶发 SIGPIPE。
+        if [ -d build-windows/signed ]; then
+          installer=$(find build-windows/signed -type f -name '*-setup.exe' -print -quit)
+          if [ -n "$installer" ]; then source="signed"; fi
+        fi
+        if [ -z "$installer" ] && [ -d build-windows/unsigned ]; then
+          installer=$(find build-windows/unsigned -type f -name '*-setup.exe' -print -quit)
+          if [ -n "$installer" ]; then source="unsigned（#318 兜底：本次未签名）"; fi
+        fi
         if [ -z "$installer" ]; then
-          echo "::error::missing signed Windows NSIS installer artifact"
+          # 两条路都空 ⇒ 这不是「签名没配」，而是构建产物真丢了，必须红。
+          echo "::error::missing Windows NSIS installer artifact（签名产物与未签名产物都没有）"
           exit 1
         fi
         cp "$installer" build/
-        echo "signed installer: $installer"
+        echo "windows installer source: ${source} (${installer})"
+        echo "- Windows 安装包来源：${source}（\`${installer}\`）" >> "$GITHUB_STEP_SUMMARY"
 
     - name: Show artifacts
       run: |
@@ -84,8 +131,9 @@ jobs:
         find build -maxdepth 2 -type f | sort || true
         ls -lh build/*.dmg build/*-setup.exe
 
-    # 两个 macOS 架构与 Windows 安装包缺一不可，缺了就直接失败，
-    # 而不是发一个缺平台或缺架构的 Release。
+    # 两个 macOS 架构缺一不可；Windows 安装包也必须有 —— 但来源可以是签名产物或
+    # 未签名兜底产物（#318），两者都没有才说明构建产物真丢了，此时才该红。
+    # 判据的用意是「不发缺平台或缺架构的 Release」，不是「必须签名」。
     - name: Verify release artifacts present
       run: |
         set -e
