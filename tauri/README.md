@@ -83,18 +83,14 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe tauri\scripts\build_desktop.py --action frontend
 .venv\Scripts\python.exe tauri\scripts\build_desktop.py --action backend
 .venv\Scripts\python.exe tauri\scripts\build_desktop.py --action app
-
-# 跨架构（例如在 ARM64 机器上打 x64 包）：PyInstaller 不能交叉编译，
-# 需要用目标架构的解释器打包后端
-.venv\Scripts\python.exe tauri\scripts\build_desktop.py --arch x86_64 `
-    --python .venv-x64\Scripts\python.exe
 ```
 
 - 产物：`build/TogoSpace_<version>_x64-setup.exe`（未签名），安装后自带 Python 后端
   sidecar，不依赖系统 Python。
-- **在 ARM64 Windows 上也建议构建 x64 产物**：`gtsp` 只提供 `gtsp-windows-amd64.exe`，
-  且部分依赖（如 `cryptography`）没有 Windows ARM64 轮子；x64 程序在 ARM64 上以模拟
-  方式运行，`appPaths.get_gtsp_binary_path()` 找不到 `arm64` 产物时会自动回退到 `amd64`。
+- **ARM64 Windows**：用本机解释器构建 ARM64 产物（依赖需提供 win-arm64 轮子）；
+  `gtsp` 只提供 `gtsp-windows-amd64.exe`，`appPaths.get_gtsp_binary_path()` 找不到
+  `arm64` 产物时会自动回退到 `amd64`，运行时依赖系统的 x64 模拟。
+- Windows / Linux 不支持跨架构构建：产物架构跟随构建机 Python，`--arch` 必须与构建机一致。
 - 签名/公证/检查（`sign` / `zip` / `notarize` / `check`）仅支持 macOS；Windows 产物
   为未签名安装包，首次运行会触发 SmartScreen 提示。
 - **Windows 路径长度**：解压/安装受 `MAX_PATH=260` 限制。`scripts/togo_desktop.spec`

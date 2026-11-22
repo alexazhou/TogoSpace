@@ -33,7 +33,6 @@ import json
 import os
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
@@ -151,21 +150,6 @@ def resolve_signing_config() -> dict | None:
     return config
 
 
-def _pe_arch(path: str) -> str | None:
-    """读 Windows PE 头判断架构；非 PE（macOS/Linux）或读取失败返回 None。"""
-    try:
-        with open(path, "rb") as file:
-            if file.read(2) != b"MZ":
-                return None
-            file.seek(0x3C)
-            offset = struct.unpack("<I", file.read(4))[0]
-            file.seek(offset + 4)
-            machine = struct.unpack("<H", file.read(2))[0]
-    except (OSError, struct.error):
-        return None
-    return {0x8664: "x86_64", 0xAA64: "arm64"}.get(machine)
-
-
 def target_triple(arch: str) -> str:
     platform_triples = ARCH_TO_TRIPLE.get(platform_key())
     if platform_triples is None:
@@ -261,27 +245,13 @@ def build_frontend() -> None:
 # ── backend ──────────────────────────────────────────────────────────────────
 
 
-def build_backend(arch: str, python: str | None = None) -> None:
+def build_backend(arch: str) -> None:
     print("\n--- backend: PyInstaller onedir ---")
     script = os.path.join(SCRIPT_DIR, "build_backend.py")
-    command = [sys.executable, script, "--arch", arch]
-    if python:
-        # 跨架构构建（如 ARM64 机器打 x64 / 反之）：PyInstaller 必须用目标架构的解释器
-        command += ["--python", python]
-    run_command(command, cwd=REPO_ROOT)
+    run_command([sys.executable, script, "--arch", arch], cwd=REPO_ROOT)
 
 
 # ── app ──────────────────────────────────────────────────────────────────────
-
-
-def _verify_windows_sidecar_arch(backend_executable: str, arch: str) -> None:
-    if not is_windows() or not os.path.isfile(backend_executable):
-        return
-    detected = _pe_arch(backend_executable)
-    if detected and detected != arch:
-        raise SystemExit(
-            f"❌ 后端 sidecar 架构 {detected} 与目标 {arch} 不一致: {backend_executable}\n"
-            f"   请先用 --arch {arch} --python <{arch} 的解释器> --action backend 重新打包后端")
 
 
 def build_app(arch: str) -> None:
@@ -302,7 +272,6 @@ def build_app(arch: str) -> None:
     if os.path.isfile(backend_executable):
         # beforeBuildCommand 里会再调一次 build_backend.py，已构建则跳过
         env["TOGOSPACE_SKIP_BACKEND_BUILD"] = "1"
-        _verify_windows_sidecar_arch(backend_executable, arch)
 
     run_command(
         npm_command("run", "tauri", "--", "build",
@@ -310,7 +279,6 @@ def build_app(arch: str) -> None:
         cwd=TAURI_DIR,
         env=env,
     )
-    _verify_windows_sidecar_arch(backend_executable, arch)
 
     if is_macos():
         app_path = app_bundle_path(arch)
@@ -694,11 +662,13 @@ def parse_actions(raw: str | None) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 Togobot 桌面应用")
     parser.add_argument("--arch", choices=["arm64", "x86_64"], default=host_arch())
-    parser.add_argument("--python", default=None,
-                        help="打包后端用的解释器（跨架构构建时指定目标架构的 .venv python）")
     parser.add_argument("--action", default=None,
                         help=f"逗号分隔，默认全流程: {','.join(PIPELINE_ACTIONS)}")
     args = parser.parse_args()
+
+    if not is_macos() and args.arch != host_arch():
+        raise SystemExit(
+            f"❌ 非 macOS 不支持跨架构构建：当前构建机为 {host_arch()}，请求 {args.arch}")
 
     actions = parse_actions(args.action)
     verify_versions()
@@ -708,7 +678,7 @@ def main() -> int:
         if action == "frontend":
             build_frontend()
         elif action == "backend":
-            build_backend(args.arch, args.python)
+            build_backend(args.arch)
         elif action == "app":
             build_app(args.arch)
         elif action == "sign":

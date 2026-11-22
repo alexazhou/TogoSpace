@@ -19,13 +19,7 @@ import shutil
 import subprocess
 import sys
 
-from build_common import (
-    arch_from_sysconfig_platform,
-    configure_stdio,
-    host_arch,
-    is_macos,
-    is_windows,
-)
+from build_common import configure_stdio, host_arch, is_windows
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TAURI_DIR = os.path.dirname(SCRIPT_DIR)
@@ -52,18 +46,6 @@ def _default_python() -> str:
         if os.path.exists(candidate):
             return candidate
     return sys.executable
-
-
-def _python_arch(python: str) -> str:
-    """读取解释器自身架构：PyInstaller 只能打包出与解释器同架构的产物。"""
-    resolved = shutil.which(python) or python
-    if os.path.abspath(resolved) == os.path.abspath(sys.executable):
-        return host_arch()
-    result = subprocess.run(
-        [resolved, "-c", "import sysconfig; print(sysconfig.get_platform())"],
-        capture_output=True, text=True, check=True,
-    )
-    return arch_from_sysconfig_platform(result.stdout)
 
 
 def _run(command: list[str], env: dict[str, str]) -> None:
@@ -131,16 +113,6 @@ def build_backend(python: str, arch: str) -> None:
     env = dict(os.environ)
     env["TARGET_ARCH"] = arch
 
-    # PyInstaller 不支持交叉编译：Windows / Linux 上产物架构由解释器决定，
-    # 请求的架构和解释器不一致时必须提前失败，否则会打出一个架构不对的 sidecar。
-    if not is_macos():
-        interpreter_arch = _python_arch(python)
-        if interpreter_arch != arch:
-            raise SystemExit(
-                f"❌ 架构不匹配：请求 {arch}，但 {python} 是 {interpreter_arch}。\n"
-                f"   PyInstaller 不支持交叉编译，请改用 {arch} 架构的 Python 环境，"
-                f"或去掉 --arch 使用本机架构。")
-
     _run([
         python, "-m", "PyInstaller", "--noconfirm", "--clean",
         "--workpath", BUILD_DIR, "--distpath", BUILD_DIR, SPEC_FILE,
@@ -161,8 +133,8 @@ def main() -> int:
     parser.add_argument("--python", default=_default_python(), help="用于运行 PyInstaller 的 Python")
     args = parser.parse_args()
 
-    # 未显式指定 --arch 时：非 macOS 跟随最终选定的 --python 架构，避免系统 Python 与 .venv 架构不同导致自相冲突
-    arch = args.arch or (host_arch() if is_macos() else _python_arch(args.python))
+    # 未显式指定 --arch 时跟随构建机架构
+    arch = args.arch or host_arch()
     build_backend(args.python, arch)
     return 0
 
