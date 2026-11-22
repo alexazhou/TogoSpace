@@ -158,7 +158,19 @@ def tool(**kwargs) -> Callable[[F], F]:
 ### 3.2 典型声明示例
 
 ```python
-# 查询 / 删除：位置参数固定绑定正整数 ID（可选），按名称查询/删除显式用 `--name` + action 别名
+# 列表 + 单个详情：get 的位置参数为 required=True 的正整数 ID（与 ls 彻底错开，裸敲 dept get 直接由 CLI 拦截）
+@tool(
+    visibility=ToolVisibility.BOTH,
+    console=(
+        ConsoleCommand("dept", "ls"),
+        ConsoleCommand("dept", "get", args=(
+            Arg(Target("dept_id", type=int), positional=True, required=True),
+        )),
+    ),
+)
+async def get_dept_info(dept_id: int | None = None, name: str | None = None, _context=None) -> dict: ...
+
+# 删除：位置参数绑定正整数 ID（可选），按名称删除显式用 `--name`（都不传时由 delete_dept 底层工具自身校验拒绝）+ action 别名
 @tool(
     visibility=ToolVisibility.BOTH,
     help=(
@@ -327,7 +339,7 @@ class ConsoleExtension(Protocol):
    - 取 `positional_args = [a for a in cmd.args if a.positional]`，记必填数为 `min_pos = sum(1 for a in positional_args if a.required)`、总槽位数为 `max_pos = len(positional_args)`。
    - `cmd.payload` 为 `True` 时（构建期保证 `min_pos == max_pos`）允许在位置参数后多带 **1 个** token 作为 `inline_payload_token`（允许数 `max_pos .. max_pos + 1`）；否则允许数为 `min_pos .. max_pos`；数量越界报 `invalid_argument_count`（定位参数被写成 `--dept-id` 等选项时附 `_locator_rewrite_hint` 改写提示）。
    - 前 `min(len(pos_tokens), max_pos)` 个 token 严格按位置 `i` 一对一匹配 `target = positional_args[i].target`（零隐式类型猜测）：
-     - 若有效类型为 `int`：`token.isdigit()` 且 `int(token) >= 1` 时转为 `int` 写入 `pos_args[target.name]`，否则直接报 `invalid_target`（如 `dept rm 研发部` 提示按名操作请用 `--name 研发部`；`dept update 研发部` 提示先用 `dept get --name 研发部` 查 ID；`dept rm 0` 直接拦截）；
+     - 若有效类型为 `int`：`token.isdigit()` 且 `int(token) >= 1` 时转为 `int` 写入 `pos_args[target.name]`，否则直接报 `invalid_target`（如 `dept rm 研发部` 提示按名删除请用 `--name 研发部`；`dept get 研发部` / `dept update 研发部` 提示只接受正整数 ID，请先用 `dept ls` 查 ID；`dept rm 0` 直接拦截）；
      - 若有效类型为 `str`：原样写入 `pos_args[target.name]`。
 3. **`--选项` 与整包 `payload` 解析（→ `opt_args` + `payload_args`）**：
    - `--kebab-case` / `--snake_case` / `Arg.alias` 统一归一为真实参数名（未知选项报 `unknown_option`），按 schema 类型转换值。
@@ -348,7 +360,7 @@ class ConsoleExtension(Protocol):
 | `dept update 7 --responsibility 研发` | `dept_id=7` | `responsibility="研发"` | `update_dept(dept_id=7, responsibility="研发")` | ✅ 按 ID 更新职责 |
 | `dept update 7 --name 产品部` | `dept_id=7` | `name="产品部"` | `update_dept(dept_id=7, name="产品部")` | ✅ 按 ID 重命名 |
 | `dept update 7 --from payload` (`{"name": "产品部"}`) | `dept_id=7` | `name="产品部"` | `update_dept(dept_id=7, name="产品部")` | ✅ 整包 payload 无冲突 |
-| `dept update 研发部 --responsibility 研发` | 校验失败 | — | — | ❌ `invalid_target`（提示只接受正整数 ID，引导先 `dept get --name 研发部` 查 ID） |
+| `dept update 研发部 --responsibility 研发` | 校验失败 | — | — | ❌ `invalid_target`（提示只接受正整数 ID，引导先 `dept ls` 查 ID） |
 | 直接调 tool `update_dept(dept_id=7, name="产品部")` | — | — | `update_dept(dept_id=7, name="产品部")` | ✅ 与 console 口径一致 |
 
 ### 5.3 Help 纯拼接与 `_HELP_OVERLAY` 归宿
@@ -364,8 +376,8 @@ class ConsoleExtension(Protocol):
 | 全局规则（重复选项、CSV / JSON 等价） | console 自有常量 |
 
 - **用法行位置槽占位符派生规则**：
-  - 必填 `int` 位置槽（如 `dept update`、`task get`）：渲染为 `<id>`；
-  - 可选 `int` 位置槽（如 `dept get/rm`、`agent get`、`room get/rm`）：渲染为 `[<id>]`（按名称定位在参数清单中自然展示 `--name <string>`）；
+  - 必填 `int` 位置槽（如 `dept get/update`、`agent get/update`、`room get/update`、`task get/update`）：渲染为 `<id>`；
+  - 可选 `int` 位置槽（如 `dept rm`、`room rm`）：渲染为 `[<id>]`（按名称删除在参数清单中自然展示 `--name <string>`）；
   - 单 `str` 位置槽（如 `role get/update/rm`、`agent wake`）：按语义渲染为 `<名称>` 或 `<target>`；多 `str` 位置槽按各自 `Target.name` 渲染为 `<container_id> <note>`。
 
 > [!IMPORTANT]
@@ -382,7 +394,7 @@ class ConsoleExtension(Protocol):
 
 | 阶段 | 内容 | 验收护栏 |
 | --- | --- | --- |
-| **P0** | ① `tools.py` 中 4 个 `save_*` 拆分为 4 对 `create_* / update_*`（总工具数从 45 变为 **49**：43 普通 + 6 容器；`dept/agent/room` 更新仅支持必填 `*_id: int`，删 `overwrite`；`create_*` 必填项进签名并在 docstring `Args` 写清语义）；默认值与提示归位（`create_dept.member_names=[]`、`list_tasks` 含 `mine` 无过滤默认 `scope="self"` + `auto_filled_filters`、`create_task` 返回 `hint`）；同步更新 `toolRegistry.CATEGORY_CONFIG` 与 `system_prompt.j2`；<br/>② 新增 `toolSpec.py` + `consoleRegistry.py`，全部 49 个工具（含同步 `get_time`）挂 `@tool(...)`；<br/>③ 切换 `consoleTool.py` 到 `consoleRegistry.get_table()` 与四步流水线 | ① **import 冒烟**：`python -c "import service.funcToolService.consoleCommands"` 零异常、无半初始化重入；新模块顶层零 `core / tools` import；<br/>② **独立基线可见性校验（49 个工具 × D2 开/关 = 98 个断言）**：用独立期望表逐个比对——除 4 对新拆工具及「废止 #187 裁定②的 8 个 `BOTH` 工具（`task` 四工具 + `mcp` 四工具在 D2 关闭时从 `BOTH` 变为 `CONSOLE_ONLY`）」外与现网 100% 全等；加 smoke 断言 D2 关闭时 `get_tools()` 不含这 8 个工具但 `console("task ...")` / `console("mcp ...")` 仍可用；硬断言 `update_container_note == CONSOLE_ONLY` 且 `group == "container"` 精确等于原 6 项；<br/>③ **有意行为变化清单与 schema 重定基线**：明确登记 6 项有意变化并更新对应单测与 schema 快照（`test_tool_schema_nullable.py`、`test_tool_schema_snapshot.py`）：<br/>  a) `save_*` 拆为 `create_*/update_*`（45 → 49 工具，必填项由第 2 跳 schema 校验拦截）；<br/>  b) `dept/agent/room update` 仅接受正整数 ID（传名称报 `invalid_target` 并提示先 `get` 查 ID）；<br/>  c) `dept/room rm 0` 在位置解析层即以 `invalid_target` 拦截（不再下穿服务层报不存在）；<br/>  d) D2 关闭时 `task` 与 `mcp` 共 8 个工具统一收敛为 `CONSOLE_ONLY`；<br/>  e) `dept/agent/room get/rm` 位置参数收口为可选正整数 ID（`[<id>]`），按名称查询/删除统一使用标准选项 `--name <名称>`（不再隐式按类型猜测，传裸名称如 `dept rm 研发部` 报 `invalid_target` 并提示改用 `--name`）；<br/>  f) `positional_param_names` 统一为所有位置槽绑定的参数（`{a.target.name for a in positional_args}`），`role get/update/rm`、`agent wake/dm`、`container note` 的位置参数统一从 `display_options` 剔除并标注为位置参数 |
+| **P0** | ① `tools.py` 中 4 个 `save_*` 拆分为 4 对 `create_* / update_*`（总工具数从 45 变为 **49**：43 普通 + 6 容器；`dept/agent/room` 更新仅支持必填 `*_id: int`，删 `overwrite`；`create_*` 必填项进签名并在 docstring `Args` 写清语义）；默认值与提示归位（`create_dept.member_names=[]`、`list_tasks` 含 `mine` 无过滤默认 `scope="self"` + `auto_filled_filters`、`create_task` 返回 `hint`）；同步更新 `toolRegistry.CATEGORY_CONFIG` 与 `system_prompt.j2`；<br/>② 新增 `toolSpec.py` + `consoleRegistry.py`，全部 49 个工具（含同步 `get_time`）挂 `@tool(...)`；<br/>③ 切换 `consoleTool.py` 到 `consoleRegistry.get_table()` 与四步流水线 | ① **import 冒烟**：`python -c "import service.funcToolService.consoleCommands"` 零异常、无半初始化重入；新模块顶层零 `core / tools` import；<br/>② **独立基线可见性校验（49 个工具 × D2 开/关 = 98 个断言）**：用独立期望表逐个比对——除 4 对新拆工具及「废止 #187 裁定②的 8 个 `BOTH` 工具（`task` 四工具 + `mcp` 四工具在 D2 关闭时从 `BOTH` 变为 `CONSOLE_ONLY`）」外与现网 100% 全等；加 smoke 断言 D2 关闭时 `get_tools()` 不含这 8 个工具但 `console("task ...")` / `console("mcp ...")` 仍可用；硬断言 `update_container_note == CONSOLE_ONLY` 且 `group == "container"` 精确等于原 6 项；<br/>③ **有意行为变化清单与 schema 重定基线**：明确登记 6 项有意变化并更新对应单测与 schema 快照（`test_tool_schema_nullable.py`、`test_tool_schema_snapshot.py`）：<br/>  a) `save_*` 拆为 `create_*/update_*`（45 → 49 工具，必填项由第 2 跳 schema 校验拦截）；<br/>  b) `dept/agent/room get/update` 位置参数为必填正整数 ID（`required=True`，不拆 `get_*_info`，裸敲 `get` 直接由 CLI 以 `invalid_argument_count` 拦截，传名称报 `invalid_target` 并提示先 `ls` 查 ID）；<br/>  c) `dept/room rm 0` 在位置解析层即以 `invalid_target` 拦截（不再下穿服务层报不存在）；<br/>  d) D2 关闭时 `task` 与 `mcp` 共 8 个工具统一收敛为 `CONSOLE_ONLY`；<br/>  e) `dept/room rm` 位置参数为可选正整数 ID（`required=False`，`[<id>]`），按名称删除使用 `--name <名称>`（都不传时由底层 `delete_dept/delete_room` 自身校验报错）；<br/>  f) `positional_param_names` 统一为所有位置槽绑定的参数（`{a.target.name for a in positional_args}`），`role get/update/rm`、`agent wake/dm`、`container note` 的位置参数统一从 `display_options` 剔除并标注为位置参数 |
 | **P1** | 清理旧实现：删 `COMMAND_SPECS`、`_OPTION_ALIASES`、`LEGACY_CONVERGED_TOOLS`、`_declared_visibility` 一族、两个 `FORWARD_TOOL_NAMES`、`CONTAINER_TOOL_NAMES`；driver 自中断改读 `FuncTool.spec` | 全量 console 单测与集成测试通过 |
 | **P2** | help 收拢与去重：`_HELP_OVERLAY` 按 §5.3 收归 `@tool` / `ConsoleCommand`，删冗余手写条目 | 人工审 help diff；更新 help 体积基线（#154 CC6） |
 | **P3** | `ConsoleExtension` 协议接入 `mcp / openapi / graphql` | 现有 mcp / spec 测试全绿 |
@@ -395,7 +407,7 @@ class ConsoleExtension(Protocol):
 | --- | --- | --- |
 | 1 | 声明载体 | `@tool(...)` 直接挂在工具函数上，与签名 / docstring 同处 |
 | 2 | help 补充放哪 | `ToolSpec.help` / `ConsoleCommand.help`，只进 console help，不进模型 schema |
-| 3 | `save_*` 拆分与定位策略 | 拆为 `create_*` + `update_*`（总工具数 45 → 49）；`dept/agent/room` 的 `update` 仅支持必填 `*_id: int`（`name` 仅表改名），`get/rm` 位置槽为可选 `*_id: int`、按名查询/删除显式使用 `--name`（不做隐式类型猜测、不造 `prefix` 语法）；`role` 按 `name` 定位且不改名 |
+| 3 | `save_*` 拆分与定位策略 | 仅将 4 个 `save_*` 拆为 `create_*` + `update_*`（总工具数 45 → 49，**不拆 `get_*_info`**）；`dept/agent/room` 的 `get / update` 位置槽均为必填 `*_id: int`（`required=True`，使 `get` 与无参 `ls` 彻底区分，避免裸敲 `get` 退化为 `ls`），`rm` 位置槽为可选 `*_id: int`（`required=False`，按名删除用 `--name`，全缺由 `delete_*` 工具自身报错）；`role` 按 `name` 定位且不改名 |
 | 4 | 整包 JSON / `--from payload` | `ConsoleCommand.payload: bool = False` 命令级开关，保持 `Target.name: str` 纯单参数语义 |
 | 5 | D2 开关与 `ToolVisibility`（废止 #187 裁定②） | 不新增 `CONVERGED` 枚举、不保留 `converged` 字段；D2 关闭时所有 `BOTH` 工具（**含原本豁免的 `task` 四工具与 MCP 注册表四工具**）统一降为 `CONSOLE_ONLY`，Operator 已确认知情 |
 | 6 | `CATEGORY_CONFIG` | **本期不改**（`create_* / update_*` 登记为 `ADMIN`）；表内含 11 个 TSP 外部工具无法挂装饰器，后续需要再加 `ToolSpec.category` |
