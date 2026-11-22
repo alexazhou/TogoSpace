@@ -3,10 +3,11 @@
   "private": true,
   "version": "0.5.2-beta5",
   "scripts": {
-    "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
-    "build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
-    "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
-    "icon": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri icon"
+    "dev": "node scripts/run-tauri.mjs dev",
+    "build": "node scripts/run-tauri.mjs build",
+    "tauri": "node scripts/run-tauri.mjs",
+    "icon": "node scripts/run-tauri.mjs icon",
+    "build:backend": "node scripts/build-backend.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

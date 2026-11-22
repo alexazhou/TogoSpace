@@ -27,12 +27,14 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -41,6 +43,14 @@ import time
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TAURI_DIR = os.path.dirname(SCRIPT_DIR)
 REPO_ROOT = os.path.dirname(TAURI_DIR)
+
+# Windows 控制台重定向输出时默认用本地代码页（如 cp936），emoji 会抛
+# UnicodeEncodeError；保留编码，只替换不可编码字符。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 FRONTEND_DIR = os.path.join(REPO_ROOT, "frontend")
 FRONTEND_DIST = os.path.join(FRONTEND_DIR, "dist")
@@ -59,9 +69,35 @@ PIPELINE_ACTIONS = ["frontend", "backend", "app", "sign", "zip", "notarize"]
 ACTION_ALIASES = {"dmg": "zip"}
 
 ARCH_TO_TRIPLE = {
-    "arm64": "aarch64-apple-darwin",
-    "x86_64": "x86_64-apple-darwin",
+    "darwin": {
+        "arm64": "aarch64-apple-darwin",
+        "x86_64": "x86_64-apple-darwin",
+    },
+    "win32": {
+        "arm64": "aarch64-pc-windows-msvc",
+        "x86_64": "x86_64-pc-windows-msvc",
+    },
+    "linux": {
+        "arm64": "aarch64-unknown-linux-gnu",
+        "x86_64": "x86_64-unknown-linux-gnu",
+    },
 }
+
+# 各平台 `tauri build --bundles` 的目标类型
+BUNDLE_TARGETS = {
+    "darwin": ["app"],
+    "win32": ["nsis"],
+    "linux": ["deb"],
+}
+
+
+def platform_key() -> str:
+    """sys.platform 归一：Windows=win32 / macOS=darwin / 其他=linux。"""
+    if sys.platform.startswith("win"):
+        return "win32"
+    if sys.platform == "darwin":
+        return "darwin"
+    return "linux"
 
 
 # ── 通用工具 ─────────────────────────────────────────────────────────────────
@@ -71,6 +107,16 @@ def run_command(command: list[str], cwd: str | None = None, env: dict | None = N
                 timeout: int | None = None) -> None:
     print(f"🚀 {' '.join(command)}")
     subprocess.run(command, cwd=cwd, env=env, check=True, timeout=timeout)
+
+
+def npm_command(*args: str) -> list[str]:
+    """构造可跨平台调用的 npm 命令。
+
+    Windows 上 npm 是 `npm.cmd`，`subprocess` 直接找 `npm` 会 FileNotFoundError；
+    `shutil.which` 会按 PATHEXT 解析到 .cmd，且 CreateProcess 能直接执行它。
+    """
+    executable = shutil.which("npm") or "npm"
+    return [executable, *args]
 
 
 def read_version() -> str:
@@ -119,27 +165,74 @@ def resolve_signing_config() -> dict | None:
     return config
 
 
+def _pe_arch(path: str) -> str | None:
+    """读 Windows PE 头判断架构；非 PE（macOS/Linux）或读取失败返回 None。"""
+    try:
+        with open(path, "rb") as file:
+            if file.read(2) != b"MZ":
+                return None
+            file.seek(0x3C)
+            offset = struct.unpack("<I", file.read(4))[0]
+            file.seek(offset + 4)
+            machine = struct.unpack("<H", file.read(2))[0]
+    except (OSError, struct.error):
+        return None
+    return {0x8664: "x86_64", 0xAA64: "arm64"}.get(machine)
+
+
 def host_arch() -> str:
-    return "arm64" if platform.machine() == "arm64" else "x86_64"
+    """默认架构跟随当前解释器：PyInstaller 只能产出与解释器同架构的 sidecar。
+
+    Windows on ARM 上 `platform.machine()` 依赖 PROCESSOR_ARCHITECTURE 环境变量，
+    x64 模拟进程里可能报成 ARM64，因此优先读 PE 头。
+    """
+    detected = _pe_arch(sys.executable)
+    if detected:
+        return detected
+    return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
 
 
 def target_triple(arch: str) -> str:
+    platform_triples = ARCH_TO_TRIPLE.get(platform_key())
+    if platform_triples is None:
+        raise SystemExit(f"❌ 不支持的平台: {sys.platform}")
     try:
-        return ARCH_TO_TRIPLE[arch]
+        return platform_triples[arch]
     except KeyError:
         raise SystemExit(f"❌ 不支持的架构: {arch}（可选 arm64 / x86_64）")
 
 
-def app_bundle_path(arch: str) -> str:
+def bundle_dir_candidates(arch: str) -> list[str]:
+    """`tauri build` 产物目录：指定 --target 时落在 triple 子目录，否则落在根目录。"""
     triple = target_triple(arch)
-    candidates = [
-        os.path.join(TARGET_ROOT, triple, "release", "bundle", "macos", "Togobot.app"),
-        os.path.join(TARGET_ROOT, "release", "bundle", "macos", "Togobot.app"),
+    return [
+        os.path.join(TARGET_ROOT, triple, "release", "bundle"),
+        os.path.join(TARGET_ROOT, "release", "bundle"),
     ]
-    for candidate in candidates:
+
+
+def app_bundle_path(arch: str) -> str:
+    for base in bundle_dir_candidates(arch):
+        candidate = os.path.join(base, "macos", "Togobot.app")
         if os.path.isdir(candidate):
             return candidate
-    return candidates[0]
+    return os.path.join(bundle_dir_candidates(arch)[0], "macos", "Togobot.app")
+
+
+def installer_path(arch: str) -> str:
+    """定位 Windows 安装包（NSIS）或 Linux 安装包（deb）。"""
+    if platform_key() == "win32":
+        for base in bundle_dir_candidates(arch):
+            matches = sorted(glob.glob(os.path.join(base, "nsis", "*.exe")))
+            if matches:
+                return matches[0]
+        return os.path.join(bundle_dir_candidates(arch)[0], "nsis", "*.exe")
+
+    for base in bundle_dir_candidates(arch):
+        matches = sorted(glob.glob(os.path.join(base, "deb", "*.deb")))
+        if matches:
+            return matches[0]
+    return os.path.join(bundle_dir_candidates(arch)[0], "deb", "*.deb")
 
 
 def dmg_path(arch: str) -> str:
@@ -168,7 +261,7 @@ def _tree_hashes(root: str) -> dict[str, str]:
 
 def build_frontend() -> None:
     print("\n--- frontend: 构建并同步双份产物 ---")
-    run_command(["npm", "run", "build"], cwd=FRONTEND_DIR)
+    run_command(npm_command("run", "build"), cwd=FRONTEND_DIR)
 
     for name in ("index.html", "splash.html"):
         if not os.path.isfile(os.path.join(FRONTEND_DIST, name)):
@@ -188,10 +281,14 @@ def build_frontend() -> None:
 # ── backend ──────────────────────────────────────────────────────────────────
 
 
-def build_backend(arch: str) -> None:
+def build_backend(arch: str, python: str | None = None) -> None:
     print("\n--- backend: PyInstaller onedir ---")
     script = os.path.join(SCRIPT_DIR, "build_backend.py")
-    run_command([sys.executable, script, "--arch", arch], cwd=REPO_ROOT)
+    command = [sys.executable, script, "--arch", arch]
+    if python:
+        # 跨架构构建（如 ARM64 机器打 x64 / 反之）：PyInstaller 必须用目标架构的解释器
+        command += ["--python", python]
+    run_command(command, cwd=REPO_ROOT)
 
 
 # ── app ──────────────────────────────────────────────────────────────────────
@@ -202,6 +299,7 @@ def build_app(arch: str) -> None:
     if not os.path.isfile(os.path.join(FRONTEND_DIST, "index.html")):
         raise SystemExit("❌ 前端尚未构建，请先执行 --action frontend")
 
+    bundles = BUNDLE_TARGETS[platform_key()]
     env = dict(os.environ)
     # Tauri CLI 会读取 APPLE_* 变量并在 tauri build 阶段自动签名/公证；
     # 此时嵌套二进制尚未签名，公证必然失败。签名与公证统一由本脚本后续步骤处理。
@@ -214,18 +312,36 @@ def build_app(arch: str) -> None:
     if os.path.isfile(backend_executable):
         # beforeBuildCommand 里会再调一次 build_backend.py，已构建则跳过
         env["TOGOSPACE_SKIP_BACKEND_BUILD"] = "1"
+        # 跨架构构建时最容易打错的地方：sidecar 架构和外壳不一致，装完必然起不来
+        detected = _pe_arch(backend_executable) if platform_key() == "win32" else None
+        if detected and detected != arch:
+            raise SystemExit(
+                f"❌ 后端 sidecar 架构 {detected} 与目标 {arch} 不一致: {backend_executable}\n"
+                f"   请先用 --arch {arch} --python <{arch} 的解释器> --action backend 重新打包后端")
 
     run_command(
-        ["npm", "run", "tauri", "--", "build",
-         "--target", target_triple(arch), "--bundles", "app"],
+        npm_command("run", "tauri", "--", "build",
+                    "--target", target_triple(arch), "--bundles", ",".join(bundles)),
         cwd=TAURI_DIR,
         env=env,
     )
 
-    app_path = app_bundle_path(arch)
-    if not os.path.isdir(app_path):
-        raise SystemExit(f"❌ 未找到构建产物: {app_path}")
-    print(f"✅ 应用已生成: {app_path}")
+    if platform_key() == "darwin":
+        app_path = app_bundle_path(arch)
+        if not os.path.isdir(app_path):
+            raise SystemExit(f"❌ 未找到构建产物: {app_path}")
+        print(f"✅ 应用已生成: {app_path}")
+        return
+
+    # Windows / Linux：把安装包复制到根目录 build/，与 DMG 产物保持同一位置
+    artifact = installer_path(arch)
+    if not os.path.isfile(artifact):
+        raise SystemExit(f"❌ 未找到安装包: {artifact}")
+    os.makedirs(ARTIFACT_DIR, exist_ok=True)
+    target = os.path.join(ARTIFACT_DIR, os.path.basename(artifact))
+    shutil.copy2(artifact, target)
+    size_mb = os.path.getsize(target) / (1024 * 1024)
+    print(f"✅ 安装包已生成: {target} ({size_mb:.1f} MB)")
 
 
 # ── sign ─────────────────────────────────────────────────────────────────────
@@ -529,6 +645,8 @@ def notarize_dmg(arch: str) -> None:
 
 def check(arch: str) -> None:
     print("\n--- check: 签名与公证状态 ---")
+    if platform_key() != "darwin":
+        raise SystemExit("❌ 签名/公证检查仅支持 macOS")
     app_path = app_bundle_path(arch)
     dmg = dmg_path(arch)
 
@@ -590,6 +708,8 @@ def parse_actions(raw: str | None) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="构建 Togobot 桌面应用")
     parser.add_argument("--arch", choices=["arm64", "x86_64"], default=host_arch())
+    parser.add_argument("--python", default=None,
+                        help="打包后端用的解释器（跨架构构建时指定目标架构的 .venv python）")
     parser.add_argument("--action", default=None,
                         help=f"逗号分隔，默认全流程: {','.join(PIPELINE_ACTIONS)}")
     args = parser.parse_args()
@@ -602,7 +722,7 @@ def main() -> int:
         if action == "frontend":
             build_frontend()
         elif action == "backend":
-            build_backend(args.arch)
+            build_backend(args.arch, args.python)
         elif action == "app":
             build_app(args.arch)
         elif action == "sign":

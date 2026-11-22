@@ -20,6 +20,19 @@ FRONTEND_DIR = os.path.join(REPO_ROOT, "frontend")
 DIST_DIR     = os.path.join(FRONTEND_DIR, "dist")
 ASSETS_DIR   = os.path.join(REPO_ROOT, "assets", "frontend")
 
+# Windows 控制台重定向输出时默认用本地代码页（如 cp936），emoji 会抛
+# UnicodeEncodeError；保留编码，只替换不可编码字符。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
+def _npm(args: list[str]) -> list[str]:
+    """跨平台 npm：Windows 上 npm 是 npm.cmd，直接找 "npm" 会 FileNotFoundError。"""
+    return [shutil.which("npm") or "npm", *args]
+
 
 def _run(cmd: list[str], cwd: str = FRONTEND_DIR):
     print(f"  $ {' '.join(cmd)}")
@@ -31,13 +44,13 @@ def _run(cmd: list[str], cwd: str = FRONTEND_DIR):
 
 def _npm_install():
     print("\n--- 1. npm install ---")
-    _run(["npm", "install"])
+    _run(_npm(["install"]))
     print("✅ 依赖安装完成")
 
 
 def _npm_build():
     print("\n--- 2. npm run build ---")
-    _run(["npm", "run", "build"])
+    _run(_npm(["run", "build"]))
     if not os.path.isdir(DIST_DIR):
         print(f"❌ 构建产物目录不存在: {DIST_DIR}", file=sys.stderr)
         sys.exit(1)
