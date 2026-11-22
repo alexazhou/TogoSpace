@@ -44,7 +44,8 @@ from __future__ import annotations
 #: **兼容期与移除触发条件**（清单 §A2 建议：旧名保留整整一个版本）：旧下划线名
 #: 在解析层继续被接受（`--dry_run` ≡ `--dry-run`），但 help 只展示 kebab 形式。
 #: 移除触发：当 `src/version.py` 的 `__version__` 进入 **0.6.0 及以后**（本条最初按
-#: 0.5.2-beta1 写，现值已是 **0.5.2-beta5**，仍未进入 0.6.0），即从
+#: `0.5.2-beta1` 写，此后已多次 bump，**现值以 `src/version.py` 为准**，仍未进入
+#: 0.6.0），即从
 #: `ResolvedCommand.command_options_map` 里删掉「真名 → 真名」这条兼容映射 ——
 #: 那时 `--dry_run` 会报 unknown_option，属预期行为。写在这里而不是 TODO：版本提升的
 #: 人一定会看到这条。
