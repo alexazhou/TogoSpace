@@ -69,24 +69,36 @@ function lastDraft(wrapper: ReturnType<typeof mountComposer>): string | undefine
   return emitted.length > 0 ? (emitted[emitted.length - 1][0] as string) : undefined;
 }
 
-/** 输入框在页面里的 CSS 像素矩形（测试里手动 stub，happy-dom 没有排版）。 */
-const EDITOR_RECT = { left: 10, top: 20, width: 300, height: 120 };
-/** 落在 EDITOR_RECT 内的物理坐标（DPR = 1）。 */
+/**
+ * 「输入框」= **textarea 本身**（#340 PM 裁定），不是 `.composer-editor` 整块。
+ * happy-dom 没有排版，rect 必须手动 stub。
+ */
+const TEXTAREA_RECT = { left: 10, top: 20, width: 300, height: 120 };
+/** 整块容器（含底部提示/发送行）比 textarea 更大，用于验证「底部行不算命中」。 */
+const EDITOR_RECT = { left: 10, top: 20, width: 300, height: 200 };
+/** 落在 TEXTAREA_RECT 内的物理坐标（DPR = 1）。 */
 const INSIDE = { x: 100, y: 100 };
-/** 落在 EDITOR_RECT 外的物理坐标（DPR = 1）：侧边栏区域。 */
+/** 落在 TEXTAREA_RECT 外、但在 `.composer-editor` 内（底部提示/发送行）的物理坐标。 */
+const IN_EDITOR_FOOT = { x: 100, y: 190 };
+/** 落在两者之外的物理坐标（DPR = 1）：侧边栏区域。 */
 const OUTSIDE = { x: 900, y: 600 };
 
-function stubEditorRect(wrapper: ReturnType<typeof mountComposer>): void {
+function rectOf(rect: { left: number; top: number; width: number; height: number }): DOMRect {
+  return {
+    ...rect,
+    x: rect.left,
+    y: rect.top,
+    right: rect.left + rect.width,
+    bottom: rect.top + rect.height,
+    toJSON: () => rect,
+  } as DOMRect;
+}
+
+function stubTextareaRect(wrapper: ReturnType<typeof mountComposer>): void {
+  const textarea = wrapper.find('textarea').element as HTMLTextAreaElement;
+  textarea.getBoundingClientRect = () => rectOf(TEXTAREA_RECT);
   const editor = wrapper.find('.composer-editor').element as HTMLElement;
-  editor.getBoundingClientRect = () =>
-    ({
-      ...EDITOR_RECT,
-      x: EDITOR_RECT.left,
-      y: EDITOR_RECT.top,
-      right: EDITOR_RECT.left + EDITOR_RECT.width,
-      bottom: EDITOR_RECT.top + EDITOR_RECT.height,
-      toJSON: () => EDITOR_RECT,
-    }) as DOMRect;
+  editor.getBoundingClientRect = () => rectOf(EDITOR_RECT);
 }
 
 function dropEvent(paths: string[], position?: { x: number; y: number }): { payload: DragDropPayload } {
@@ -169,7 +181,7 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
   it('注册 onDragDropEvent，drop 事件里插入绝对路径', async () => {
     const wrapper = mountComposer('PLEASE');
     await flushPromises();
-    stubEditorRect(wrapper);
+    stubTextareaRect(wrapper);
     expect(dragDropHandlers).toHaveLength(1);
 
     dragDropHandlers[0](dropEvent(['/Users/alexa/Desktop/a b.txt'], INSIDE));
@@ -181,7 +193,7 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
   it('多文件 drop ⇒ 每个绝对路径一行', async () => {
     const wrapper = mountComposer();
     await flushPromises();
-    stubEditorRect(wrapper);
+    stubTextareaRect(wrapper);
 
     dragDropHandlers[0](dropEvent(['/tmp/a.txt', '/tmp/b.png'], INSIDE));
     await flushPromises();
@@ -217,7 +229,7 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
     const wrapper = mountComposer();
     await flushPromises();
 
-    stubEditorRect(wrapper);
+    stubTextareaRect(wrapper);
     const textarea = wrapper.find('textarea').element as HTMLTextAreaElement;
     // 模拟「webview 原生插入」：值与光标都已经是这条路径之后。
     textarea.value = '/tmp/a.txt';
@@ -234,7 +246,7 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
     const wrapper = mountComposer();
     await flushPromises();
 
-    stubEditorRect(wrapper);
+    stubTextareaRect(wrapper);
     const textarea = wrapper.find('textarea').element as HTMLTextAreaElement;
     textarea.value = '/tmp/a.txt';
     textarea.setSelectionRange(0, 0);
@@ -248,9 +260,20 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
   it('落点在输入框外（侧边栏区域）⇒ 什么都不做，不写进聊天草稿', async () => {
     const wrapper = mountComposer();
     await flushPromises();
-    stubEditorRect(wrapper);
+    stubTextareaRect(wrapper);
 
     dragDropHandlers[0](dropEvent(['/tmp/a.txt'], OUTSIDE));
+    await flushPromises();
+
+    expect(wrapper.emitted('updateDraft')).toBeUndefined();
+  });
+
+  it('落在底部提示/发送行（textarea 之外、.composer-editor 之内）⇒ 不算命中，不插入', async () => {
+    const wrapper = mountComposer();
+    await flushPromises();
+    stubTextareaRect(wrapper);
+
+    dragDropHandlers[0](dropEvent(['/tmp/foot.txt'], IN_EDITOR_FOOT));
     await flushPromises();
 
     expect(wrapper.emitted('updateDraft')).toBeUndefined();
@@ -259,7 +282,7 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
   it('拿不到 position ⇒ fail-closed，不插入', async () => {
     const wrapper = mountComposer();
     await flushPromises();
-    stubEditorRect(wrapper);
+    stubTextareaRect(wrapper);
 
     dragDropHandlers[0](dropEvent(['/tmp/a.txt']));
     await flushPromises();
@@ -272,7 +295,7 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
     try {
       const wrapper = mountComposer();
       await flushPromises();
-      stubEditorRect(wrapper);
+      stubTextareaRect(wrapper);
 
       // css (100,100) 在 rect 内 ⇒ 物理 (200,200) 命中
       dragDropHandlers[0](dropEvent(['/tmp/hit.txt'], { x: 200, y: 200 }));
