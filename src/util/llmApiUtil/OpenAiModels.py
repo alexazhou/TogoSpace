@@ -167,6 +167,12 @@ class OpenAIFunctionParameter(BaseModel):
     type: str
     properties: dict
     required: List[str]
+    #: 未知键策略（#334 / C-03②）：无 `**kwargs` 的工具在**生成点**
+    #: （`funcToolType.get_function_metadata`）就封口，校验用的 schema 与下发给模型的
+    #: schema 必须逐键相等 —— 所以这里要如实透传，不能只在校验侧偷加。
+    #: 默认 `True`（JSON Schema 的本义）：本类也被 TSP 远端工具复用，而 `None` 会让
+    #: `jsonschema.check_schema` 直接判非法（"None is not of type 'object', 'boolean'"）。
+    additionalProperties: bool = True
 
 
 class OpenAIFunction(BaseModel):

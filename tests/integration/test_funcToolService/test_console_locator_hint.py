@@ -99,14 +99,18 @@ class TestConsoleLocatorHint(ServiceTestCase):
     # ==================================================================
 
     async def test_dept_get_with_locator_option_gets_executable_rewrite(self):
-        """`dept get --dept-id <真实id>` → invalid_argument_count + 含改写示例。
+        """`dept get --dept-id <真实id>` → `unknown_option` + 含改写示例。
 
         改写示例里写的就是本部门真实 id：提示必须**可执行**，不是示意文案。
+
+        错误码变化（#334 / C-01）：改前是 `invalid_argument_count`（靠「位置参数个数不足」
+        间接拒）；C-01 之后位置槽的 `--选项` 写法在**选项解析**层就被拒 ⇒ `unknown_option`。
+        `min_pos=0` 的 `dept rm` 现在走同一条路（不再放行），所以这条必须钉在真入口上。
         """
         result = await self._call(f"dept get --dept_id {self.dept_id}")
         assert result["success"] is False, f"选项形态定位不该被放行：{result}"
-        assert result["error_code"] == "invalid_argument_count", (
-            f"错误码应沿用 invalid_argument_count，实际 {result.get('error_code')!r}"
+        assert result["error_code"] == "unknown_option", (
+            f"C-01 后应在选项层拒绝（unknown_option），实际 {result.get('error_code')!r}"
         )
         message = result.get("message", "")
         assert f"dept get {self.dept_id}" in message, f"没给可执行的等价写法：{message!r}"

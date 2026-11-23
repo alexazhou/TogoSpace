@@ -43,7 +43,7 @@ PYTEST_XDIST_WORKER=gw99 env -u TOGOSPACE_DESKTOP \
 | `summary_bytes` | 1042 | **1042** | 0 |
 | `summary_lines` | 14 | **14** | 0 |
 | `detail_entries` | 28 | **28** | 0 |
-| `detail_bytes_total` | 21085 | **19128** | −1957（−9.28%） |
+| `detail_bytes_total` | 21085 | **19008** | −2077（−9.85%；其中 #323 −1957、#334 −120） |
 | `detail_bytes_max` | 2835（`task update`） | **2735**（`task update`） | -100 |
 | `detail_bytes_min` | 144（`reload`） | **83**（`room ls`） | -61 |
 
@@ -67,23 +67,25 @@ PYTEST_XDIST_WORKER=gw99 env -u TOGOSPACE_DESKTOP \
 | `role update` | 637 | 734 → 637（-97） |
 | `room create` | 590 | — |
 | `room rm` | 506 | 530 → 506（-24） |
-| `agent get` | 474 | 658 → 474（-184） |
-| `container note` | 456 | 746 → 456（-290） |
+| `agent get` | 459 | 658 → 474（-184） → 459（#334 −15） |
+| `container note` | 441 | 746 → 456（-290） → 441（#334 −15） |
 | `task get` | 382 | 405 → 382（-23） |
-| `dept get` | 370 | 561 → 370（-191） |
-| `agent dm` | 346 | 382 → 346（-36） |
-| `room get` | 346 | 477 → 346（-131） |
+| `dept get` | 355 | 561 → 370（-191） → 355（#334 −15） |
+| `agent dm` | 331 | 382 → 346（-36） → 331（#334 −15） |
+| `room get` | 331 | 477 → 346（-131） → 331（#334 −15） |
 | `role ls` | 320 | — |
-| `role rm` | 305 | 339 → 305（-34） |
-| `agent wake` | 293 | 331 → 293（-38） |
-| `role get` | 236 | 271 → 236（-35） |
+| `role rm` | 290 | 339 → 305（-34） → 290（#334 −15） |
+| `agent wake` | 278 | 331 → 293（-38） → 278（#334 −15） |
+| `role get` | 221 | 271 → 236（-35） → 221（#334 −15） |
 | `time get` | 182 | — |
 | `reload` | 144 | — |
 | `dept ls` | 107 | 279 → 107（-172） |
 | `agent ls` | 88 | 252 → 88（-164） |
 | `room ls` | 83 | 195 → 83（-112） |
 
-**#323 之后的口径**：参数清单拆成「位置参数：/ 选项：」两段（位置行名字 = 签名 token），并按 `ConsoleCommand(exclude=...)` 裁掉了命令级不可达参数（`container note --record-id`、`dept|room|agent get --name`、`dept|room|agent ls` 的单查定位参数）。实测量法下 **28 条里 19 条字节变化、9 条不变**（`dept|agent|room create`、`role ls`、`role create`、`task ls`、`task create`、`time get`、`reload` —— 都是「无位置槽、且排除前后选项面都为空」的命令）。最小的是 `room ls` 83 B（选项被裁空，只剩用法行 + 用途），`reload` 仍是无参数命令、字节不变。
+**#323 之后的口径**：参数清单拆成「位置参数：/ 选项：」两段（位置行名字 = 签名 token），并按 `ConsoleCommand(exclude=...)` 裁掉了命令级不可达参数（`container note --record-id`、`dept|room|agent get --name`、`dept|room|agent ls` 的单查定位参数）。实测量法下 **28 条里 19 条字节变化、9 条字节不变**——⚠️「字节不变」不等于「内容不变」：按文本内容实际是 **27 条变化、只有 `reload` 一字未动**，那 8 条字节相同的（`dept|agent|room create`、`role ls`、`role create`、`task ls`、`task create`、`time get`）只是把段标题「参数：」改成「选项：」（3 字符等长），**不能读成「help 未被触碰」**。最小的是 `room ls` 83 B（选项被裁空，只剩用法行 + 用途），`reload` 仍是无参数命令、字节不变。
+
+**#334 之后的口径**：`[--选项 ...]` 的**出现与否改由 `display_options` 决定**（原来按 `cmd.options` —— 那里还留着位置槽的 kebab 形态与兼容期旧名）。受影响的是「详情没有『选项：』段、用法行却宣称有选项」的 8 条：`dept get` / `agent get` / `room get` / `agent dm` / `agent wake` / `role get` / `role rm` / `container note`，每条用法行各少 15 B（`" [--选项 ...]"` 的 UTF-8 字节数），合计 **−120 B**，`detail_bytes_total` 19128 → **19008**。其余 20 条命令的用法行逐字节不变（`max`/`min`/`entries`/`summary` 均未变）。
 
 ## 4. 已知限制
 

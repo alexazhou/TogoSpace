@@ -165,6 +165,16 @@ class ResolvedCommand:
         """位置槽绑定的工具参数真名（§4.1：直接用 `{a.target.name for a in positional_args}`）。"""
         return frozenset(arg.target.name for arg in self.positional_args)
 
+    @property
+    def locators(self) -> tuple[str, ...]:
+        """同一定位语义的**互斥参数组**（#334 / C-16 家族：`dept rm` 的 `<id>` 与 `--name`）。
+
+        空元组 = 该命令没有「二选一」定位（单一必填定位不要声明）。非空时
+        `consoleTool._check_conflicts` 按三个来源（位置 / 选项 / payload）合起来计数，
+        >1 就报 `ambiguous_input_source` —— 否则底层 `if xxx_id is not None` 会静默丢掉另一个。
+        """
+        return tuple(self.decl.locators)
+
     # -- schema 派生（来源是 `self.tool.callable`，不是 `getattr(tools, name)`）----
     @functools.cached_property
     def param_schemas(self) -> dict[str, dict]:
@@ -476,6 +486,22 @@ def _validate_command(cmd: ResolvedCommand, *, seen_keys: dict[str, str], two_se
             )
         if any(arg.target.name == name for arg in decl.args):
             raise ValueError(f"`{cmd.key}` 的 {name!r} 已在 args 里声明，不能再 exclude。")
+    for name in decl.locators:
+        if name not in cmd.param_schemas:
+            raise ValueError(
+                f"`{cmd.key}` 的 locators 引用了不存在的工具参数 {name!r}；"
+                f"该工具的参数是：{' / '.join(cmd.param_names) or '（无）'}。"
+            )
+        if name in cmd.excluded_param_names:
+            raise ValueError(
+                f"`{cmd.key}` 把 {name!r} 同时写进了 locators 与 exclude："
+                "被裁掉的参数根本进不来，不可能与谁二选一。"
+            )
+    if decl.locators and len(set(decl.locators)) < 2:
+        raise ValueError(
+            f"`{cmd.key}` 的 locators 只有 {len(set(decl.locators))} 个参数："
+            "互斥定位至少要两个才有「二选一」可言（单一必填定位不需要声明）。"
+        )
     if decl.payload:
         non_positional = [arg for arg in decl.args if not arg.positional]
         if not non_positional:

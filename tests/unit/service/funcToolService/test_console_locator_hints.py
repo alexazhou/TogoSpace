@@ -58,15 +58,19 @@ def _run(command: str) -> None:
 
 class TestLocatorRewriteHint:
     def test_option_form_gets_rewrite_example(self) -> None:
-        """`dept get --dept_id 7`（兼容期旧名）⇒ invalid_argument_count + 等价写法。
+        """`dept get --dept_id 7`（兼容期旧名）⇒ `unknown_option` + 等价写法。
 
-        旧名输入也要给改写，且报错展示 **kebab 主形态**（--dept-id）——兼容期两种写法
-        都能走到这条报错，展示面统一。
+        错误码变化（#334 / C-01）：改前靠「位置参数个数不足」在**位置解析**这一步间接拒，
+        码是 `invalid_argument_count`；C-01 之后位置槽的 `--选项` 写法在**选项解析**层就被
+        拒，码是 `unknown_option`（`min_pos=0` 的 `dept rm` 走了同一条路，不再放行）。
+
+        但改写提示必须照旧给出，且展示 **kebab 主形态**（--dept-id）——兼容期两种写法都能
+        走到这条报错，展示面统一。没有提示的裸 `unknown_option` 等于把用户的路堵死。
         """
         with pytest.raises(cp.ConsoleError) as caught:
             _run("dept get --dept_id 7")  # 兼容期旧名输入
         exc = caught.value
-        assert exc.code == "invalid_argument_count", f"错误码不该变（沿用口径）：{exc.code!r}"
+        assert exc.code == "unknown_option", f"C-01 后应在选项层拒绝：{exc.code!r}"
         assert "dept get 7" in exc.message, f"没给等价改写示例：{exc.message!r}"
         assert "--dept-id" in exc.message, f"没点出是定位参数写法问题：{exc.message!r}"
         assert "位置参数" in exc.message, f"没说清定位只接受位置形态：{exc.message!r}"
