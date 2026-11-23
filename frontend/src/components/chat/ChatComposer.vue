@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import type { StyleValue } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, type StyleValue } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { buildDropText, insertDroppedText } from '../../utils/dropText';
+import { isTauri } from '../../utils/platform';
 
 /**
  * 聊天输入区（含可拖拽分隔条）：从 `ChatPanel.vue` 抽出（P4）。
  *
  * 高度计算与拖拽逻辑仍在 `useChatComposerResize`（父组件调用后把 `composerStyle` 与
  * `dragging` 传下来），本组件只负责结构与交互事件，保持模板层级与 class 名不变。
+ *
+ * 拖入文件（#339）：两端都走我们自己的实现，不依赖内核默认行为——
+ * - 浏览器：`drop` 事件里取 `DataTransfer.files[i].name`（**只有文件名，拿不到绝对路径，
+ *   这是浏览器安全限制**），`preventDefault()` 阻止默认行为（否则整页会跳去打开文件）；
+ * - 桌面（Tauri）：Tauri 默认 `dragDropEnabled: true` 会拦下 webview 的原生 drop
+ *   （`tauri-runtime-wry` 的 drag_drop handler 恒返回 `true` ⇒ wry 不再回调 OS 默认行为），
+ *   因此改为订阅 `getCurrentWebview().onDragDropEvent`，从 `payload.paths` 取**绝对路径**。
+ *   同期监听 DOM `drop` 只为兜底 `preventDefault`，不做插入，避免双插。
  */
 const { t } = useI18n();
 
-defineProps<{
+const props = defineProps<{
   draft: string;
   dragging: boolean;
   composerStyle: StyleValue;
@@ -23,6 +33,80 @@ const emit = defineEmits<{
   resizeStart: [event: PointerEvent];
   composingChange: [value: boolean];
 }>();
+
+const textareaRef = ref<HTMLTextAreaElement | null>(null);
+let stopDragDropListener: (() => void) | null = null;
+
+/** 在聊天框光标处插入拖入项；桌面端传绝对路径，浏览器端传文件名。 */
+function insertDroppedItems(items: readonly string[]): void {
+  const element = textareaRef.value;
+  const block = buildDropText(items);
+  if (!element || block.length === 0) {
+    return;
+  }
+
+  const { value, caret } = insertDroppedText(
+    element.value,
+    element.selectionStart ?? element.value.length,
+    element.selectionEnd ?? element.value.length,
+    block,
+    // 双插保护（#339 R1）：桌面端若 webview 原生也已插入同一路径，这里不再重复插入。
+    { skipIfAlreadyBeforeCaret: true },
+  );
+  if (value === element.value) {
+    return;
+  }
+  emit('updateDraft', value);
+  void nextTick(() => {
+    element.focus();
+    element.setSelectionRange(caret, caret);
+  });
+}
+
+function dragCarriesFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+function handleDragOver(event: DragEvent): void {
+  // 不让浏览器接管拖放，否则 drop 不会触发、松手还会跳去打开文件。
+  if (dragCarriesFiles(event)) {
+    event.preventDefault();
+  }
+}
+
+function handleDrop(event: DragEvent): void {
+  if (!dragCarriesFiles(event)) {
+    return;
+  }
+  event.preventDefault();
+  if (isTauri()) {
+    // 桌面端插入交给 onDragDropEvent（DOM 层拿不到真实文件路径），这里只阻止默认行为。
+    return;
+  }
+  const names = Array.from(event.dataTransfer?.files ?? []).map((file) => file.name);
+  insertDroppedItems(names);
+}
+
+onMounted(async () => {
+  if (!isTauri()) {
+    return;
+  }
+  try {
+    const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+    stopDragDropListener = await getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === 'drop') {
+        insertDroppedItems(event.payload.paths);
+      }
+    });
+  } catch (error) {
+    console.warn('onDragDropEvent failed:', error);
+  }
+});
+
+onBeforeUnmount(() => {
+  stopDragDropListener?.();
+  stopDragDropListener = null;
+});
 
 function handleInput(event: Event): void {
   emit('updateDraft', (event.target as HTMLTextAreaElement).value);
@@ -56,10 +140,13 @@ function handleEnterKey(e: KeyboardEvent): void {
     </button>
     <div class="composer-editor">
       <textarea
+        ref="textareaRef"
         :value="draft"
         :placeholder="t('chat.inputPlaceholder')"
         rows="2"
         @input="handleInput"
+        @dragover="handleDragOver"
+        @drop="handleDrop"
         @compositionstart="emit('composingChange', true)"
         @compositionend="emit('composingChange', false)"
         @keydown.enter.exact="handleEnterKey"
