@@ -520,14 +520,25 @@ html.macos-overlay-titlebar .shell {
   overflow-x: auto;
 }
 
-/* macOS 覆盖式标题栏：顶部这条透明区域用于拖动窗口，同时让出红绿灯位置。 */
+/*
+ * macOS 覆盖式标题栏：顶部这条透明区域用于拖动窗口，同时让出红绿灯位置。
+ *
+ * 层级铁律（#319）：拖动带必须压在所有全屏遮罩之上。
+ * Tauri 的拖动判定是 document 级 mousedown + e.composedPath()（tauri 2.x
+ * src/window/scripts/drag.js），命中路径上有没有拖动带说了算，与 pointer-events 无关；
+ * 一旦被 `position: fixed; inset: 0` 的遮罩盖住，顶部就再没有可命中的拖动目标，
+ * 而系统标题栏已是 TitleBarStyle::Overlay + hidden_title ⇒ 窗口彻底拖不动。
+ * 分层：浮层遮罩（当前最高 80）< 拖动带 200 < 窗口缩放手柄 900 / 自绘窗口按钮 1000。
+ * 新增遮罩请让 z-index 保持在 200 以下，否则下面这道守护会直接报红：
+ * frontend/src/__tests__/titlebarDragRegionStacking.test.ts
+ */
 .titlebar-drag-region {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   height: var(--macos-titlebar-height, 28px);
-  z-index: 5;
+  z-index: 200;
 }
 
 /* Windows 无边框窗口：顶部同样是一条透明拖动区，右侧留给自绘窗口按钮。 */
