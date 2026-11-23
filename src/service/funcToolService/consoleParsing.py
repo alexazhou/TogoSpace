@@ -131,8 +131,28 @@ def parse_boolean_value(raw: str, *, name: str, command: str) -> bool:
     )
 
 
-def _unknown_option_error(spec: CommandSpecLike, name: str) -> ConsoleError:
-    """未知选项 / 「位置参数被写成选项」的**唯一**构造点（#281 P1 + P2）。
+def positional_option_hint(spec: CommandSpecLike, name: str, value: str) -> str:
+    """位置槽参数被写成 `--选项` 时的**等价写法提示**（唯一文案来源，#334 / C-01）。
+
+    值取用户写下的那一段（分 token 与 `--x=v` 两种形态都由调用方提前取出），拼成一条
+    可以直接复制去执行的命令。`--选项` 的其余部分不动 —— 提示只说「定位参数换个位置写」。
+
+    为什么文案要放在解析层：`--dept-id` 现在**不在** `command_options_map` 里（位置槽的
+    kebab 形态已移出），所以它会先在 `_parse_options` 撞 `unknown_option`；改写提示必须
+    从这条路上给出，否则 `dept rm --dept-id 2` 会退化成没有等价写法的裸 `unknown_option`
+    （ISSUES v2.1 §4 RC-4 的 PM 注记）。
+    """
+    text = str(value).strip()
+    quoted = f"'{text}'" if (not text or " " in text) else text
+    return (
+        f"。注意：--{cc.to_kebab(name)} 是定位参数，`{spec.key}` 的定位只接受位置参数形态"
+        f"（不接受 --选项 写法）；等价写法：`{spec.key} {quoted}`"
+        f"（其余 --选项 照原样保留在命令尾部）"
+    )
+
+
+def _unknown_option_error(spec: CommandSpecLike, name: str, *, value: str | None = None) -> ConsoleError:
+    """未知选项 / 「位置参数被写成选项」的**唯一**构造点（#281 P1 + P2，C-01 复用）。
 
     message 是「一行可以直接复制去执行的正确调用」，而不是「可用选项」清单：
 
@@ -146,14 +166,22 @@ def _unknown_option_error(spec: CommandSpecLike, name: str) -> ConsoleError:
 
     P2 复用同一段：`mcp call --target x` 里的 `--target` 对 `mcp call` 就是「不被接受的
     选项」，与 P1 性质相同 ⇒ 同一个函数产出，不新增第二份文案、不新增错误码。
+
+    `value` 非空且命中的是**该命令的位置槽参数**时，追加 `positional_option_hint` 的等价
+    写法（C-01）：错误码仍是 `unknown_option`，不扩错误码面。
     """
+    hint = ""
+    if value is not None and spec.normalize_option(name) in spec.positional_param_names:
+        hint = positional_option_hint(spec, name, value)
+    # hint 自带句读（「。注意：…」），拼装时不能再补一个句号，否则出现「：--dept-id。。注意」。
+    unknown_text = f"未知选项：--{name}" + (hint if hint else "。")
     if not spec.example:
         # 无示例可给的命令：不再列「可用选项」清单（#281 P1），只报名字；
         # `example=spec.key` 保留（返回体里仍能看到这条命令怎么写）。
-        return ConsoleError("unknown_option", f"未知选项：--{name}。", example=spec.key)
+        return ConsoleError("unknown_option", unknown_text, example=spec.key)
     return ConsoleError(
         "unknown_option",
-        f"未知选项：--{name}。{spec.option_tip or ''}正确调用：\n  {spec.example}",
+        f"{unknown_text}{spec.option_tip or ''}正确调用：\n  {spec.example}",
         example=spec.example,
     )
 
@@ -252,17 +280,16 @@ def _parse_options(
                 continue
             if name not in allowed:
                 raise _unknown_option_error(spec, name)
-            # #281 P2：位置参数承载的参数被写成选项（`mcp call --target x`）。
-            # 只在该命令声明了 `example` 时才特例（目前仅 `mcp call`）：其它命令的
-            # `--name` 形态（如 `dept get --name x`）是**合法选项**，不能动。
-            # 位置参数已给出时（`mcp call ctx7 --target https://x`）仍走原来的
-            # `ambiguous_input_source` 分支——既有契约（§3.6-5）零改动。
-            if (
-                spec.example
-                and name in spec.positional_param_names
-                and not positional
-            ):
-                raise _unknown_option_error(spec, name)
+            # C-01（#334）：位置槽参数被写成 `--选项` —— **无论 `min_pos` 是 0 还是 1 一律拒**。
+            # 旧实现只在 `min_pos=1` 时由「位置参数个数不足」间接拦住；`dept/room rm` 的位置槽
+            # `required=False`（`min_pos=0`），`--dept-id 2` 于是被当成普通合法选项放行、真删。
+            # 值先取出来，好给出**可直接复制执行**的等价位置写法（ISSUES v2.1 §4 RC-4 PM 注记：
+            # 改写提示必须从这条路上给，否则退化成没有提示的裸 `unknown_option`）。
+            # 位置参数**已给出**时（`dept rm 2 --dept-id 2`）不在此拦，交给 `_check_conflicts`
+            # 按「同一参数重复提供」报 `ambiguous_input_source` —— 既有契约零改动。
+            if not positional and spec.normalize_option(name) in spec.positional_param_names:
+                raw_value = inline_value if sep else (tokens[idx + 1] if idx + 1 < len(tokens) else "")
+                raise _unknown_option_error(spec, name, value=raw_value)
             if name in boolean_options:
                 _store(
                     name,

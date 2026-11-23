@@ -309,14 +309,32 @@ def get_function_metadata(func_name: str, func: Callable[..., Any]) -> Dict[str,
 
         properties[param_name] = schema
 
+    # C-03② / #334：**没有 `**kwargs`** 的工具封口。
+    #
+    # 不封口时未知键会穿透 schema 校验直达 `func(**args)`，在 Python 层抛 `TypeError`
+    # （错误体 `error_code: null`）。封口必须写在**唯一生成点**这里：校验用的 schema 与
+    # 下发给模型的 schema 都来自本函数（`test_schema_equals_what_is_sent_to_the_model`
+    # 用等值钉住这一点），只在校验侧偷偷加会让两侧漂移、也让模型不知道「不能给别的键」。
+    #
+    # 有 `**kwargs` 的可调用对象语义上接受任意关键字参数 ⇒ 不封口（`_drop_variadic_params`
+    # 只把变长参数本身从 schema 摘掉，不改变这个语义）。
+    has_var_keyword = any(
+        param.kind is inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values()
+    )
+    parameters: Dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        # 两个分支都显式写出来：校验侧与模型侧必须**逐键相等**（单测用等值钉住）。
+        # 语义别搞反：`additionalProperties` 是「**是否允许**额外键」——有 `**kwargs`
+        # ⇒ True（允许），没有 ⇒ False（封口）。
+        "additionalProperties": has_var_keyword,
+    }
+
     return {
         "name": func_name,
         "description": description,
-        "parameters": {
-            "type": "object",
-            "properties": properties,
-            "required": required
-        }
+        "parameters": parameters,
     }
 
 
@@ -344,7 +362,8 @@ class FuncTool:
                 parameters=llmApiUtil.OpenAIFunctionParameter(
                     type=metadata["parameters"]["type"],
                     properties=metadata["parameters"]["properties"],
-                    required=metadata["parameters"].get("required", [])
+                    required=metadata["parameters"].get("required", []),
+                    additionalProperties=metadata["parameters"].get("additionalProperties", True),
                 )
             ),
         )

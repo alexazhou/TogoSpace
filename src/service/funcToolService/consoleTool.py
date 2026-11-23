@@ -242,7 +242,11 @@ def _usage_line(cmd: registry.ResolvedCommand) -> str:
         parts.append(_positional_tokens(cmd, arg)[0])
     if cmd.payload:
         parts.append("['<json>' | --from payload]")
-    if cmd.options:
+    # `[--选项 ...]` 的出现与否**只看展示清单**（#334 / #323 验收追加）：`cmd.options` 里还有
+    # 位置槽的 kebab 形态与兼容期旧名，用它判会出现「详情没有『选项：』段、用法行却宣称有
+    # 选项」的同状态两种渲染（8 条：`dept|room|agent get`、`agent dm/wake`、`role get/rm`、
+    # `container note`）。展示段与用法行必须同源，故统一用 `display_options`。
+    if cmd.display_options:
         parts.append("[--选项 ...]")
     if cmd.payload and any(kind in ("array", "object") for kind in cmd.option_kinds.values()):
         parts.append("（复杂参数建议优先 --from payload）")
@@ -613,14 +617,71 @@ def _locator_rewrite_hint(cmd: registry.ResolvedCommand, options: dict[str, Any]
         real = cmd.normalize_option(name)
         if real not in positional:
             continue
-        text = str(raw).strip()
-        quoted = f"'{text}'" if (not text or " " in text) else text
-        return (
-            f"。注意：--{cc.to_kebab(name)} 是定位参数，`{cmd.key}` 的定位只接受位置参数形态"
-            f"（不接受 --选项 写法）；等价写法：`{cmd.key} {quoted}`"
-            f"（其余 --选项 照原样保留在命令尾部）"
-        )
+        # 文案单一来源在解析层（`consoleParsing.positional_option_hint`）：C-01 之后同一句
+        # 提示要同时出现在「位置个数不足」与「位置槽被写成 --选项」两条路上，两处各写一份
+        # 必然漂移。
+        return cp.positional_option_hint(cmd, name, str(raw))
     return ""
+
+
+def _payload_key_whitelist(cmd: registry.ResolvedCommand) -> frozenset[str]:
+    """配置输入（payload / 内联 JSON）允许出现的键：工具真名，非位置槽、未被 exclude。
+
+    与 `--选项` 的白名单同源：`command_options_map` 是命令行形态，这里是**真名**集合
+    （`_validate_payload_keys` 会先用 `normalize_option` 归一，所以 kebab / 旧下划线名 /
+    别名写进 payload 也能正确落位）。
+    """
+    return frozenset(
+        name
+        for name in cmd.param_names
+        if name not in cmd.positional_param_names and name not in cmd.excluded_param_names
+    )
+
+
+def _validate_payload_keys(cmd: registry.ResolvedCommand, payload_args: dict[str, Any]) -> dict[str, Any]:
+    """按**命令参数白名单**校验配置输入的键名（C-03① / #334），返回归一成真名的字典。
+
+    改前这里只校验了 payload 根节点是 object，未知键会一路漏到 `func(**args)` 的
+    Python `TypeError`（错误体 `error_code: null`）——入口不做校验，问题推到第 2 跳才炸。
+    现在两类键在这里就被结构化拒绝：
+
+    - **未知键** ⇒ `unknown_payload_key`（附该命令接受的键清单）；
+    - **位置参数键** ⇒ `positional_payload_key`（定位参数只能写成位置参数形态，不能塞进
+      配置输入——否则与位置槽/选项三处来源打架，正是 C-01 要消的「同一事实多来源」）。
+    """
+    if not payload_args:
+        return payload_args
+    allowed = _payload_key_whitelist(cmd)
+    positional = cmd.positional_param_names
+    unknown: list[str] = []
+    positional_keys: list[str] = []
+    normalized: dict[str, Any] = {}
+    for key, value in payload_args.items():
+        real = cmd.normalize_option(key)
+        if real in positional:
+            positional_keys.append(key)
+        elif real in allowed:
+            normalized[real] = value
+        else:
+            unknown.append(key)
+    if unknown:
+        raise ConsoleError(
+            "unknown_payload_key",
+            f"配置输入里有 `{cmd.key}` 不认识的键：{' / '.join(unknown)}。"
+            f"该命令接受：{' / '.join(sorted(allowed)) or '（无）'}。",
+            example=f"help {cmd.key}",
+            unknown=unknown,
+            allowed=sorted(allowed),
+        )
+    if positional_keys:
+        raise ConsoleError(
+            "positional_payload_key",
+            f"配置输入里不能给位置参数：{' / '.join(positional_keys)}。"
+            f"`{cmd.key}` 的定位参数要写在命令名后面（位置参数形态，见 `help {cmd.key}`）。",
+            example=f"help {cmd.key}",
+            positional=positional_keys,
+        )
+    return normalized
 
 
 def _resolve_payload(
@@ -639,9 +700,10 @@ def _resolve_payload(
             )
         return {}
     config_tokens = [] if inline_payload is None else [inline_payload]
-    return cp._resolve_input_payload(
+    raw = cp._resolve_input_payload(
         config_tokens, payload, input_source=input_source, command_key=cmd.key
     )
+    return _validate_payload_keys(cmd, raw)
 
 
 def _check_conflicts(
@@ -650,7 +712,12 @@ def _check_conflicts(
     opt_args: dict[str, Any],
     payload_args: dict[str, Any],
 ) -> None:
-    """冲突校验（禁止静默覆盖）：位置槽 / `--选项` / `payload` 三者互斥。"""
+    """冲突校验（禁止静默覆盖）：位置槽 / `--选项` / `payload` 三者互斥。
+
+    除了原来的「**同名**重叠」，还判「**同一定位语义的多来源**」（`cmd.locators`，C-16 /
+    #334）：`dept rm 2 --name 研发部` 是位置 `<id>` 与 `--name` 两个**不同参数名**，同名
+    重叠判不出来，而底层 `if dept_id is not None` 会静默丢掉 `--name` —— 只能给一个。
+    """
     duplicated = sorted(set(opt_args) & set(payload_args))
     if duplicated:
         raise ConsoleError(
@@ -664,6 +731,17 @@ def _check_conflicts(
             raise ConsoleError(
                 "ambiguous_input_source",
                 f"位置参数 {' / '.join(overlap)} 不能与{source_name}重复提供；请二选一。",
+                example=f"help {cmd.key}",
+            )
+    locators = cmd.locators
+    if locators:
+        provided = [
+            name for name in locators if name in pos_args or name in opt_args or name in payload_args
+        ]
+        if len(provided) > 1:
+            raise ConsoleError(
+                "ambiguous_input_source",
+                f"`{cmd.key}` 的定位参数 {' / '.join(provided)} 只能给一个（二选一，不能同时提供）。",
                 example=f"help {cmd.key}",
             )
 

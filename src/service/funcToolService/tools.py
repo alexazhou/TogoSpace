@@ -2262,7 +2262,7 @@ async def _upsert_room(
     console=(
         ConsoleCommand("room", "rm", args=(
             Arg(Target("room_id", type=int), positional=True, required=False),
-        ), help=(
+        ), locators=("room_id", "name"), help=(
             "位置参数 <id> 与 --name 二选一（至少给一个；同时给出时以 <id> 为准）。",
         )),
     ),
@@ -2327,7 +2327,7 @@ async def delete_room(
     console=(
         ConsoleCommand("dept", ("rm", "remove"), args=(
             Arg(Target("dept_id", type=int), positional=True, required=False),
-        ), help=(
+        ), locators=("dept_id", "name"), help=(
             "位置参数 <id> 与 --name 二选一（至少给一个；同时给出时以 <id> 为准）。",
         )),
     ),
