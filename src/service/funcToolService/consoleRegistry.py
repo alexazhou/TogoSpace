@@ -149,6 +149,18 @@ class ResolvedCommand:
         return len(self.positional_args)
 
     @property
+    def excluded_param_names(self) -> frozenset[str]:
+        """声明 `ConsoleCommand(exclude=...)` 的参数：该命令上不暴露、也不接受。
+
+        一工具多命令的参数裁剪点（D1=A / #323）：`get_dept_info` / `get_room_info` /
+        `get_agent_info` 是「列表 + 单查二合一」，`ls` 与 `get` 各自挂载时都继承了全部
+        参数，于是 `get` 上出现永不生效的 `--name`（C-16）、`ls` 上出现会跳进单查分支
+        的 `--*-id` / `--name`（C-12）；`container note` 的 `--record-id` 则必然与必填的
+        `<container_id>` 撞车（C-21）。这些都是**命令级不可达**参数，在声明里裁掉。
+        """
+        return frozenset(self.decl.exclude)
+
+    @property
     def positional_param_names(self) -> frozenset[str]:
         """位置槽绑定的工具参数真名（§4.1：直接用 `{a.target.name for a in positional_args}`）。"""
         return frozenset(arg.target.name for arg in self.positional_args)
@@ -220,6 +232,8 @@ class ResolvedCommand:
             mapping[form] = real
 
         for real in self.param_names:
+            if real in self.excluded_param_names:
+                continue  # 命令级裁剪：既不展示，也不接受（传了走 unknown_option）
             _register(to_kebab(real), real)
             _register(real, real)
         for alias, real in self.alias_map.items():
@@ -449,6 +463,19 @@ def _validate_command(cmd: ResolvedCommand, *, seen_keys: dict[str, str], two_se
     seen_positional: list[Arg] = []
     for arg in decl.args:
         _validate_arg(cmd, arg, seen_positional=seen_positional)
+    for name in decl.exclude:
+        if name not in cmd.param_schemas:
+            raise ValueError(
+                f"`{cmd.key}` 的 exclude 引用了不存在的工具参数 {name!r}；"
+                f"该工具的参数是：{' / '.join(cmd.param_names) or '（无）'}。"
+            )
+        if name in cmd.positional_param_names:
+            raise ValueError(
+                f"`{cmd.key}` 试图 exclude 位置参数 {name!r}；位置槽要收窄请改 `Arg.required`，"
+                "不能用 exclude 把槽位抹掉（用法行与解析会不一致）。"
+            )
+        if any(arg.target.name == name for arg in decl.args):
+            raise ValueError(f"`{cmd.key}` 的 {name!r} 已在 args 里声明，不能再 exclude。")
     if decl.payload:
         non_positional = [arg for arg in decl.args if not arg.positional]
         if not non_positional:

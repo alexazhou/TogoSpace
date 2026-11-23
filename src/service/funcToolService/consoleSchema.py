@@ -239,6 +239,25 @@ def describe_param(
     return f"{head}{shape}{positional}{tail}"
 
 
+def describe_positional(token: str, prop: dict, *, required: bool) -> str:
+    """把一个**位置参数**渲染成「位置参数：」段里的一行（方案 B，#323）。
+
+    与 `describe_param` 的分工：位置参数在命令行上没有 `--名字`，它的「名字」就是
+    签名里的那个 token（`<id>` / `<container_id>` / `<note>`）。`token` 由调用方
+    从**签名渲染的同一处**取（`consoleTool._positional_token`），保证两处逐字一致
+    —— 这正是 C-08 的病根：签名印 `<id>`、参数行印 `--dept-id`，同一件事两个 token。
+
+    必填/可选由 `required` 传入，调用方按**命令表的位置 arity**（`min_pos`）判，
+    **不按 schema 的 `required`** —— C-09 的根因就是拿了 schema required，导致
+    `container note` 两个必填位置槽被印成「（可选）」。
+    """
+    kind = param_kind(prop)
+    marker = "必填" if required else "可选"
+    note = _first_clause(prop.get("description"))
+    tail = f"（{marker}）" + (f" {note}" if note else "")
+    return f"{token} <{kind}>{tail}"
+
+
 def describe_tool_params(
     tool_name: str,
     *,

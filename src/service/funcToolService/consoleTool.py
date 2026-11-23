@@ -214,24 +214,32 @@ def _tool_description(cmd: registry.ResolvedCommand) -> str:
     return cs._first_clause(metadata.get("description") if isinstance(metadata, dict) else "")
 
 
-def _usage_line(cmd: registry.ResolvedCommand) -> str:
-    """由**命令声明**拼出用法行：位置槽按 `Arg` 的顺序与必填性渲染（§5.3）。
+def _positional_tokens(cmd: registry.ResolvedCommand, arg: Any) -> tuple[str, str]:
+    """位置槽在签名里的呈现 + 裸 token：`("<id>" | "[<id>]", "<id>")`。
 
-    占位规则：
-    - 必填 `int` 位置槽 → `<id>`；可选 `int` 位置槽 → `[<id>]`；
-    - 单 `str` 位置槽 → `<名称>` / `<target>`；多 `str` 位置槽按 `Target.name` 逐个渲染。
+    **签名与「位置参数：」段共用的唯一来源**（#323 方案 B 要求两处逐字一致）。
+    裸 token 不带可选括号、不带 `--`：可选性由参数行的「（必填）/（可选）」表达。
+
+    占位规则（与历史签名逐字节一致）：
+    - `int` 位置槽 → `<id>`，可选时签名里加方括号 → `[<id>]`；
+    - 单 `str` 位置槽 → `<名称>`，可选时 `[<名称>]`；
+    - 多 `str` 位置槽按 `Target.name` 逐个渲染 → `<container_id>` / `<note>`。
     """
+    kind = cmd.param_kinds.get(arg.target.name, "string")
+    effective = arg.target.type or (int if kind == "integer" else str)
+    if effective is int:
+        return ("<id>" if arg.required else "[<id>]"), "<id>"
+    if len(cmd.positional_args) == 1:
+        return ("<名称>" if arg.required else "[<名称>]"), "<名称>"
+    token = f"<{arg.target.name}>"
+    return token, token
+
+
+def _usage_line(cmd: registry.ResolvedCommand) -> str:
+    """由**命令声明**拼出用法行：位置槽按 `Arg` 的顺序与必填性渲染（§5.3）。"""
     parts = [cmd.key] if cmd.key else ["<资源> <操作>"]
     for arg in cmd.positional_args:
-        kind = cmd.param_kinds.get(arg.target.name, "string")
-        effective = arg.target.type or (int if kind == "integer" else str)
-        if effective is int:
-            label = "<id>" if arg.required else "[<id>]"
-        elif len(cmd.positional_args) == 1:
-            label = "<名称>" if arg.required else "[<名称>]"
-        else:
-            label = f"<{arg.target.name}>"
-        parts.append(label)
+        parts.append(_positional_tokens(cmd, arg)[0])
     if cmd.payload:
         parts.append("['<json>' | --from payload]")
     if cmd.options:
@@ -249,33 +257,57 @@ def _alias_reverse(cmd: registry.ResolvedCommand) -> dict[str, tuple[str, ...]]:
     return reverse
 
 
-def _positional_labels(cmd: registry.ResolvedCommand) -> dict[str, str]:
-    """位置槽绑定的参数 → 「位置参数」标注文案（§5.3 / #220 需求 2）。"""
-    labels: dict[str, str] = {}
-    for arg in cmd.positional_args:
-        name = arg.target.name
-        labels[name] = (
-            f"位置参数：值必须写在命令名后面（{_usage_line(cmd)}），"
-            f"不接受 --{cc.to_kebab(name)} 选项写法"
-        )
-    return labels
+def _param_sections(cmd: registry.ResolvedCommand) -> tuple[list[str], list[str]]:
+    """参数清单拆成 `(位置行, 选项行)`：**先按声明的 `Arg`，再用未声明的 schema 参数补齐**。
 
+    这是 C-08 / C-09 的正解（#323 口径第 3 版）：形态（位置 or 选项）、必填性、顺序
+    全部由**声明**决定，schema 只提供 `kind` 与描述两样东西。
 
-def _describe_params(cmd: registry.ResolvedCommand) -> list[str]:
-    """参数清单：schema 顺序 + 别名 + 「位置参数」标注（全部派生）。"""
+    - 位置行名字与用法行**同源**（`_positional_tokens`），不带 `--`，顺序 = 声明顺序；
+    - 位置行的必填取 `arg.required`。**不能取 schema `required`**：工具签名里的参数
+      全都有默认值 ⇒ `schema_required` 恒为空集 ⇒ `container note` 两个
+      `Arg(required=True)` 的槽位被印成「（可选）」（C-09 现场）；
+    - 未被声明到的 schema 参数按 schema 顺序补齐成选项行（它们的必填仍看 schema
+      `required` —— 声明里没写，schema 是唯一来源）。
+    """
     aliases = _alias_reverse(cmd)
-    labels = _positional_labels(cmd)
-    required = set(cmd.schema_required)
-    return [
-        cs.describe_param(
-            name,
-            prop,
-            required=name in required,
-            aliases=aliases.get(name, ()),
-            positional_label=labels.get(name, ""),
+    required_options = set(cmd.required_option_names)
+    positionals = [
+        cs.describe_positional(
+            _positional_tokens(cmd, arg)[1],
+            cmd.param_schemas.get(arg.target.name, {}),
+            required=arg.required,
         )
-        for name, prop in cmd.param_schemas.items()
+        for arg in cmd.positional_args
     ]
+    # 选项段直接吃 `display_options`（它已剔除位置槽，并已应用 `ConsoleCommand.exclude`
+    # 的裁剪）；同一真名的多个形态（kebab / 兼容旧名 / 短别名）只出一行 —— 别名内联。
+    options: list[str] = []
+    seen: set[str] = set()
+    for form in cmd.display_options:
+        real = cmd.normalize_option(form)
+        if real in seen:
+            continue
+        seen.add(real)
+        options.append(
+            cs.describe_param(
+                real,
+                cmd.param_schemas.get(real, {}),
+                required=real in required_options,
+                aliases=aliases.get(real, ()),
+            )
+        )
+    return positionals, options
+
+
+def _positional_note(cmd: registry.ResolvedCommand) -> str:
+    """「位置参数：」段后面那句短注（C-08 需求 5：长括号说明收敛成一句）。
+
+    只陈述两件解析层事实：值写在哪、**不接受**哪种写法。被拒绝的写法按同一批位置槽
+    的 kebab 形态列出（`--dept-id` / `--container-id / --note`），与签名 token 一一对应。
+    """
+    rejected = " / ".join(f"--{cc.to_kebab(arg.target.name)}" for arg in cmd.positional_args)
+    return f"写在命令名后面（见用法行），不接受 {rejected} 选项写法。"
 
 
 def _help_detail_table() -> dict[str, str]:
@@ -290,10 +322,14 @@ def _help_detail_table() -> dict[str, str]:
         lines = [_usage_line(cmd)]
         description = _tool_description(cmd)
         lines.append(f"用途：{description}" if description else "用途：（该工具未提供说明）")
-        params = _describe_params(cmd)
-        if params:
-            lines.append("参数：")
-            lines.extend(f"  {param}" for param in params)
+        positionals, options = _param_sections(cmd)
+        if positionals:
+            lines.append("位置参数：")
+            lines.extend(f"  {line}" for line in positionals)
+            lines.append(f"  注：{_positional_note(cmd)}")
+        if options:
+            lines.append("选项：")
+            lines.extend(f"  {line}" for line in options)
         lines.extend(cmd.help_lines)
         lines.extend(_HELP_OVERLAY.get(cmd.key, ()))
         detail[cmd.key] = "\n".join(lines)

@@ -43,48 +43,47 @@ PYTEST_XDIST_WORKER=gw99 env -u TOGOSPACE_DESKTOP \
 | `summary_bytes` | 1042 | **1042** | 0 |
 | `summary_lines` | 14 | **14** | 0 |
 | `detail_entries` | 28 | **28** | 0 |
-| `detail_bytes_total` | 21539 | **21085** | −454（−2.11%） |
-| `detail_bytes_max` | 2884（`task update`） | **2835**（`task update`） | −49 |
-| `detail_bytes_min` | 144（`reload`） | **144**（`reload`） | 0 |
+| `detail_bytes_total` | 21085 | **19128** | −1957（−9.28%） |
+| `detail_bytes_max` | 2835（`task update`） | **2735**（`task update`） | -100 |
+| `detail_bytes_min` | 144（`reload`） | **83**（`room ls`） | -61 |
 
 `summary` 一字未动是有意为之：本单只删「与 summary 重复」的 overlay 行，summary 自身
 是全局规则的**正本**（`_build_help_summary`），不在收拢范围内。
 
 ## 3. 逐条明细（收拢后，按字节降序）
 
-| 命令 key | 字节（收拢后） | 本单变化 |
+| 命令 key | 字节（#323 后） | 相对 #323 前 |
 | --- | --- | --- |
-| `task update` | 2835 | 2884 → 2835（−49） |
+| `task update` | 2735 | 2835 → 2735（-100） |
 | `task create` | 1705 | — |
-| `agent update` | 1661 | 1700 → 1661（−39） |
+| `agent update` | 1559 | 1661 → 1559（-102） |
 | `task ls` | 1527 | — |
-| `dept update` | 1407 | 1446 → 1407（−39） |
-| `room update` | 1131 | 1171 → 1131（−40） |
-| `agent create` | 1130 | 1178 → 1130（−48） |
-| `dept create` | 922 | 996 → 922（−74） |
-| `container note` | 746 | — |
-| `role update` | 734 | 815 → 734（−81） |
-| `dept rm` | 727 | — |
-| `agent get` | 658 | — |
+| `dept update` | 1307 | 1407 → 1307（-100） |
+| `agent create` | 1130 | — |
+| `room update` | 1031 | 1131 → 1031（-100） |
+| `dept create` | 922 | — |
+| `dept rm` | 703 | 727 → 703（-24） |
 | `role create` | 644 | — |
-| `room create` | 590 | 650 → 590（−60） |
-| `dept get` | 561 | — |
-| `room rm` | 530 | — |
-| `room get` | 477 | — |
-| `task get` | 405 | — |
-| `agent dm` | 382 | 406 → 382（−24） |
-| `role rm` | 339 | — |
-| `agent wake` | 331 | — |
+| `role update` | 637 | 734 → 637（-97） |
+| `room create` | 590 | — |
+| `room rm` | 506 | 530 → 506（-24） |
+| `agent get` | 474 | 658 → 474（-184） |
+| `container note` | 456 | 746 → 456（-290） |
+| `task get` | 382 | 405 → 382（-23） |
+| `dept get` | 370 | 561 → 370（-191） |
+| `agent dm` | 346 | 382 → 346（-36） |
+| `room get` | 346 | 477 → 346（-131） |
 | `role ls` | 320 | — |
-| `dept ls` | 279 | — |
-| `role get` | 271 | — |
-| `agent ls` | 252 | — |
-| `room ls` | 195 | — |
+| `role rm` | 305 | 339 → 305（-34） |
+| `agent wake` | 293 | 331 → 293（-38） |
+| `role get` | 236 | 271 → 236（-35） |
 | `time get` | 182 | — |
 | `reload` | 144 | — |
+| `dept ls` | 107 | 279 → 107（-172） |
+| `agent ls` | 88 | 252 → 88（-164） |
+| `room ls` | 83 | 195 → 83（-112） |
 
-变化只落在 9 条命令上，且全部是**变短**（本单只删复述行，没有新增文案）。其余 19 条
-逐字节不变。
+**#323 之后的口径**：参数清单拆成「位置参数：/ 选项：」两段（位置行名字 = 签名 token），并按 `ConsoleCommand(exclude=...)` 裁掉了命令级不可达参数（`container note --record-id`、`dept|room|agent get --name`、`dept|room|agent ls` 的单查定位参数）。实测量法下 **28 条里 19 条字节变化、9 条不变**（`dept|agent|room create`、`role ls`、`role create`、`task ls`、`task create`、`time get`、`reload` —— 都是「无位置槽、且排除前后选项面都为空」的命令）。最小的是 `room ls` 83 B（选项被裁空，只剩用法行 + 用途），`reload` 仍是无参数命令、字节不变。
 
 ## 4. 已知限制
 
