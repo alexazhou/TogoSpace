@@ -475,6 +475,39 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             r["room_name"] for r in direct_ls["rooms"]
         ]
 
+    async def test_cc1_room_ls_to_get_closure(self):
+        """RC-3 闭环（#335 / C-02）：`room ls` → 取 `room_id` → `room get <id>` 必须走通。
+
+        这一条打的是**用户流程**而不是字段存在性：列表项里只允许用 `room_id` 这一项
+        去驱动下一步（不看 `room_name`、不借夹具已知的 row.id），走得通才算闭环。
+        顺便把两端的返回体原文打出来，报告里的黑盒证据就来自这里（`pytest -s` 采集）。
+
+        为什么**不新建房间**：产品有「成员集合相同的房间不能重复创建」这条规则
+        （`ROOM_DUPLICATE`），本文件后面的 `test_cc1_create_room` 会用 alice+bob 建
+        `cc1_room2`。这里若自建一个 alice+bob 的房间，就会把后面那条用例弄红——
+        首版就是这样踩到的（实测报 `已存在成员相同的房间 'cc1_closure_room'`）。
+        改用类级 setup 里必然存在的部门房间 `root`，既零副作用，也不依赖用例顺序。
+        """
+        ctx = self._ctx()
+
+        listed = await self._call("room ls", _context=ctx)
+        print("\n[black-box] room ls =>", json.dumps(listed, ensure_ascii=False))
+        assert listed["success"] is True, listed
+        target = next(r for r in listed["rooms"] if r["room_name"] == "root")
+        # 断链的形态就是这里 KeyError；显式断言让失败信息可读。
+        assert "room_id" in target, f"列表项必须带 room_id，实际键={sorted(target)}"
+        room_id = target["room_id"]
+
+        detail = await self._call(f"room get {room_id}", _context=ctx)
+        print(f"[black-box] room get {room_id} =>", json.dumps(detail, ensure_ascii=False))
+        assert detail["success"] is True, detail
+        # 顶层键契约：ls 仍是 rooms（数组）、get 仍是 room（单数对象）。
+        assert set(listed) == {"success", "rooms"}
+        assert set(detail) == {"success", "room"}
+        # 详情项也带 room_id，且就是列表里拿到的那个 ID。
+        assert detail["room"]["room_id"] == room_id
+        assert detail["room"]["room_name"] == "root"
+
     async def test_cc1_create_room(self):
         """`create_room`(新建) ↔ `room create <json>`。"""
         via = await self._call(
