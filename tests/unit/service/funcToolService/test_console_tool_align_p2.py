@@ -53,35 +53,105 @@ def test_help_keys_match_command_table() -> None:
 
 
 def test_help_lists_exactly_the_schema_params() -> None:
-    """help 里列出的 `--参数` 必须与工具 schema properties **逐名相同**（kebab 形态）。
+    """help 的参数面必须与命令表**双向**对齐（方案 B / #323 之后的三个分段口径）。
 
-    这是「选项面从工具签名派生」这件事的可观测结果：派生逻辑一旦回退成手抄、或者
-    schema 加了参数但 help 渲染漏了，这里立刻红。别名也要在——用户在 help 上看到的
-    写法必须真能用。
+    这是「参数面从声明派生」的可观测结果：派生逻辑回退成手抄、或 schema/命令表加了
+    参数但渲染漏了，这里立刻红。三个方向分别钉：
 
-    位置槽绑定的参数（`dept get` 的 `dept_id` 等）也在 help 里出现，但它们是被标注为
-    「位置参数」的声明行，本来就不在 `display_options` 里，所以反向比对允许
-    `display_options ∪ 位置槽参数 kebab 形态`。
+    1. **选项**：help 里 `  --x` 行 == `display_options` 的主形态（别名内联渲染，不成行）；
+    2. **位置参数**：每个位置槽在「位置参数：」段里有 `  <token>` 行，token 取自签名。
+
+    （`container note` 的 `record_id` 这类「命令行上不可用」的参数是否该从 help 隐去，
+    等 Operator 拍板声明层口径，本单只留报告条目、不动渲染。）
     """
     problems: list[str] = []
 
     for cmd in TABLE.specs:
         if cmd.tool is None:
             continue
-        props = {cc.to_kebab(name) for name in cmd.param_names}
-        listed = set(re.findall(r"^  --([A-Za-z][\w-]*)", ct.HELP_DETAIL[cmd.key], flags=re.MULTILINE))
+        detail = ct.HELP_DETAIL[cmd.key]
+        listed_options = set(re.findall(r"^  --([A-Za-z][\w-]*)", detail, flags=re.MULTILINE))
 
-        missing = props - listed
-        allowed_display = set(cmd.display_options) | {
-            cc.to_kebab(name) for name in cmd.positional_param_names
-        }
-        extra = listed - allowed_display
-        if missing:
-            problems.append(f"{cmd.key}: schema 有但 help 没列 {sorted(missing)}")
-        if extra:
-            problems.append(f"{cmd.key}: help 列了但选项白名单没有 {sorted(extra)}")
+        # ① 选项面（双向）：help 里不许出现白名单外的选项；白名单里的**主形态**必须都在。
+        #    例外是口径不是遗漏：别名（`--kw` / `--status` / `--remove-field` …）内联渲染
+        #    在真名行里（「（别名 --kw）」），不会自成一行。
+        alias_forms = {cc.to_kebab(alias) for alias in cmd.alias_map}
+        must_list = set(cmd.display_options) - alias_forms
+        if listed_options - set(cmd.display_options):
+            problems.append(f"{cmd.key}: help 列了但选项白名单没有 {sorted(listed_options - set(cmd.display_options))}")
+        if must_list - listed_options:
+            problems.append(f"{cmd.key}: 选项白名单有但 help 没列 {sorted(must_list - listed_options)}")
+
+        # ② 位置面带：每个位置槽一行 `  <token>`，且 token 与签名同源
+        section = detail.split("位置参数：", 1)[1] if "位置参数：" in detail else ""
+        for arg in cmd.positional_args:
+            token = ct._positional_tokens(cmd, arg)[1]
+            if f"  {token} " not in section:
+                problems.append(f"{cmd.key}: 位置段缺 {token} 行（位置槽 {arg.target.name}）")
 
     assert not problems, "help 与 schema 参数面不一致：\n" + "\n".join(problems)
+
+
+def _section_rows(detail: str, title: str) -> list[str]:
+    """取某段标题下的行（缩进两格起，遇到第一个非缩进行即段尾）。"""
+    if title not in detail:
+        return []
+    rows: list[str] = []
+    for line in detail.split(title, 1)[1].splitlines():
+        if not rows and not line.strip():
+            continue  # 标题行本身在 split 后留下一个空串
+        if line.startswith("  "):
+            rows.append(line)
+        else:
+            break
+    return rows
+
+
+def test_help_sections_are_never_empty() -> None:
+    """交付标准（#323）：「无对应内容时不留空标题」。
+
+    `位置参数：` / `选项：` 只在下面**真有行**时才许出现；反向也钉：真有位置槽就有
+    「位置参数：」段（否则参数被静默吞掉）。
+    """
+    problems: list[str] = []
+    for cmd in TABLE.specs:
+        detail = ct.HELP_DETAIL[cmd.key]
+        for title in ("位置参数：", "选项："):
+            if title in detail and not _section_rows(detail, title):
+                problems.append(f"{cmd.key}: 「{title}」段是空的")
+        if cmd.positional_args and "位置参数：" not in detail:
+            problems.append(f"{cmd.key}: 有位置槽却没有「位置参数：」段")
+        if "位置参数：" in detail and not cmd.positional_args:
+            problems.append(f"{cmd.key}: 没有位置槽却出现了「位置参数：」段")
+    assert not problems, "help 分段有空标题：\n" + "\n".join(problems)
+
+
+def test_positional_required_marker_follows_arg_declaration() -> None:
+    """位置行必填标记 == **声明** `Arg.required`（不拿 schema required 比 —— 同源无鉴别力）。
+
+    PM 的验收判据：造「声明必填 / schema 可选」的现场，本用例必须在**每一个**这类
+    槽位上都红（`dept get.dept_id`、`agent get.agent_id`、`room get.room_id`、
+    `container note.container_id`、`container note.note`），而不是只红一条。
+    """
+    problems: list[str] = []
+    checked = 0
+    for cmd in TABLE.specs:
+        rows = _section_rows(ct.HELP_DETAIL[cmd.key], "位置参数：")
+        for arg in cmd.positional_args:
+            token = ct._positional_tokens(cmd, arg)[1]
+            line = next((row for row in rows if row.startswith(f"  {token} ")), None)
+            if line is None:  # 缺行由 test_help_lists_exactly_the_schema_params 负责
+                continue
+            checked += 1
+            want = "（必填）" if arg.required else "（可选）"
+            other = "（可选）" if arg.required else "（必填）"
+            if want not in line or other in line:
+                problems.append(
+                    f"{cmd.key}.{arg.target.name}: 声明 required={arg.required}，"
+                    f"help 行却是 {line!r}"
+                )
+    assert checked >= 17, f"位置槽只核到 {checked} 个，覆盖面不对"
+    assert not problems, "位置行必填标记与声明不一致：\n" + "\n".join(problems)
 
 
 def test_help_summary_is_derived_from_command_table() -> None:
