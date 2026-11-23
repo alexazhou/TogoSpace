@@ -7,13 +7,16 @@ import { clearToken } from '../../authStore';
 import { showTokenDialog } from '../../appUiState';
 import { clearTeams } from '../../teamStore';
 import { clearRuntimeStore } from '../../realtime/runtimeStore';
-import { openExternal } from '../../utils/platform';
+import { isTauri, openExternal } from '../../utils/platform';
 import ConfirmDialog from '../ui/ConfirmDialog.vue';
 import type { AppLocale } from '../../i18n';
 
 /**
  * 顶栏「工具与更新」区块：主题切换、语言切换（含菜单与外部点击关闭）、登出按钮
  * （含二次确认弹窗）、更新可用提示。
+ *
+ * 登出按钮**只在浏览器（web 服务）模式下**渲染：桌面 app（Tauri）不提供登出入口（#338），
+ * 判定口径见下方 `isAppMode`。
  *
  * 从 `TopBar.vue` 拆出（P4）。注意本组件是**多根**（fragment）：`.topbar-utility-group`
  * 与 `.update-pill` 两个根节点直接作为父级 `.status-group` 的 flex 子项，DOM 顺序与拆分前一致；
@@ -36,6 +39,19 @@ const emit = defineEmits<{
 const languageMenuOpen = ref(false);
 const currentLocale = computed<AppLocale>(() => i18n.global.locale.value);
 const logoutConfirmOpen = ref(false);
+
+/**
+ * 是否运行在桌面 app（Tauri）里。判据与全仓其它地方一致：`isTauri()` 读 Tauri 运行时注入的
+ * `window.__TAURI_INTERNALS__`（见 `utils/platform.ts`，`main.ts` / `desktopLog.ts` 同口径）。
+ * 用它来表示「app 模式」而不是另造开关：桌面端与浏览器端唯一的客观差异就是这个运行时标记，
+ * 加一个自建 flag 只会多一处可能与真实运行形态不同步的状态。
+ *
+ * 用 `computed` 而非 setup 时取常量：测试与热重载可以在挂载前/后改变该标记，判定跟着走。
+ */
+const isAppMode = computed(() => isTauri());
+
+/** 登出入口只在浏览器（web 服务）里给：桌面 app 没有「退出登录」的语义（#338）。 */
+const showLogoutButton = computed(() => props.authEnabled === true && !isAppMode.value);
 
 function handleWindowPointerDown(event: PointerEvent): void {
   const target = event.target;
@@ -188,7 +204,7 @@ function closeLogoutConfirm(): void {
       </div>
     </div>
     <button
-      v-if="authEnabled"
+      v-if="showLogoutButton"
       class="nav-icon-button toolbar-icon-button logout-button"
       type="button"
       :title="t('topbar.logout')"
