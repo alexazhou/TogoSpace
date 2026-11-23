@@ -140,12 +140,16 @@ class TestConsoleLocatorHint(ServiceTestCase):
         assert "dept ls" in by_pos["message"], by_pos["message"]
 
     async def test_help_carries_positional_label_via_real_entry(self):
-        """真入口 `help dept get`：--dept-id 行带「位置参数」标注（需求 2）。"""
+        """真入口 `help dept get`：位置参数单列一段，行名复用签名 token（#323 方案 B）。"""
         result = await self._call("help dept get")
         assert result["success"] is True, result
         detail = result.get("help", "")
-        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept-id")]
-        assert line and "位置参数" in line[0], f"真 help 输出没标位置参数：{detail!r}"
+        assert "位置参数：" in detail, f"真 help 输出没有「位置参数：」段：{detail!r}"
+        section = detail.split("位置参数：", 1)[1]
+        assert any(ln.startswith("  <id> ") for ln in section.splitlines()), (
+            f"位置段里没有 `<id>` 行：{detail!r}"
+        )
+        assert "不接受 --dept-id 选项写法" in detail, detail
 
     # ==================================================================
     # M3 回归：报错不误伤合法位置调用（说清楚、不放宽，也不多拒）

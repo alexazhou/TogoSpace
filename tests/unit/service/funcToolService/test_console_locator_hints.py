@@ -110,19 +110,36 @@ class TestLocatorRewriteHint:
 
 
 class TestHelpPositionalLabel:
-    def test_get_command_locator_line_is_marked(self) -> None:
-        """`dept get` 的 `--dept-id` 行必须标「位置参数」且含等价写法。"""
-        detail = ct.HELP_DETAIL["dept get"]
-        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept-id")]
-        assert line, f"dept get 参数清单里没有 --dept-id 行：\n{detail}"
-        assert "位置参数" in line[0], f"定位行没标位置参数：{line[0]!r}"
-        assert "dept get <" in line[0], f"没给等价写法占位：{line[0]!r}"
+    """方案 B（#323 / C-08）：位置参数单列「位置参数：」段，名字复用签名 token。
 
-    def test_payload_command_locator_line_is_marked(self) -> None:
-        """`task update` 的 `--task-id` 行同样标注（payload=True 的位置槽）。"""
+    旧契约是「`--dept-id` 行加一段『位置参数：值必须写在命令名后面…』标注」——
+    同一件事两个 token（签名 `<id>` vs 行名 `--dept-id`）。新契约下：
+    段标题 → 行名 = 签名 token（不带 `--`）→ 短注说明被拒绝的选项写法。
+    """
+
+    def test_get_command_positional_section_uses_signature_token(self) -> None:
+        """`dept get`：位置段行名 `<id>`（与签名逐字一致），且不再有 `--dept-id` 行。"""
+        detail = ct.HELP_DETAIL["dept get"]
+        assert "位置参数：" in detail, f"dept get 没有「位置参数：」段：\n{detail}"
+        section = detail.split("位置参数：", 1)[1]
+        token_line = [ln for ln in section.splitlines() if ln.startswith("  <id>")]
+        assert token_line, f"位置段里没有 `<id>` 行：\n{detail}"
+        # 签名与行名同源：用法行里也必须是 `<id>`
+        assert "dept get <id>" in detail.splitlines()[0], detail.splitlines()[0]
+        # 旧形态不许回流：参数清单里不能再出现 `--dept-id` 选项行
+        assert not [ln for ln in detail.splitlines() if ln.lstrip().startswith("--dept-id")], (
+            f"`--dept-id` 选项行又出现了：\n{detail}"
+        )
+        # 短注点名被拒绝的写法（与签名 token 同源）
+        assert "不接受 --dept-id 选项写法" in detail, detail
+
+    def test_payload_command_positional_section_uses_signature_token(self) -> None:
+        """`task update`（payload=True 的位置槽）：同样进位置段、行名 `<id>`。"""
         detail = ct.HELP_DETAIL["task update"]
-        line = [ln for ln in detail.splitlines() if ln.lstrip().startswith("--task-id")]
-        assert line and "位置参数" in line[0], f"task update 的 --task-id 行没标注：{line!r}"
+        section = detail.split("位置参数：", 1)[1]
+        line = [ln for ln in section.splitlines() if ln.startswith("  <id>")]
+        assert line and "（必填）" in line[0], f"task update 的 <id> 行没标必填：{line!r}"
+        assert not [ln for ln in detail.splitlines() if ln.lstrip().startswith("--task-id")]
 
     def test_create_has_no_positional_slot_at_all(self) -> None:
         """`dept create` 的参数面里**没有** `dept_id`：P0 把新建与更新彻底拆开后，
@@ -142,11 +159,12 @@ class TestHelpPositionalLabel:
         assert line and "位置参数" not in line[0], f"--note 被误标：{line!r}"
 
     def test_positional_label_via_schema_unit(self) -> None:
-        """渲染函数单点：传入 label 就渲染、不传就不渲染（不隐式推断）。"""
+        """渲染函数单点：位置参数用 `describe_positional`（token 不带 `--`）。"""
         prop = {"type": "integer", "description": "部门 id"}
-        plain = cs.describe_param("dept_id", prop, required=False)
-        marked = cs.describe_param("dept_id", prop, required=False, positional_label="位置参数：写在命令名后")
-        assert "位置参数" not in plain
-        assert "位置参数" in marked
-        # label 渲染在别名之后、必填标记之前，行为与 _describe_params 实际顺序一致
-        assert marked.index("位置参数") < marked.index("可选")
+        rendered = cs.describe_positional("<id>", prop, required=True)
+        assert rendered.startswith("<id> <integer>（必填）"), rendered
+        assert "部门 id" in rendered
+        # 方案 B 之后 `describe_param` 的 positional_label 分支不再是主路径，
+        # 但仍须可用（mcp 子树等旧调用点不因此炸）
+        legacy = cs.describe_param("dept_id", prop, required=False, positional_label="位置参数：写在命令名后")
+        assert legacy.startswith("--dept-id <integer>") and "位置参数" in legacy
