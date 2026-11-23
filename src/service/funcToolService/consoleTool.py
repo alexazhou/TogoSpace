@@ -257,22 +257,47 @@ def _alias_reverse(cmd: registry.ResolvedCommand) -> dict[str, tuple[str, ...]]:
     return reverse
 
 
-def _positional_lines(cmd: registry.ResolvedCommand) -> list[str]:
-    """「位置参数：」段的行（方案 B / #323）：名字逐字复用签名 token，不带 `--`。
+def _param_sections(cmd: registry.ResolvedCommand) -> tuple[list[str], list[str]]:
+    """参数清单拆成 `(位置行, 选项行)`：**先按声明的 `Arg`，再用未声明的 schema 参数补齐**。
 
-    必填/可选按**声明**（`Arg.required`）判，**不按 schema 的 `required`** —— C-09 的
-    根因就是拿了 schema required：工具签名里的参数全都有默认值，`schema_required`
-    因此恒为空集，`container note` 两个 `Arg(required=True)` 的槽位被印成「（可选）」。
+    这是 C-08 / C-09 的正解（#323 口径第 3 版）：形态（位置 or 选项）、必填性、顺序
+    全部由**声明**决定，schema 只提供 `kind` 与描述两样东西。
+
+    - 位置行名字与用法行**同源**（`_positional_tokens`），不带 `--`，顺序 = 声明顺序；
+    - 位置行的必填取 `arg.required`。**不能取 schema `required`**：工具签名里的参数
+      全都有默认值 ⇒ `schema_required` 恒为空集 ⇒ `container note` 两个
+      `Arg(required=True)` 的槽位被印成「（可选）」（C-09 现场）；
+    - 未被声明到的 schema 参数按 schema 顺序补齐成选项行（它们的必填仍看 schema
+      `required` —— 声明里没写，schema 是唯一来源）。
     """
-    lines: list[str] = []
-    for arg in cmd.positional_args:
-        name = arg.target.name
-        token = _positional_tokens(cmd, arg)[1]
-        prop = cmd.param_schemas.get(name, {})
-        # 必填取**声明**（`Arg.required`），不取 schema 的 `required`：工具签名参数全有
-        # 默认值 ⇒ `schema_required` 恒空集 ⇒ 一条都标不出来（C-09 的根因）。
-        lines.append(cs.describe_positional(token, prop, required=arg.required))
-    return lines
+    aliases = _alias_reverse(cmd)
+    required_options = set(cmd.required_option_names)
+    positionals = [
+        cs.describe_positional(
+            _positional_tokens(cmd, arg)[1],
+            cmd.param_schemas.get(arg.target.name, {}),
+            required=arg.required,
+        )
+        for arg in cmd.positional_args
+    ]
+    # 选项段直接吃 `display_options`（它已剔除位置槽，并已应用 `ConsoleCommand.exclude`
+    # 的裁剪）；同一真名的多个形态（kebab / 兼容旧名 / 短别名）只出一行 —— 别名内联。
+    options: list[str] = []
+    seen: set[str] = set()
+    for form in cmd.display_options:
+        real = cmd.normalize_option(form)
+        if real in seen:
+            continue
+        seen.add(real)
+        options.append(
+            cs.describe_param(
+                real,
+                cmd.param_schemas.get(real, {}),
+                required=real in required_options,
+                aliases=aliases.get(real, ()),
+            )
+        )
+    return positionals, options
 
 
 def _positional_note(cmd: registry.ResolvedCommand) -> str:
@@ -283,22 +308,6 @@ def _positional_note(cmd: registry.ResolvedCommand) -> str:
     """
     rejected = " / ".join(f"--{cc.to_kebab(arg.target.name)}" for arg in cmd.positional_args)
     return f"写在命令名后面（见用法行），不接受 {rejected} 选项写法。"
-
-
-def _describe_params(cmd: registry.ResolvedCommand) -> list[str]:
-    """「选项：」段的行：schema 顺序 + 别名（全部派生）。
-
-    跳过位置槽绑定的参数（它们进「位置参数：」段）；其余（schema 顺序）都是选项。
-    选项的必填仍按 schema `required`（与改动前一致，本单只动位置参数的判据）。
-    """
-    aliases = _alias_reverse(cmd)
-    required = set(cmd.schema_required)
-    skip = cmd.positional_param_names
-    return [
-        cs.describe_param(name, prop, required=name in required, aliases=aliases.get(name, ()))
-        for name, prop in cmd.param_schemas.items()
-        if name not in skip
-    ]
 
 
 def _help_detail_table() -> dict[str, str]:
@@ -313,12 +322,11 @@ def _help_detail_table() -> dict[str, str]:
         lines = [_usage_line(cmd)]
         description = _tool_description(cmd)
         lines.append(f"用途：{description}" if description else "用途：（该工具未提供说明）")
-        positionals = _positional_lines(cmd)
+        positionals, options = _param_sections(cmd)
         if positionals:
             lines.append("位置参数：")
             lines.extend(f"  {line}" for line in positionals)
             lines.append(f"  注：{_positional_note(cmd)}")
-        options = _describe_params(cmd)
         if options:
             lines.append("选项：")
             lines.extend(f"  {line}" for line in options)

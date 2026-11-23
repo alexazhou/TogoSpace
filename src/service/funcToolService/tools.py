@@ -706,12 +706,14 @@ def _clear_field_conflict(
 @tool(
     visibility=ToolVisibility.BOTH,
     console=(
-        ConsoleCommand("dept", "ls"),
+        # `ls` 不该暴露单查定位参数：传了会跳进 `get_dept_info` 的单查分支，返回体从
+        # 部门树突变成单个部门（C-12）。`get` 的 `<id>` 必填 ⇒ 底层 `if dept_id is not None`
+        # 恒走 ID 分支，`--name` 在 get 上是 100% 死选项（C-16）。
+        ConsoleCommand("dept", "ls", exclude=("dept_id", "name")),
         ConsoleCommand("dept", "get", args=(
             Arg(Target("dept_id", type=int), positional=True, required=True),
-        ), help=(
-            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `dept ls` 取 ID）；"
-            "同时传 `--name` 时按底层契约以 <id> 为准。",
+        ), exclude=("name",), help=(
+            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `dept ls` 取 ID）。",
         )),
     ),
 )
@@ -756,12 +758,12 @@ async def get_dept_info(
 @tool(
     visibility=ToolVisibility.BOTH,
     console=(
-        ConsoleCommand("room", "ls"),
+        # 同 dept：`ls` 裁掉单查定位参数（C-12），`get` 裁掉死选项 `--name`（C-16）。
+        ConsoleCommand("room", "ls", exclude=("room_id", "name")),
         ConsoleCommand("room", "get", args=(
             Arg(Target("room_id", type=int), positional=True, required=True),
-        ), help=(
-            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `room ls` 取 ID）；"
-            "同时传 `--name` 时按底层契约以 <id> 为准。",
+        ), exclude=("name",), help=(
+            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `room ls` 取 ID）。",
         )),
     ),
 )
@@ -928,12 +930,12 @@ async def start_chat(
 @tool(
     visibility=ToolVisibility.BOTH,
     console=(
-        ConsoleCommand("agent", "ls"),
+        # 同 dept：`ls` 裁掉单查定位参数（C-12），`get` 裁掉死选项 `--name`（C-16）。
+        ConsoleCommand("agent", "ls", exclude=("agent_id", "name")),
         ConsoleCommand("agent", "get", args=(
             Arg(Target("agent_id", type=int), positional=True, required=True),
-        ), help=(
-            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `agent ls` 取 ID）；"
-            "同时传 `--name` 时按底层契约以 <id> 为准。",
+        ), exclude=("name",), help=(
+            "只接受正整数 <id>，不接受按名称定位（按名称查询请先用 `agent ls` 取 ID）。",
         )),
     ),
 )
@@ -3242,10 +3244,12 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
     visibility=ToolVisibility.CONSOLE_ONLY,
     group="container",
     console=(
+        # `record_id` 命令行上不可达：两个位置槽都必填，`--record-id` 一旦给就必然
+        # `container_invalid_params: 必须二选一`（C-21）⇒ 该命令裁掉它。
         ConsoleCommand("container", "note", args=(
             Arg(Target("container_id", type=str), positional=True, required=True),
             Arg(Target("note", type=str), positional=True, required=True),
-        )),
+        ), exclude=("record_id",)),
     ),
 )
 async def update_container_note(

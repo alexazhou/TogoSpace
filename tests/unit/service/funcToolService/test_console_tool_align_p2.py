@@ -92,6 +92,68 @@ def test_help_lists_exactly_the_schema_params() -> None:
     assert not problems, "help 与 schema 参数面不一致：\n" + "\n".join(problems)
 
 
+def _section_rows(detail: str, title: str) -> list[str]:
+    """取某段标题下的行（缩进两格起，遇到第一个非缩进行即段尾）。"""
+    if title not in detail:
+        return []
+    rows: list[str] = []
+    for line in detail.split(title, 1)[1].splitlines():
+        if not rows and not line.strip():
+            continue  # 标题行本身在 split 后留下一个空串
+        if line.startswith("  "):
+            rows.append(line)
+        else:
+            break
+    return rows
+
+
+def test_help_sections_are_never_empty() -> None:
+    """交付标准（#323）：「无对应内容时不留空标题」。
+
+    `位置参数：` / `选项：` 只在下面**真有行**时才许出现；反向也钉：真有位置槽就有
+    「位置参数：」段（否则参数被静默吞掉）。
+    """
+    problems: list[str] = []
+    for cmd in TABLE.specs:
+        detail = ct.HELP_DETAIL[cmd.key]
+        for title in ("位置参数：", "选项："):
+            if title in detail and not _section_rows(detail, title):
+                problems.append(f"{cmd.key}: 「{title}」段是空的")
+        if cmd.positional_args and "位置参数：" not in detail:
+            problems.append(f"{cmd.key}: 有位置槽却没有「位置参数：」段")
+        if "位置参数：" in detail and not cmd.positional_args:
+            problems.append(f"{cmd.key}: 没有位置槽却出现了「位置参数：」段")
+    assert not problems, "help 分段有空标题：\n" + "\n".join(problems)
+
+
+def test_positional_required_marker_follows_arg_declaration() -> None:
+    """位置行必填标记 == **声明** `Arg.required`（不拿 schema required 比 —— 同源无鉴别力）。
+
+    PM 的验收判据：造「声明必填 / schema 可选」的现场，本用例必须在**每一个**这类
+    槽位上都红（`dept get.dept_id`、`agent get.agent_id`、`room get.room_id`、
+    `container note.container_id`、`container note.note`），而不是只红一条。
+    """
+    problems: list[str] = []
+    checked = 0
+    for cmd in TABLE.specs:
+        rows = _section_rows(ct.HELP_DETAIL[cmd.key], "位置参数：")
+        for arg in cmd.positional_args:
+            token = ct._positional_tokens(cmd, arg)[1]
+            line = next((row for row in rows if row.startswith(f"  {token} ")), None)
+            if line is None:  # 缺行由 test_help_lists_exactly_the_schema_params 负责
+                continue
+            checked += 1
+            want = "（必填）" if arg.required else "（可选）"
+            other = "（可选）" if arg.required else "（必填）"
+            if want not in line or other in line:
+                problems.append(
+                    f"{cmd.key}.{arg.target.name}: 声明 required={arg.required}，"
+                    f"help 行却是 {line!r}"
+                )
+    assert checked >= 17, f"位置槽只核到 {checked} 个，覆盖面不对"
+    assert not problems, "位置行必填标记与声明不一致：\n" + "\n".join(problems)
+
+
 def test_help_summary_is_derived_from_command_table() -> None:
     """`HELP_SUMMARY` 的资源与操作 == `table.by_resource`（规范排序后）派生结果。"""
     summary = ct.HELP_SUMMARY

@@ -120,19 +120,19 @@ class TestConsoleLocatorHint(ServiceTestCase):
         只收正整数 ID），所以这个选项连存在都不该存在——继续要求「给它一个改写示例」
         等于要求把按名定位加回来。这里改钉「选项不存在」+ 提示怎么查 ID。
         """
-        # ① 只给 `--name`：位置槽先判数量（0 段）⇒ invalid_argument_count。
+        # #323（D1=A）之后 `dept get` 声明层排除了 `name`（C-16 死选项）：
+        # 它既不在 help 里，也不在解析白名单里 ⇒ 解析阶段就 `unknown_option`，
+        # 不再走到「位置参数数量」那一步（裁剪发生在更前面）。
         result = await self._call("dept get --name hint_root")
         assert result["success"] is False, result
-        assert result["error_code"] == "invalid_argument_count", result
-        assert "位置参数" in result["message"], result["message"]
+        assert result["error_code"] == "unknown_option", result
+        assert "name" in result["message"], result["message"]
 
-        # ② 位置参数给足时，`--name` 会落到**原工具的同名可选参数**上，按变化 b 的契约
-        #    「`<id> --name` 同时给出时以 `<id>` 为准」⇒ 仍然按 ID 定位成功。
-        #    这条是 ① 的对照：证明 ① 的拒绝来自「位置参数缺失」，不是「命令整体不可用」。
+        # 对照：位置参数给足时**同样**拒（死选项不会被位置槽「救活」），
+        # 证明它是被裁剪掉的，而不是只在缺位置参数时才报错。
         with_pos = await self._call(f"dept get {self.dept_id} --name 不存在的名字")
-        assert with_pos["success"] is True, with_pos
-        assert with_pos["dept"]["dept_id"] == self.dept_id, with_pos
-        assert with_pos["dept"]["dept_name"] == "hint_root", with_pos
+        assert with_pos["success"] is False, with_pos
+        assert with_pos["error_code"] == "unknown_option", with_pos
 
         by_pos = await self._call("dept get hint_root")
         assert by_pos["success"] is False, by_pos

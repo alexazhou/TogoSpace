@@ -70,8 +70,11 @@ class TestToKebab:
         空表只对「有 schema 参数的命令」才算异常。
         """
         for spec in cr.get_table().specs:
-            if not spec.param_names and not spec.alias_map:
-                continue  # reload 等无选项命令：无可冲突面
+            # 可暴露面 = 全部参数减去 `ConsoleCommand.exclude` 裁掉的那些；位置槽也算在
+            # `command_options_map` 里（C-01 未拍板前仍接受 `--<kebab>` 写法）。
+            exposed = set(spec.param_names) - set(spec.excluded_param_names)
+            if not exposed and not spec.alias_map:
+                continue  # reload 等无参数命令 / 参数被整体裁掉的命令（dept|room|agent ls）
             # command_options_map 派生含冲突检测；有冲突会直接 ValueError。
             assert spec.command_options_map, f"{spec.key} 选项派生为空"
 
