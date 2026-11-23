@@ -141,6 +141,22 @@ class TestHelpPositionalLabel:
         assert line and "（必填）" in line[0], f"task update 的 <id> 行没标必填：{line!r}"
         assert not [ln for ln in detail.splitlines() if ln.lstrip().startswith("--task-id")]
 
+    def test_container_note_two_required_slots_marked_required(self) -> None:
+        """C-09 回归钉：`container note` 两个位置槽都是必填（`Arg(required=True)`），
+        改造前被印成「（可选）」——根因是拿了 schema `required`，而工具签名参数全有
+        默认值 ⇒ `schema_required` 恒空集。这里钉「声明即判据」：把判据换回 schema
+        required，本用例必须转红（变异实跑见 #323 报告）。
+        """
+        detail = ct.HELP_DETAIL["container note"]
+        section = detail.split("位置参数：", 1)[1].split("选项：", 1)[0]
+        for token in ("<container_id>", "<note>"):
+            line = [ln for ln in section.splitlines() if ln.startswith(f"  {token} ")]
+            assert line, f"container note 位置段缺 {token} 行：\n{detail}"
+            assert "（必填）" in line[0], f"{token} 没标必填：{line[0]!r}"
+        # 签名同源：用法行里两个槽都在、且不带 `--`
+        usage = detail.splitlines()[0]
+        assert usage.startswith("container note <container_id> <note>"), usage
+
     def test_create_has_no_positional_slot_at_all(self) -> None:
         """`dept create` 的参数面里**没有** `dept_id`：P0 把新建与更新彻底拆开后，
         「create 时顺带传 ID 走更新语义」这条通道已随 `save_dept` 一起删除（变化 a）。
