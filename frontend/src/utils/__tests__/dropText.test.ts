@@ -81,3 +81,31 @@ describe('insertDroppedText', () => {
     expect(insertDroppedText('abc', 99, 99, '')).toEqual({ value: 'abc', caret: 3 });
   });
 });
+
+describe('insertDroppedText 双插保护（skipIfAlreadyBeforeCaret）', () => {
+  it('光标前紧邻已经是这一块 ⇒ 不重复插入', () => {
+    expect(insertDroppedText('/tmp/a.txt', 10, 10, '/tmp/a.txt', { skipIfAlreadyBeforeCaret: true })).toEqual({
+      value: '/tmp/a.txt',
+      caret: 10,
+    });
+  });
+
+  it('不开启保护 ⇒ 照旧插入（默认行为不受影响）', () => {
+    expect(insertDroppedText('/tmp/a.txt', 10, 10, '/tmp/a.txt')).toEqual({
+      value: '/tmp/a.txt\n/tmp/a.txt',
+      caret: 21,
+    });
+  });
+
+  it('光标前不是这一块 ⇒ 不误杀（仍然插入）', () => {
+    expect(
+      insertDroppedText('/tmp/a.txt', 0, 0, '/tmp/a.txt', { skipIfAlreadyBeforeCaret: true }),
+    ).toEqual({ value: '/tmp/a.txt\n/tmp/a.txt', caret: 11 });
+  });
+
+  it('有选中区间时不走保护（语义是替换）', () => {
+    expect(
+      insertDroppedText('/tmp/a.txt', 0, 10, '/tmp/a.txt', { skipIfAlreadyBeforeCaret: true }),
+    ).toEqual({ value: '/tmp/a.txt', caret: 10 });
+  });
+});

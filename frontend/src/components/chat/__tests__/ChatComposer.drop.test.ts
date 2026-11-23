@@ -173,6 +173,36 @@ describe('ChatComposer 拖入文件（Tauri 形态）', () => {
     expect(wrapper.emitted('updateDraft')).toBeUndefined();
   });
 
+  it('双插保护：原生已把路径插进输入框时，事件通道不再重复插入（只出现一次）', async () => {
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    const textarea = wrapper.find('textarea').element as HTMLTextAreaElement;
+    // 模拟「webview 原生插入」：值与光标都已经是这条路径之后。
+    textarea.value = '/tmp/a.txt';
+    textarea.setSelectionRange(12, 12);
+
+    dragDropHandlers[0]({ payload: { type: 'drop', paths: ['/tmp/a.txt'] } });
+    await flushPromises();
+
+    expect(wrapper.emitted('updateDraft')).toBeUndefined();
+    expect(textarea.value).toBe('/tmp/a.txt');
+  });
+
+  it('双插保护不误杀：光标不在该路径之后时仍然插入', async () => {
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    const textarea = wrapper.find('textarea').element as HTMLTextAreaElement;
+    textarea.value = '/tmp/a.txt';
+    textarea.setSelectionRange(0, 0);
+
+    dragDropHandlers[0]({ payload: { type: 'drop', paths: ['/tmp/a.txt'] } });
+    await flushPromises();
+
+    expect(lastDraft(wrapper)).toBe('/tmp/a.txt\n/tmp/a.txt');
+  });
+
   it('组件卸载时调用 unlisten', async () => {
     const wrapper = mountComposer();
     await flushPromises();

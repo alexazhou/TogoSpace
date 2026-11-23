@@ -38,12 +38,17 @@ export function buildDropText(items: readonly string[]): string {
  * - 选中区间会被替换；
  * - 插入点前一个字符**不是空白** ⇒ 块前补一个换行；插入点后一个字符**不是空白** ⇒ 块后补一个换行。
  *   （避免出现 `看他file:///a.txt吗` 这种粘连，也让多文件逐行时不会粘到上一行末尾）
+ * - `options.skipIfAlreadyBeforeCaret` 为真且「光标前紧邻的文本已经就是这一块」⇒ 不重复插入。
+ *   这是**双插保护**（#339 R1）：桌面端若 webview 原生也把同一路径插了进去（原生插入会把光标放在
+ *   路径之后），事件通道随后再插一次就会重复；有这条判断就只留一份。代价：用户不输入任何内容
+ *   连续两次拖同一个文件时，第二次是空操作（可接受，且可预测，不依赖计时窗口）。
  */
 export function insertDroppedText(
   value: string,
   selectionStart: number,
   selectionEnd: number,
   block: string,
+  options: { skipIfAlreadyBeforeCaret?: boolean } = {},
 ): DropInsertResult {
   const text = block.trim();
   const clamp = (input: number) => Math.min(Math.max(input, 0), value.length);
@@ -54,6 +59,11 @@ export function insertDroppedText(
 
   const start = clamp(selectionStart);
   const end = Math.max(clamp(selectionEnd), start);
+
+  if (options.skipIfAlreadyBeforeCaret === true && start === end && value.slice(0, start).endsWith(text)) {
+    return { value, caret: start };
+  }
+
   const before = value.slice(0, start);
   const after = value.slice(end);
 

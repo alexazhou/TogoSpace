@@ -50,7 +50,12 @@ function insertDroppedItems(items: readonly string[]): void {
     element.selectionStart ?? element.value.length,
     element.selectionEnd ?? element.value.length,
     block,
+    // 双插保护（#339 R1）：桌面端若 webview 原生也已插入同一路径，这里不再重复插入。
+    { skipIfAlreadyBeforeCaret: true },
   );
+  if (value === element.value) {
+    return;
+  }
   emit('updateDraft', value);
   void nextTick(() => {
     element.focus();
