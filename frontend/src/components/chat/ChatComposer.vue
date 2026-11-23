@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, type StyleValue } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { isDropInsideRect } from '../../utils/dropHitTest';
 import { buildDropText, insertDroppedText } from '../../utils/dropText';
 import { isTauri } from '../../utils/platform';
 
@@ -17,6 +18,11 @@ import { isTauri } from '../../utils/platform';
  *   （`tauri-runtime-wry` 的 drag_drop handler 恒返回 `true` ⇒ wry 不再回调 OS 默认行为），
  *   因此改为订阅 `getCurrentWebview().onDragDropEvent`，从 `payload.paths` 取**绝对路径**。
  *   同期监听 DOM `drop` 只为兜底 `preventDefault`，不做插入，避免双插。
+ *
+ * 落点判定（#340）：`onDragDropEvent` 是 webview 级事件，不带「命中哪个 DOM」，所以必须自己判——
+ * 用 `payload.position`（物理像素）与输入框 `getBoundingClientRect()`（CSS 像素）按
+ * `devicePixelRatio` 换算后比较，**未命中就什么都不做**；position / rect / DPR 任一不可用一律
+ * 视为未命中（fail-closed：宁可漏插，不可乱插）。浏览器侧 DOM `drop` 天然只在本输入框上触发。
  */
 const { t } = useI18n();
 
@@ -36,6 +42,21 @@ const emit = defineEmits<{
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 let stopDragDropListener: (() => void) | null = null;
+
+/**
+ * 桌面端拖放落点是否命中输入框（物理像素 ÷ DPR 后与 CSS 像素矩形比较，fail-closed）。
+ *
+ * 命中区域取 **textarea 本身**，不取 `.composer-editor` 整块：浏览器端 DOM `drop` 只挂在
+ * textarea 上，若桌面端把底部提示/发送行也算命中，就又造出一个「拖到底部行：桌面插、浏览器不插」
+ * 的不一致。要放宽必须两端一起放宽（属扩需求），不要单边改这一行。
+ */
+function isDropInsideComposer(position: { x: number; y: number } | null | undefined): boolean {
+  const textarea = textareaRef.value;
+  if (!textarea) {
+    return false;
+  }
+  return isDropInsideRect(position, textarea.getBoundingClientRect(), window.devicePixelRatio);
+}
 
 /** 在聊天框光标处插入拖入项；桌面端传绝对路径，浏览器端传文件名。 */
 function insertDroppedItems(items: readonly string[]): void {
@@ -81,6 +102,10 @@ function handleDrop(event: DragEvent): void {
   event.preventDefault();
   if (isTauri()) {
     // 桌面端插入交给 onDragDropEvent（DOM 层拿不到真实文件路径），这里只阻止默认行为。
+    // 保留这个早退而不是「两条通道都插」：`dragDropEnabled = true`（默认）时 wry 的 drag_drop
+    // handler 会吞掉 drop、DOM `drop` 根本不派发；`= false` 时 handler 不安装、事件通道也不发
+    // 事件——两条通道按源码是互斥的（我们**没有**真机拖拽能力实测这一点），所以早退不会漏插。
+    // 若将来要把 `dragDropEnabled` 设成 false，必须同时删掉这段早退并各自补真机验证。
     return;
   }
   const names = Array.from(event.dataTransfer?.files ?? []).map((file) => file.name);
@@ -93,10 +118,18 @@ onMounted(async () => {
   }
   try {
     const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+    // 依赖：`tauri.conf.json` 的 window `dragDropEnabled` 必须保持默认 true。
+    // 显式设成 false 后 Tauri 不再安装 drag_drop handler、事件通道不再发事件，
+    // 而 DOM `drop` 在 Tauri 形态下又被 `handleDrop` 早退挡掉 ⇒ 拖入会**静默失效**。
     stopDragDropListener = await getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type === 'drop') {
-        insertDroppedItems(event.payload.paths);
+      if (event.payload.type !== 'drop') {
+        return;
       }
+      // webview 级事件无落点信息，必须自己判：拖到侧边栏/设置页时不能插进聊天草稿。
+      if (!isDropInsideComposer(event.payload.position)) {
+        return;
+      }
+      insertDroppedItems(event.payload.paths);
     });
   } catch (error) {
     console.warn('onDragDropEvent failed:', error);
