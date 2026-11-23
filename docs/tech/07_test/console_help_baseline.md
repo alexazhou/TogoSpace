@@ -43,9 +43,9 @@ PYTEST_XDIST_WORKER=gw99 env -u TOGOSPACE_DESKTOP \
 | `summary_bytes` | 1042 | **1042** | 0 |
 | `summary_lines` | 14 | **14** | 0 |
 | `detail_entries` | 28 | **28** | 0 |
-| `detail_bytes_total` | 21085 | **20129** | −956（−4.53%） |
+| `detail_bytes_total` | 21085 | **19128** | −1957（−9.28%） |
 | `detail_bytes_max` | 2835（`task update`） | **2735**（`task update`） | -100 |
-| `detail_bytes_min` | 144（`reload`） | **144**（`reload`） | 0 |
+| `detail_bytes_min` | 144（`reload`） | **83**（`room ls`） | -61 |
 
 `summary` 一字未动是有意为之：本单只删「与 summary 重复」的 overlay 行，summary 自身
 是全局规则的**正本**（`_build_help_summary`），不在收拢范围内。
@@ -65,25 +65,25 @@ PYTEST_XDIST_WORKER=gw99 env -u TOGOSPACE_DESKTOP \
 | `dept rm` | 703 | 727 → 703（-24） |
 | `role create` | 644 | — |
 | `role update` | 637 | 734 → 637（-97） |
-| `agent get` | 633 | 658 → 633（-25） |
 | `room create` | 590 | — |
-| `container note` | 574 | 746 → 574（-172） |
-| `dept get` | 538 | 561 → 538（-23） |
 | `room rm` | 506 | 530 → 506（-24） |
-| `room get` | 454 | 477 → 454（-23） |
+| `agent get` | 474 | 658 → 474（-184） |
+| `container note` | 456 | 746 → 456（-290） |
 | `task get` | 382 | 405 → 382（-23） |
+| `dept get` | 370 | 561 → 370（-191） |
 | `agent dm` | 346 | 382 → 346（-36） |
+| `room get` | 346 | 477 → 346（-131） |
 | `role ls` | 320 | — |
 | `role rm` | 305 | 339 → 305（-34） |
 | `agent wake` | 293 | 331 → 293（-38） |
-| `dept ls` | 279 | — |
-| `agent ls` | 252 | — |
 | `role get` | 236 | 271 → 236（-35） |
-| `room ls` | 195 | — |
 | `time get` | 182 | — |
 | `reload` | 144 | — |
+| `dept ls` | 107 | 279 → 107（-172） |
+| `agent ls` | 88 | 252 → 88（-164） |
+| `room ls` | 83 | 195 → 83（-112） |
 
-**#323 之后的口径**：凡有参数的命令都换成了「位置参数：/ 选项：」两段，所以 28 条里 27 条字节都变了（唯一不变的是 `reload`，它没有参数）；没有位置参数、也没有隐藏参数的命令净变化为 0（段标题改名「参数：」→「选项：」恰好同长）。
+**#323 之后的口径**：参数清单拆成「位置参数：/ 选项：」两段（位置行名字 = 签名 token），并按 `ConsoleCommand(exclude=...)` 裁掉了命令级不可达参数（`container note --record-id`、`dept|room|agent get --name`、`dept|room|agent ls` 的单查定位参数）。实测量法下 **28 条里 19 条字节变化、9 条不变**（`dept|agent|room create`、`role ls`、`role create`、`task ls`、`task create`、`time get`、`reload` —— 都是「无位置槽、且排除前后选项面都为空」的命令）。最小的是 `room ls` 83 B（选项被裁空，只剩用法行 + 用途），`reload` 仍是无参数命令、字节不变。
 
 ## 4. 已知限制
 
