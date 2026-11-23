@@ -753,6 +753,50 @@ async def get_dept_info(
     return {"success": True, "dept": _serialize_dept_node(target, id_to_name)}
 
 
+async def _room_view(
+    room_config: Any,
+    id_to_name: dict[int, str],
+    *,
+    detail: bool,
+) -> dict[str, Any]:
+    """把一个房间配置渲染成对外视图：列表项与详情项共用**同一份**构造。
+
+    为什么必须抽成一个函数（#335 / C-02）：原先列表分支与单查分支各手搓一份字典，
+    列表那份漏了 `room_id` —— 而 `room get <id>` 是唯一的详情入口、`room ls` 又是拿到
+    id 的唯一途径，少这一项就把「查房间」整条用户流程断死（提示教人拿 ID，却永远拿不到）。
+    两份手搓还会各自漂移（本次修复只补一处就会留下同形缺陷），所以合并成单点构造。
+
+    `detail=True` 只额外追加 `current_turn` / `total_messages`（详情专属字段），
+    其余字段两档完全一致。
+    """
+    runtime_room = roomService.get_room(room_config.id)
+    agent_ids = [
+        agent_id
+        for agent_id in (room_config.agent_ids or [])
+        if agent_id != int(SpecialAgent.SYSTEM.value)
+    ]
+    view: dict[str, Any] = {
+        # room_id 放在首位：它是 `room get <id>` 的唯一输入，也是本单要补的那个字段。
+        "room_id": room_config.id,
+        "room_name": room_config.name,
+        "room_type": room_config.type.name,
+        "state": runtime_room.state.name if runtime_room is not None else RoomState.INIT.name,
+        "members": [_resolve_agent_name(agent_id, id_to_name) for agent_id in agent_ids],
+        "member_count": len(agent_ids),
+        "tags": list(room_config.tags or []),
+    }
+    if detail:
+        view["current_turn"] = (
+            _resolve_agent_name(runtime_room.get_current_turn_agent_id(), id_to_name)
+            if runtime_room is not None and runtime_room.state == RoomState.SCHEDULING
+            else None
+        )
+        # 内存窗口化后 len(runtime_room.messages) 只等于窗口大小（且房间未加载时为 0），
+        # 不再等于真实总数 —— 改查 DB 计数。
+        view["total_messages"] = await gtRoomMessageManager.count_room_messages(room_config.id)
+    return view
+
+
 @tool(
     visibility=ToolVisibility.BOTH,
     console=(
@@ -786,25 +830,12 @@ async def get_room_info(
 
     if room_id is None and normalized_name is None:
         room_configs = await gtRoomManager.get_rooms_by_team(team_id)
-        rooms: list[dict[str, Any]] = []
-        for room_config in room_configs:
-            runtime_room = roomService.get_room(room_config.id)
-            rooms.append({
-                "room_name": room_config.name,
-                "room_type": room_config.type.name,
-                "state": runtime_room.state.name if runtime_room is not None else RoomState.INIT.name,
-                "members": [
-                    _resolve_agent_name(agent_id, id_to_name)
-                    for agent_id in (room_config.agent_ids or [])
-                    if agent_id != int(SpecialAgent.SYSTEM.value)
-                ],
-                "member_count": len([
-                    agent_id
-                    for agent_id in (room_config.agent_ids or [])
-                    if agent_id != int(SpecialAgent.SYSTEM.value)
-                ]),
-                "tags": list(room_config.tags or []),
-            })
+        rooms: list[dict[str, Any]] = [
+            await _room_view(room_config, id_to_name, detail=False)
+            for room_config in room_configs
+        ]
+        # 顶层键保持 `rooms`（数组）不变：`room ls` 的契约是列表，
+        # 改成单数 `room` 会破坏 `room get <id>` 的单查契约（文档 §9 已把该说法列为作废）。
         return {"success": True, "rooms": rooms}
 
     if room_id is not None:
@@ -819,28 +850,8 @@ async def get_room_info(
     if room_config is None:
         return {"success": False, "message": f"未找到房间: {_locator_label(room_id, normalized_name)}"}
 
-    runtime_room = roomService.get_room(room_config.id)
-    room_dict: dict[str, Any] = {
-        "room_name": room_config.name,
-        "room_type": room_config.type.name,
-        "state": runtime_room.state.name if runtime_room is not None else RoomState.INIT.name,
-        "members": [
-            _resolve_agent_name(agent_id, id_to_name)
-            for agent_id in (room_config.agent_ids or [])
-            if agent_id != int(SpecialAgent.SYSTEM.value)
-        ],
-        "member_count": len([
-            agent_id
-            for agent_id in (room_config.agent_ids or [])
-            if agent_id != int(SpecialAgent.SYSTEM.value)
-        ]),
-        "current_turn": _resolve_agent_name(runtime_room.get_current_turn_agent_id(), id_to_name) if runtime_room is not None and runtime_room.state == RoomState.SCHEDULING else None,
-        # 内存窗口化后 len(runtime_room.messages) 只等于窗口大小（且房间未加载时为 0），
-        # 不再等于真实总数 —— 改查 DB 计数。
-        "total_messages": await gtRoomMessageManager.count_room_messages(room_config.id),
-        "tags": list(room_config.tags or []),
-    }
-    return {"success": True, "room": room_dict}
+    # 顶层键保持 `room`（单数对象）不变。
+    return {"success": True, "room": await _room_view(room_config, id_to_name, detail=True)}
 
 
 @tool(
