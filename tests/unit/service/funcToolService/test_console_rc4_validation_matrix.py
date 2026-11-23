@@ -295,60 +295,110 @@ async def test_unknown_key_at_executor_entry_is_structured_not_typeerror() -> No
 
 
 # --------------------------------------------------------------------------- #
-# usage 行与详情段同源（#323 验收追加，本单收敛）
+# usage 行与详情段同源（#323 验收追加；#334 按 PM 02:24 裁定改成**文本对文本**）
 # --------------------------------------------------------------------------- #
+#
+# 判据口径（重要，别改回去）：两侧都从**渲染后的 help 文本**抽，不读 `display_options`。
+# 为什么：`display_options` 正是 `_usage_line` 的实现输入，判据读它等于「判据与实现同源」
+# —— 只能防「改漏一处」，防不住两处一起改回 `cmd.options`（那恰恰是本单要防的回归：
+# 位置槽的 kebab 形态又回到选项面，`dept get` 会同时印 `<id>` 位置行与 `--dept-id` 选项行）。
+# `display_options` 只写进根因说明（§报告），不进判据。
+
+_USAGE_PLACEHOLDER = "[--选项 ...]"
+_SECTION = "选项："
+#: #323/#334 定案：只有位置槽、没有可展示选项的 8 条（文本判据下逐条点名）
+_NO_OPTION_COMMANDS = {
+    "dept get",
+    "agent get",
+    "room get",
+    "agent dm",
+    "agent wake",
+    "role get",
+    "role rm",
+    "container note",
+}
 
 
-def test_usage_option_placeholder_follows_display_options() -> None:
-    """全量扫 28 条命令：`[--选项 ...]` 的出现**恰好等价于** `display_options` 非空。
+def _usage_line(detail: str) -> str:
+    return detail.splitlines()[0]
 
-    两半一起钉：
-    - 详情没有「选项：」段却仍印占位 ⇒ 判不合格；
-    - 详情有段却不印占位 ⇒ 也判不合格（防「过度删除」，改前 8 条正是第一种）。
+
+def _has_section(detail: str) -> bool:
+    """详情里**是否真的有「选项：」段**（标题行本身，不是被描述文字蹭到的子串）。"""
+    return any(line.strip() == _SECTION for line in detail.splitlines())
+
+
+def _text_table() -> list[tuple[str, bool, bool]]:
+    return [
+        (key, _USAGE_PLACEHOLDER in _usage_line(detail), _has_section(detail))
+        for key, detail in ct.HELP_DETAIL.items()
+    ]
+
+
+def test_usage_placeholder_matches_detail_section_textonly() -> None:
+    """**主判据**（全量逐条）：`usage 行有 [--选项` ⇔ `详情有「选项：」段`。
+
+    两侧都是渲染后的文本，覆盖全部命令（28 条），失败时打印全量对照表。
     """
-    mismatched: list[tuple[str, bool, bool, tuple[str, ...]]] = []
-    for key, detail in ct.HELP_DETAIL.items():
-        cmd = _cmd(key)
-        usage_has = "[--选项 ...]" in detail.splitlines()[0]
-        has_section = "选项：" in detail
-        if usage_has != bool(cmd.display_options) or has_section != bool(cmd.display_options):
-            mismatched.append((key, usage_has, has_section, cmd.display_options))
-    assert not mismatched, f"usage 占位 / 详情段 / display_options 三者不同源：{mismatched}"
-
-
-def test_usage_placeholder_absent_for_the_eight_commands() -> None:
-    """#323 验收点出的 8 条必须已经不印占位（名单现场派生，不写死）。"""
-    eight = sorted(
-        key
-        for key in ct.HELP_DETAIL
-        if not _cmd(key).display_options and _cmd(key).positional_param_names
+    table = _text_table()
+    bad = [(key, left, right) for key, left, right in table if left != right]
+    assert not bad, (
+        "usage 占位与详情选项段不同源（左=usage 有无 [--选项 / 右=详情有无「选项：」段）：\n  "
+        + "\n  ".join(f"{key}: usage={left} detail_section={right}" for key, left, right in bad)
+        + "\n全量对照：\n  "
+        + "\n  ".join(f"{key}: usage={left} detail_section={right}" for key, left, right in table)
     )
-    assert eight, "派生不出任何「只有位置槽、没有选项」的命令（判据失效，先查 display_options）"
-    for key in eight:
-        assert "[--选项 ...]" not in ct.HELP_DETAIL[key].splitlines()[0], (
-            f"{key} 的 usage 仍宣称有选项：{ct.HELP_DETAIL[key].splitlines()[0]!r}"
-        )
-    assert set(eight) == {
-        "dept get",
-        "agent get",
-        "room get",
-        "agent dm",
-        "agent wake",
-        "role get",
-        "role rm",
-        "container note",
-    }, eight
 
 
-def test_usage_placeholder_present_when_options_exist() -> None:
-    """反向对照：真的有选项的命令必须**仍然**印占位（否则就是过度删除）。"""
-    with_options = [key for key in ct.HELP_DETAIL if _cmd(key).display_options]
-    assert len(with_options) >= 15, len(with_options)
-    for key in with_options:
-        assert "[--选项 ...]" in ct.HELP_DETAIL[key].splitlines()[0], (
-            f"{key} 有选项却没印占位：{ct.HELP_DETAIL[key].splitlines()[0]!r}"
+def test_no_option_commands_have_neither_placeholder_nor_section() -> None:
+    """正向（改前 8 条的第一种失效）：这些命令详情没有选项段，usage 就不许宣称有选项。"""
+    for key in sorted(_NO_OPTION_COMMANDS):
+        detail = ct.HELP_DETAIL[key]
+        assert not _has_section(detail), f"{key} 详情里出现了「选项：」段：\n{detail}"
+        assert _USAGE_PLACEHOLDER not in _usage_line(detail), (
+            f"{key} 的 usage 仍宣称有选项：{_usage_line(detail)!r}"
         )
-        assert "选项：" in ct.HELP_DETAIL[key], key
+
+
+def test_commands_with_option_section_still_print_placeholder() -> None:
+    """反向（防过度删除）：详情**有**选项段的命令，usage 必须**仍然**印占位。
+
+    样本数 N 现场统计并要求 > 0（`N == 0` 说明判据没武装），失败时点名具体命令。
+    """
+    with_section = [key for key, detail in ct.HELP_DETAIL.items() if _has_section(detail)]
+    missing = [key for key in with_section if _USAGE_PLACEHOLDER not in _usage_line(ct.HELP_DETAIL[key])]
+    assert len(with_section) > 0, "样本 N=0：没有任何命令有选项段，这条判据没武装"
+    assert not missing, (
+        f"这 {len(missing)} 条有选项段却没印占位（N={len(with_section)}，越界名单={missing}）："
+        + " / ".join(f"{k}: {_usage_line(ct.HELP_DETAIL[k])!r}" for k in missing)
+    )
+    assert len(with_section) == 16, f"样本数变了（{len(with_section)}，预期 16）：{sorted(with_section)}"
+
+
+def test_positional_param_kebab_never_appears_in_option_section() -> None:
+    """C-08 的**文本回潮判据**：位置槽参数的 `--kebab` 形态不得出现在「选项：」段里。
+
+    为什么需要这条：主判据（usage ⇔ 详情段）两侧都是渲染文本，**同源误修**——把
+    `_usage_line` 与 `display_options` 一起改回读 `cmd.options`——会让两侧保持一致，
+    主判据照样绿，但同一个参数会被印两遍（位置行 `<id>` + 选项行 `--dept-id`）。
+
+    右侧取的是**声明**里的位置槽名（`Arg.positional`，单一事实源），不是 `display_options`，
+    所以这条不会被「渲染实现被一起改坏」骗过：只要渲染把位置槽又当选项印出来就红。
+    """
+    offenders: list[str] = []
+    for key, detail in ct.HELP_DETAIL.items():
+        lines = detail.splitlines()
+        if _SECTION not in lines:
+            continue
+        option_block = lines[lines.index(_SECTION) + 1 :]
+        for name in sorted(_cmd(key).positional_param_names):
+            kebab = "--" + name.replace("_", "-")
+            hit = [line.strip() for line in option_block if line.strip().startswith(kebab + " ")]
+            if hit:
+                offenders.append(f"{key}: 位置槽 {name} 又在选项段出现 -> {hit[0][:50]}")
+    assert not offenders, (
+        "位置槽参数被当成选项行又印了一次（C-08 回潮）：\n  " + "\n  ".join(offenders)
+    )
 
 
 # --------------------------------------------------------------------------- #
