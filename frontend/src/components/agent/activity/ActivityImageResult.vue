@@ -208,7 +208,13 @@ onUnmounted(() => {
   background: var(--surface-activity-item);
   color: var(--muted);
   font-size: 0.72rem;
-  cursor: zoom-in;
+  /* 只有 loaded 才可点（openLightbox 也只在 loaded 生效），基底不能先假装可点：
+     否则 idle/loading 的放大镜光标会让人以为「点了没反应 = 卡死」(#363)。 */
+  cursor: default;
+}
+
+.agent-activity-image__frame[data-state='loading'] {
+  cursor: progress;
 }
 
 .agent-activity-image__frame[data-state='loaded'] {
