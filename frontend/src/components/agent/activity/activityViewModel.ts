@@ -46,6 +46,8 @@ export type ActivityView = {
   showModelOutsideLlmInfer: boolean;
   showMetadataToolName: boolean;
   taskTitle: string;
+  /** read_image 成功结果的图片数据；非图片工具/无数据时为 null（模板据此渲染图片块） */
+  image: ActivityImage | null;
   sendChatMsgContent: string;
   sendChatMsgError: string;
   sendChatMsgTruncated: boolean;
@@ -71,6 +73,96 @@ export type ActivityView = {
   toolName: string;
   toolResult: string;
 };
+
+/**
+ * read_image 活动的图片数据（#361）。
+ *
+ * 数据来源：后端 `AgentActivityMeta.to_dict()` 把整个工具结果原样写进活动
+ * `metadata.tool_result`，`read_image` 的结果形如
+ * `{mime_type, base64, format, width, height, size_bytes, file_path}`。
+ * 实测（`dev_storage_root/data/data.db`，74 条 read_image 活动里 69 条带 base64）
+ * base64 是**完整内联**数据，因此前端零后端改动即可显示。
+ *
+ * 刻意**不用 `file_path` 当图片源**：它多是 `/tmp/...` 或容器内路径，运行期
+ * 大概率已不存在（本机读不到），base64 才是唯一可靠来源；路径只做文案。
+ */
+export type ActivityImage = {
+  /** 可直接喂给 `<img src>` 的 data URL */
+  src: string;
+  mimeType: string;
+  /** `png` / `jpeg` 之类，后端给的短格式名；缺失时为空串 */
+  format: string;
+  width: number | null;
+  height: number | null;
+  sizeBytes: number | null;
+  filePath: string;
+};
+
+function readPositiveInt(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : null;
+}
+
+/**
+ * 从活动记录里取图片数据，取不到返回 null（fail-closed）。
+ *
+ * 判据（任一不满足即 null，宁可退回文本态也不渲染半张图）：
+ * ① 活动类型是 `tool_call` 且工具名是 `read_image`；
+ * ② `metadata.tool_result` 是对象（不是数组）；
+ * ③ `mime_type` 是非空 `image/*` 字符串；
+ * ④ `base64` 是去空白后非空字符串。
+ */
+export function getActivityImage(activity: AgentActivity): ActivityImage | null {
+  if (activity.activity_type !== 'tool_call') {
+    return null;
+  }
+  if (computeToolName(activity) !== 'read_image') {
+    return null;
+  }
+  const result = activity.metadata?.tool_result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return null;
+  }
+  const record = result as Record<string, unknown>;
+  const mimeType = readTrimmedString(record.mime_type);
+  if (!mimeType.startsWith('image/')) {
+    return null;
+  }
+  const rawBase64 = typeof record.base64 === 'string' ? record.base64.replace(/\s+/g, '') : '';
+  if (!rawBase64) {
+    return null;
+  }
+  return {
+    src: `data:${mimeType};base64,${rawBase64}`,
+    mimeType,
+    format: readTrimmedString(record.format),
+    width: readPositiveInt(record.width),
+    height: readPositiveInt(record.height),
+    sizeBytes: readPositiveInt(record.size_bytes),
+    filePath: readTrimmedString(record.file_path),
+  };
+}
+
+/** 图片下方那行说明：`171×1000 · png · 24.9 KB · old_edge.png`（缺哪项就省哪项）。 */
+export function buildImageMetaText(image: ActivityImage): string {
+  const parts: string[] = [];
+  if (image.width !== null && image.height !== null) {
+    parts.push(`${image.width}×${image.height}`);
+  }
+  const format = image.format || image.mimeType.replace(/^image\//, '');
+  if (format) {
+    parts.push(format);
+  }
+  if (image.sizeBytes !== null) {
+    parts.push(image.sizeBytes >= 1024 * 1024
+      ? `${(image.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(image.sizeBytes / 1024))} KB`);
+  }
+  const fileName = image.filePath.split('/').filter(Boolean).pop() ?? '';
+  if (fileName) {
+    parts.push(fileName);
+  }
+  return parts.join(' · ');
+}
 
 export const TOOL_RESULT_PREVIEW_MAX_CHARS = 2000;
 export const TOOL_ARGUMENTS_PREVIEW_MAX_CHARS = 500;
@@ -432,6 +524,14 @@ function resolveRawToolResult(t: Translate, activity: AgentActivity, toolName: s
   if (toolResult == null) {
     return '';
   }
+  if (toolResult && typeof toolResult === 'object' && !Array.isArray(toolResult)) {
+    // read_image：图片由 ActivityImageResult 渲染，不再把 base64 当文本预览打出来
+    // （否则卡片里是一屏被截断的 base64 JSON，看着像「没有图」）。仅有 base64 时省略，
+    // 失败/非图片结果（无 base64）继续走下面的文本分支，错误信息不会丢。
+    if (getActivityImage(activity) !== null) {
+      return '';
+    }
+  }
   if (typeof toolResult === 'string') {
     return stripAnsi(toolResult.replace(/\s+$/, ''));
   }
@@ -661,6 +761,7 @@ export function buildActivityView(input: ActivityViewInput): ActivityView {
     ? truncatePreview(getExecuteBashStderr(activity), TOOL_RESULT_PREVIEW_MAX_CHARS)
     : '';
   const currentExitCode = executeBashResult ? getExecuteBashExitCode(activity) : '';
+  const currentImage = getActivityImage(activity);
   const currentToolResult = getActivityToolResult(t, activity, currentToolName);
   const currentErrorMessage = readTrimmedString(activity.error_message);
   const currentRetryText = getActivityRetryText(t, activity);
@@ -682,6 +783,7 @@ export function buildActivityView(input: ActivityViewInput): ActivityView {
   const receivedMessages = getReceivedMessages(activity);
   const expandedContent = activity.activity_type === 'chat_reply' || expandedMessage || expandedToolResult
     || hasExecuteBashDetails
+    || Boolean(currentImage)
     || (activity.activity_type === 'message_received' && receivedMessages.length > 0);
   const currentTaskTitle = getActivityTaskTitle(t, activity, currentToolName);
   const currentExecEnvBadge = execEnvBadgeText(t, activity);
@@ -732,6 +834,7 @@ export function buildActivityView(input: ActivityViewInput): ActivityView {
     showModelOutsideLlmInfer: activity.activity_type !== 'llm_infer' && Boolean(currentModel),
     showMetadataToolName: activity.activity_type !== 'tool_call' && Boolean(currentMetadataToolName),
     taskTitle: currentTaskTitle,
+    image: currentImage,
     sendChatMsgContent,
     sendChatMsgError,
     sendChatMsgTruncated,

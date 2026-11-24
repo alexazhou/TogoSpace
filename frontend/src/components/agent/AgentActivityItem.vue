@@ -220,8 +220,9 @@ const activityView = computed(() => buildActivityView({
       :stderr="activityView.stderr"
     />
     <ActivityToolResult
-      v-else-if="activityView.expandedToolResult"
+      v-else-if="activityView.expandedToolResult || activityView.image"
       :content="activityView.toolResult"
+      :image="activityView.image"
     />
     <ActivityReceivedMessages
       v-if="activityView.showReceivedMessages"

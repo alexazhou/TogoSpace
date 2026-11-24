@@ -97,6 +97,14 @@
     "roomAdded": "Room created"
   },
   "agent": {
+    "image": {
+      "deferred": "Image (loads when scrolled into view)",
+      "loading": "Loading image…",
+      "loadFailed": "Image failed to load (missing or invalid data)",
+      "open": "View full size",
+      "close": "Close",
+      "alt": "Image read by the tool"
+    },
     "status": {
       "active": "Active",
       "idle": "Idle",
@@ -183,6 +191,7 @@
       "execute_bash": "Run Command",
       "edit": "Edit File",
       "read_file": "Read File",
+      "read_image": "Read Image",
       "write_file": "Write File",
       "send_chat_msg": "Message",
       "create_task": "Create Task",

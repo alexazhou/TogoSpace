@@ -97,6 +97,14 @@
     "roomAdded": "房间已创建"
   },
   "agent": {
+    "image": {
+      "deferred": "图片（滚动到可见时加载）",
+      "loading": "图片加载中…",
+      "loadFailed": "图片加载失败（数据缺失或已失效）",
+      "open": "查看大图",
+      "close": "关闭",
+      "alt": "工具读取的图片"
+    },
     "status": {
       "active": "忙碌",
       "idle": "空闲",
@@ -183,6 +191,7 @@
       "execute_bash": "执行命令",
       "edit": "编辑文件",
       "read_file": "读取文件",
+      "read_image": "读取图片",
       "write_file": "写入文件",
       "send_chat_msg": "发言",
       "create_task": "创建任务",
