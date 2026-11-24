@@ -152,3 +152,22 @@ class ToolVisibility(EnhanceEnum):
    - Driver 全量注册工具以保证 `enabled` 权限单点计算；
    - 同时在 `export_openai_tools()` 与 `list_enabled_tool_names()`（供 `claudeSdkDriver` 使用）按 `tool_visible` 过滤模型暴露面（支持动态响应 `TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS` 环境变量）；
    - 在 `execute_tool_call` 中按 `hop == 0`（要求 `tool_visible`）和 `hop == 1`（要求 `console_visible`）校验可见性，在 `console` 的 `help` 与路由中按需过滤 `console_visible`，并更新 `test_console_meta.py` 与 `test_console_d2_execution.py`。
+
+---
+
+## 五、补充：`consoleSchema.py` 的两条约束（#359 搬迁）
+
+> 本节是 `src/service/funcToolService/consoleSchema.py` 模块 docstring 的原文搬迁（2026-11-25，#359 压缩注释：30 行压到 5 行）。
+> 该模块「从 `tools.py` 单向派生选项与 help」这件事本文 [一、现状概览](#一现状概览) 第 2 条已经写过，[三、清单](#三代码实现层面的简化与清理清单) 第 7 行还给了 `get_function_metadata` 重复调用的改法；下面只记录原文里本文没覆盖的两条。
+
+### 5.1 为什么 `import tools` 写在函数体里
+
+`consoleCommands` 的设计约束是「只依赖标准库，单元测试可以脱离数据库直接跑」。而本模块必须 `import tools`（只有那里有被翻译成 schema 的函数本体），所以把所有 `import` 都放进函数体：模块顶层仍然只有标准库，`import consoleSchema` 不会带起任何 service 依赖。
+
+### 5.2 本模块不校验参数值
+
+本模块只回答「命令行上这个参数怎么写」：叫什么、是数字/开关/列表/字符串/对象、是否必填。**不判断值是否合法**（枚举、正数范围、业务规则）—— 那一步在 `#189` 的 schema 校验和服务层。在这里再做一遍就等于有两个地方决定同一件事，以后加枚举值时会两边不一致（`#187` 第 3 条裁定里同样的判断）。
+
+### 5.3 手抄副本出过的事故
+
+`taskService` 曾经手抄了一份 `clear_fields` 常量，把派生出来的常量挡住了；做变异测试时用例照样变红，但红的原因是那份手抄副本，不是被测逻辑本身（`#181` 现场）。

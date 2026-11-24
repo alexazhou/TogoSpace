@@ -258,3 +258,41 @@ await self._history.finalize_history_item(output_item.id, message=final_message,
    （如 `STORAGE_ROOT/workspace` 下的产物），仅持久化引用。
 3. **token 估算**：多模态 content 的 `estimate_tokens` 走 litellm 原生估算（已验证支持）；
    字符兜底估算 `estimate_token_by_char` 已改为按 `text_content()` 计算。
+
+---
+
+## 10. MCP `CallToolResult` 二进制内容落盘（#300 / #359 搬迁）
+
+> 本节是 `src/service/funcToolService/mcpContent.py` 模块 docstring 的原文搬迁（2026-11-25，#359 压缩注释：模块头从 46 行压到 5 行）。
+> 需求来源：`need_fix_3.md`《MCP 工具结果多模态内容通用处理方案》§3 方案 A。
+
+### 10.1 问题
+
+MCP 协议里 `CallToolResult.content[]` 是**多态数组**：
+
+| type | 结构 |
+|---|---|
+| `text` | `{type, text}` |
+| `image` / `audio` | `{type, data(base64), mimeType}` |
+| `resource_link` | `{type, uri, name, mimeType?}` |
+| `resource` | `{type, resource: {...}}` |
+
+改造前 `consoleMcp._content_text()`（当时文件名是 `mcpConsole.py`）只做「有 `text` 取 text，否则取 `data` 拼进去」，`type` 与 `mimeType` **整段丢弃** ⇒ 带截图产出的工具（如 `take_screenshot` 不传 `filePath`）会把近 1MB 裸 base64 灌进 Agent 上下文：LLM 不可读、纯占上下文，且没有任何「这是图片」的标记。
+
+### 10.2 做法
+
+按**协议字段 `content[].type` 分发**，不对任何具体 server 做特判 —— 一次实现，所有 MCP server（文件类 / 图像类 / 音频类）自动受益：
+
+- `text` → 原样拼文本（现行为不变）
+- `image` / `audio` → base64 解码 → 写 `tempfile.gettempdir()` → 返回 `[图片已保存: <绝对路径> (size, mimeType)]` 占位，Agent 用现有 `read_image` 即可看图
+- `resource_link` → 保留 URI（改造前这类段**整段丢失**，因为它既无 `text` 也无 `data`）
+- `resource`（内嵌资源）→ 内容（`blob` 或 `text`）落盘 → `[资源已保存: <路径> (size, mimeType)]`（#300 评论 1846：Operator 要求「dump 到本地 + 注入提示」，正文不进上下文）
+- 未知 type → JSON 结构兜底，其中 base64 字段省略为占位
+
+### 10.3 红线：任何分支都不把 base64 或资源正文拼回文本
+
+解码失败、超过大小上限、落盘失败 ⇒ 都返回带原因的占位文本。失败时回吐原始 base64 会把「零 base64」的收益全部作废（这正是本单要修的问题）。同理，`resource` 的 `text` 正文也不内联（只落盘 + 提示），未知 type 的兜底序列化里 `blob` / 超长 base64 外观字符串也替换为 `<base64 已省略: N 字符>`。
+
+### 10.4 生命周期
+
+文件写 `tempfile.gettempdir()`（per-user TMPDIR），由 OS 常规清理回收，本模块**不主动删除** —— 与 server 侧 `saveTemporaryFile` 的行为一致；且 Agent 可能在其后的回合里才去 `read_image`，提前删会打断链路。

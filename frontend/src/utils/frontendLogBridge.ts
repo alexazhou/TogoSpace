@@ -1,36 +1,7 @@
-/**
- * 前端日志桥（#197）：把前端 console 日志经现有 ws 通道转发到后端，由后端写入本地文件。
- *
- * ## 与 `desktopLog.ts` 的分工（不重复、不互相替代）
- *
- * - `desktopLog.ts`：**仅桌面形态**，`warn`/`error`/全局异常恒定转发到 Tauri 外壳，
- *   落到 `{STORAGE_ROOT}/logs/desktop/desktop.log`。它解决的是「外壳与后端启动时序」
- *   这类只在桌面端有的问题。
- * - 本模块：**桌面与浏览器都装**，把日志经 ws 送到**后端**，落到
- *   `{STORAGE_ROOT}/logs/backend/frontend/frontend.log`。它解决的是 Operator 的原需求：
- *   「web 跑在浏览器里也要能转发」—— 浏览器形态没有 Tauri 外壳，`desktopLog.ts`
- *   在那一侧直接 return，等于完全没有落库能力。
- *
- * 桌面形态下 `warn`/`error` 会同时出现在两个文件里。这是刻意的：`desktop.log`
- * 记录「外壳视角看到了什么」，`frontend.log` 记录「后端收到了什么」，排查转发链路
- * 本身的问题时两者对比才有信息量。本模块**不修改 `desktopLog.ts` 的任何行为**。
- *
- * ## 开关
- *
- * 双层门控，两道都必须开：
- * 1. 前端侧（由 `setFrontendLogBridgeEnabled` 置位）：桌面来自 Rust 注入的
- *    `window.tgconfig.frontendDebug`，浏览器来自 `/system/status.json` 的
- *    `frontend_debug`。关着就连 ws 报文都不发（省流量）。
- * 2. 后端侧 `TOGOSPACE_FRONTEND_DEBUG`（`util/frontendLog.py`）：真正的写盘闸门。
- *    前端这道只是省流量，**不是**安全边界 —— 任何能连 ws 的客户端都能自己发报文。
- *
- * 前端侧有三态（`pending` / `enabled` / `disabled`）：未知态只攒队列、不发报文，
- * 拿到权威答案后再决定 flush 还是丢弃。
- *
- * ## 为什么不丢启动早期的日志
- *
- * ws 连上通常晚于首屏脚本执行，而排查白屏最需要的恰恰是最早那几行。所以未就绪时
- * 日志进环形队列（`MAX_QUEUE`），连接就绪后一次性 flush。
+/** 把前端 console 日志经 ws 送到后端，由后端写进 `{STORAGE_ROOT}/logs/backend/frontend/frontend.log`。
+ * 现象：浏览器形态下 `desktopLog.ts` 直接 return，那一侧完全没有落库能力；ws 又比首屏脚本晚连上，排查白屏最需要的最早几行会丢。
+ * 原因：桌面和浏览器都要装，连上之前先排进队列 `MAX_QUEUE`；前端开关只用来省流量，真正决定写不写盘的是后端的 `TOGOSPACE_FRONTEND_DEBUG`。
+ * 要改这里：别让日志绕过 `MAX_QUEUE` 直接发，也别改 `desktopLog.ts` 的行为；两道开关与三态见 `docs/tech/08_debugging/frontend_log_bridge.md`。
  */
 
 import {

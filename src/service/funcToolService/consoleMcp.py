@@ -1,38 +1,8 @@
-"""`mcp` 子树的 mcporter 风格 CLI（#291 T1–T3）。
+"""`mcp` 子命令（`list` / `call` / `resource` / `session` / `config`）的解析与执行。
 
-按 `docs/design/2026-11-16-mcp-native-session/step1_product.md` §2 实现：
-
-    mcp list [<server-name> | <server-name>.<tool-name>] [--schema|--brief|--all-parameters]
-             [--stdio '<server-command>'] [--output json|text]
-    mcp call <server-name>.<tool-name> [--args '<args-json>'] [<name>=<value> …] [--output json|text]
-    mcp config list | get <server-name> | add <server-name> <target> | remove <server-name>
-    mcp resource <server-name> [<resource-uri>]
-    mcp session start | status | stop
-    mcp enable <server-name> / mcp disable <server-name>   （既有注册表能力，非 mcporter 语法）
-
-## 为什么是「局部专用解析器」而不扩通用 console 框架
-
-通用 `consoleCommands` 的 spec 机制假定「一条命令 = 资源 + 动词 + 至多一个位置参数，选项面从
-某个既有工具签名派生」。本子树需要三层子命令（`mcp config list`）、双位置参数
-（`config add <name> <target>`、`resource <server> <uri>`）、`name=value` 具名参数与
-`--output` 这类纯展示选项 —— 这些语义**只属于 mcp**。把它们塞进通用框架会让 34 条既有
-命令的解析路径一起变（风险与收益不成比例），所以这里自带一个窄解析器，
-`consoleTool.console()` 只在 `tokens[0] == "mcp"` 时短路进来。
-
-## 两条入口的分工（Q1=A，产品 §5「OpenAPI / GraphQL 能力保留，CLI 另行明确」）
-
-- `mcp list` / `mcp call <server>.<tool>` / `mcp resource` / `mcp session` ⇒ **MCP 原生路径**
-  （Python `mcp` SDK，`mcpSessionService`）。
-- `mcp ls <path/URL>` / `mcp call --kind openapi|graphql …` ⇒ **既有 mcp2cli 路径**，原样委托
-  `tools.list_mcp_servers` / `tools.mcp_call`，行为与文案不变（它是 A 类不变量）。
-  两条靠**命令词不同**（`list` vs `ls`）区分，不靠猜参数，所以无二义；`help` 里各给一条
-  可复制示例，避免「能力保住了但用户不知道怎么用」。
-
-## 错误反馈口径（产品 §4.1 第 3 条）
-
-语法错误 / 未知选项 / 缺目标 / 缺参数一律：固定错误码 + 一句话原因 + **一行可直接复制的
-固定占位符示例**，不动态拼装注册表实值。
-"""
+现象：把这套子命令塞进通用的 `consoleCommands` 框架，34 条既有命令的解析会跟着一起改；`mcp list`（原生）和 `mcp ls`（mcp2cli）两条入口也会变得分不清。
+原因：这里需要三层子命令、两个位置参数和 `name=value` 形式的具名参数，通用框架假定一条命令只有一个位置参数、选项从工具签名派生，套不进去。
+要改这里：`consoleTool.console()` 只在 `tokens[0] == "mcp"` 时进本模块，别去改通用框架，改完跑 `tests/unit/service/funcToolService/test_console_mcp_usability_281.py`；命令写法见 `docs/design/2026-11-16-mcp-native-session/step1_product.md` §2，为什么这么分层见 step2 §8。"""
 from __future__ import annotations
 
 import json

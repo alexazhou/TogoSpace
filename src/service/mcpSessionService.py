@@ -1,43 +1,8 @@
-"""MCP 原生 session service（#291，按 `docs/design/2026-11-16-mcp-native-session/step2_technical.md`）。
+"""MCP 原生 session service：为每个 `(team_id, agent_id)` 各自维护一条长连接会话。
 
-职责：维护 `(team_id, agent_id) -> AgentMcpSession` 的有状态会话 —— 长连接管理、并发锁、
-配置快照校验、初始化/关闭清理。**不负责 CLI 解析与结果格式化**（那在
-`funcToolService/console*`），也不接管 OpenAPI / GraphQL（它们继续走 `mcpTool` 的
-mcp2cli 路径，见 step2 §1.3）。
-
-## 归属与隔离（step2 §3.1）
-
-- **会话键** `SessionKey = (team_id, agent_id)`，只能由可信 `ToolCallContext` 提供；
-  CLI 入参无法覆盖身份，缺身份直接拒绝（不回退为全局会话）。
-- **连接键** `ServerKey` 三种：已注册 `("registered", name)`、临时 URL
-  `("adhoc_url", normalized_url)`、临时 stdio `("adhoc_stdio", command_str)`。
-- **绝不跨 Agent 复用连接**：不同 Agent 访问同一 server 各自持有一份 transport
-  （stdio 子进程 / HTTP 客户端）。
-
-## 连接生命周期（step2 §4.1–4.2）
-
-`mcp` SDK 的 transport 与 `ClientSession` 都是 anyio 上下文管理器，**进入与退出必须在
-同一个 asyncio Task**。因此每个 `ManagedMcpConnection` 用一条**专用 owner task** 持有
-`contextlib.AsyncExitStack`：任务内进入 transport + session、`initialize()`、置 ready，
-然后等 `close_event`；关闭方只 set event 并等 owner 自然退出，超时才 cancel。
-这样 stdio 子进程回收、HTTP 客户端关闭都发生在 owner task 内。
-
-状态机：`CONNECTING -> READY -> CLOSING -> CLOSED`。`CONNECTING` 也被记录，`stop` /
-归属清理会连初始化中的连接一起取消并等待收敛（不留残留子进程）。
-
-## 配置快照与失效（step2 §3.2）
-
-已注册连接建立时记下 `(kind, protocol, target, config)` 签名；每次从活动 session 取连接
-前先 `mcpRegistryService.resolve_name` 复核：条目消失/被禁用 ⇒ 关闭并报错；签名变了 ⇒
-关旧建新。`invalidate_server(name)` 供注册表写入路径主动失效（本模块只提供入口，接线
-由调用方决定）。
-
-## 与 mcp2cli 的关系
-
-本服务只用 Python `mcp` SDK（`mcp==1.27.1`，requirements.txt:21），**不拉 daemon、
-不读 stdin、不依赖 `sys.executable` 子进程**，所以打包产物里同样可用 —— 这正是
-`mcpTool._SESSION_EXTRA_REASON` 里「打包产物没有 Python 解释器」那条限制的替代路径。
-"""
+现象：把一条连接给两个 Agent 复用、或者让 transport 和 `ClientSession` 待在不同的 asyncio Task，关闭时会抛 anyio 跨 Task 报错，stdio 子进程和 HTTP 客户端也一起泄漏。
+原因：mcp SDK 的这两个对象都必须进出同一个 Task，所以每条连接由一个专用 owner task 用 `AsyncExitStack` 持有；身份只能来自 `ToolCallContext`，命令行参数改不了它。
+要改这里：新增或改动连接逻辑时保持「进入和退出都在 owner task 内」，改完跑 `tests/integration/test_funcToolService/test_mcp_session_service.py`；会话键、连接键与状态机见 `docs/design/2026-11-16-mcp-native-session/step2_technical.md` §3.1 / §4.1。"""
 from __future__ import annotations
 
 import asyncio
