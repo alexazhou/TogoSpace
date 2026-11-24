@@ -305,12 +305,32 @@ class TestTaskTools(ServiceTestCase):
         assert open_task.id in ids
         assert done_task.id in ids
 
-    async def test_list_tasks_requires_assignee_or_reviewer(self):
-        """assignee / reviewer 都不传 ⇒ missing_target 参数错误。"""
+    async def test_list_tasks_without_filters_auto_fills_self_scope(self):
+        """过滤项全缺 ⇒ 自动补 `scope="self"` 并**显式说明**（不许静默改口径）。
+
+        设计 §2.2 / #315 P0 起契约变了：`list_tasks()` 一个过滤项都不给时不再报
+        `missing_target`，而是在**工具函数内**补 `scope="self"`（最常用口径），但必须
+        「补了就说」——`auto_filled_filters` + message 两处说明。静默改口径会让模型
+        以为拿到的是全团队列表，比直接报错更贵。
+
+        这条用例真正的保护点是**口径本身**：补的是「与我相关（我执行 OR 我验收）」，
+        不是「全团队」。所以除两处说明，还要用一条**只属于别人**的任务做反证——它出现
+        在结果里，就说明自动补参漏成了全团队查询（那才是静默改口径的真实后果）。
+        """
+        mine = await self._make_task()
+        # 独立 assignee（77，本文件其余用例未占用；与当前调用者 agent 8 无关）
+        others = await self._make_task_for(77, status=TaskStatus.TODO)
+
         res = await tools.list_tasks(_context=self._ctx())
 
-        assert res["success"] is False
-        assert res["error_code"] == "missing_target"
+        assert res["success"] is True, res
+        # ① 补了必须说：结构化 auto_filled_filters + 人话 message
+        assert res.get("auto_filled_filters") == {"scope": "self"}, res
+        assert "--scope self" in res["message"], res["message"]
+        # ② 口径必须是 self，不是全团队
+        ids = [t["id"] for t in res["tasks"]]
+        assert mine.id in ids, f"自己的任务没出现：{ids}"
+        assert others.id not in ids, f"自动补 scope 没生效，别人的任务也漏出来了：{ids}"
 
     async def test_list_tasks_sorted_latest_first(self):
         """工具层排序契约（#83 改动）：**id 倒序 = 最新在前**，与优先级无关。
