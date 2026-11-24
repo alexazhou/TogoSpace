@@ -246,7 +246,10 @@ textarea {
 
 .sidebar-scroll::-webkit-scrollbar-thumb,
 .message-stream::-webkit-scrollbar-thumb {
-  border: 2px solid var(--scrollbar-track);
+  /* 透明边框 + padding-box：滑块比轨道窄 2px（与 .scrollbar-thin 同一套做法）。
+   * 别把边框写回轨道色：在伪元素仍生效的内核上，滑块外圈会出现一条色环。 */
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
