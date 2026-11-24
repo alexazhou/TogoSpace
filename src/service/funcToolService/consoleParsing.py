@@ -430,4 +430,4 @@ def _require_json_object(data: Any) -> dict[str, Any]:
 
 # 目标定位全部由 `Arg.positional` / `Target` 声明、`consoleTool` 的流水线一处翻译成
 # 工具参数；同名消歧已下沉到 `tools.update_agent`（工具层对直接调用同样生效）。
-# `console*` 四个模块自此不再 import `dal`。
+# `console*` 各模块不再 import `dal`。

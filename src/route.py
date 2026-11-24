@@ -54,7 +54,7 @@ application = tornado.web.Application([
     (r"/config/frontend.json",                       configController.ConfigHandler),
     (r"/config/directories.json",                    configController.DirectoriesHandler),
 
-    # LLM Config (V24)
+    # LLM Config
     (r"/config/llm.json",                            settingController.LlmConfigHandler),
     (r"/config/provider_types.json",                 settingController.ProviderTypesHandler),
     (r"/config/llm_test.json",                       settingController.LlmTestHandler),
@@ -72,7 +72,7 @@ application = tornado.web.Application([
     (r"/mcp/servers/delete.json",                    mcpController.McpServerDeleteHandler),
     (r"/mcp/servers/enable.json",                    mcpController.McpServerEnableHandler),
 
-    # System Status & Quick Init (V13)
+    # System Status & Quick Init
     (r"/system/status.json",                         systemController.SystemStatusHandler),
     (r"/system/check_update.json",                   systemController.CheckUpdateHandler),
     (r"/system/update_config.json",                  systemController.UpdateConfigHandler),
@@ -136,11 +136,11 @@ application = tornado.web.Application([
     (r"/teams/(\d+)/rooms/(\d+)/agents/list.json",  roomController.TeamRoomAgentsHandler),
     (r"/teams/(\d+)/rooms/(\d+)/agents/modify.json",roomController.TeamRoomAgentsModifyHandler),
 
-    # Dept Tree (V10)
+    # Dept Tree
     (r"/teams/(\d+)/dept_tree.json",                deptController.DeptTreeDetailHandler),
     (r"/teams/(\d+)/dept_tree/update.json",         deptController.DeptTreeUpdateHandler),
 
-    # Activities (V11)
+    # Activities
     (r"/activities.json",                            activityController.ActivitiesHandler),
     (r"/agents/(\d+)/activities.json",               activityController.AgentActivitiesHandler),
     (r"/teams/(\d+)/activities.json",                activityController.TeamActivitiesHandler),
