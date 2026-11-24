@@ -80,9 +80,9 @@
 
   /* Utility chrome tokens for idle dots, scrollbars, and theme toggles. */
   --status-dot-idle: var(--text-tertiary);
-  /* 滚动条不画轨道底色（深浅两套主题都设 transparent）。设成具体颜色会让列表右侧
-   * 常驻一条轨道，浅色下尤其明显。改回具体颜色前先确认：内核一旦支持标准属性
-   * scrollbar-color，::-webkit-scrollbar 的样式就会被忽略，轨道色只由这里决定（推断）。 */
+  /* 滚动条不画轨道底色（两种主题都设 transparent）。
+   * 设成具体颜色会让列表右侧常驻一条轨道，浅色下尤其明显。
+   * 本机实测：标准属性非 auto 时，::-webkit-scrollbar* 的尺寸与形状不被采用。 */
   --scrollbar-track: transparent;
   --scrollbar-thumb: #274968;
   --scrollbar-thumb-hover: #366286;
