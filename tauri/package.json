@@ -1,7 +1,7 @@
 {
   "name": "togospace-tauri",
   "private": true,
-  "version": "0.5.2-beta6",
+  "version": "0.6.1-beta1",
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
