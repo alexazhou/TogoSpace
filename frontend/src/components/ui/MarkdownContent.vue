@@ -222,6 +222,13 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 
+/* 图片按原始尺寸渲染时会撑破气泡，进而让 .message-stream 横向溢出、冒出横向滚动条
+ * （实测：3000px 宽的图让容器 scrollWidth 多出 1979px）。只约束上限，不放大正常图片。 */
+.markdown-content :deep(img) {
+  max-width: 100%;
+  height: auto;
+}
+
 .markdown-content :deep(pre) {
   overflow-x: auto;
   padding: 0.12rem 0.6rem 0.5rem;
