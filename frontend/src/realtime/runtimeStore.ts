@@ -394,32 +394,9 @@ export function getAgentContextUsage(agentId: number | null): AgentContextUsage 
   return agentContextUsageState.value[agentId] ?? null;
 }
 
-/**
- * 用接口快照播种上下文用量。
- *
- * 三态语义，**`null` 与 `undefined` 必须分开**：
- *
- * | 传值 | 含义 | 动作 |
- * |---|---|---|
- * | `AgentContextUsage` | 后端算出来了 | 写入 |
- * | `null` | 后端**明确说**「算不出来」 | **删除** |
- * | `undefined` | 响应里**根本没有这个字段**（老后端 / 字段缺省） | 保留不动 |
- *
- * 为什么 `null` 要删而不是「沿用上次」：`null` 的契约意思是「不知道」（见
- * `types.ts` 的 `AgentDetail.context_usage` 与 `getAgentContextUsage` 注释），
- * 「沿用上次」会把「不知道」悄悄变成「知道，而且值还是旧的」——用户看到一条
- * 78% 的进度条，而后端其实已经算不出数了。这正是实测到的现象。
- *
- * 可达路径不止「Agent 未装载」：
- * - `agentService/core.py` 的 `build_context_usage_snapshot`（未装载）；
- * - `contextUsage.calc_context_usage` 返回 None（模型配置解析失败 / 分母非正）；
- * - **手动 compact 成功后** `execute_manual_compact` 返回的 `snapshot_context_usage()`
- *   为 None（例如刷新 System Prompt 后模型配置临时不可解析）。
- *
- * 为什么 `undefined` 反而要保留：那是「推送先到、详情后到」的真实时序——详情
- * 由老后端或某个没带该字段的响应给出，不代表先前推送的值失效。删掉会让刚显示
- * 出来的进度条突然消失。区分两者的成本只有一行，而混淆任一侧都会造成
- * 「显示的数值与后端不一致」。
+/** 用接口快照播种上下文用量：`null` 要删、`undefined` 要保留，两者必须分开。
+ * `null` 表示后端明确说「算不出来」（未装载、模型配置解析失败、手动 compact 后为 None）；把它当成「沿用上次」，后端明明已经算不出数，用户仍会看到一条 78% 的进度条。`undefined` 表示响应里根本没有这个字段（老后端），不代表先前推送的值失效，删掉它刚由推送显示出来的进度条会突然消失。
+ * 所以 `AgentContextUsage` 写入、`null` 删除、`undefined` 不动；契约说明见 `frontend/src/types.ts` 里 `AgentDetail.context_usage` 的注释。
  */
 export function seedAgentContextUsage(agentId: number | null, usage: AgentContextUsage | null | undefined): void {
   if (agentId === null || agentId <= 0) {

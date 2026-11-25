@@ -1,8 +1,8 @@
 """`mcp` 子命令（`list` / `call` / `resource` / `session` / `config`）的解析与执行。
 
-现象：把这套子命令塞进通用的 `consoleCommands` 框架，34 条既有命令的解析会跟着一起改；`mcp list`（原生）和 `mcp ls`（mcp2cli）两条入口也会变得分不清。
-原因：这里需要三层子命令、两个位置参数和 `name=value` 形式的具名参数，通用框架假定一条命令只有一个位置参数、选项从工具签名派生，套不进去。
-要改这里：`consoleTool.console()` 只在 `tokens[0] == "mcp"` 时进本模块，别去改通用框架，改完跑 `tests/unit/service/funcToolService/test_console_mcp_usability_281.py`；命令写法见 `docs/design/2026-11-16-mcp-native-session/step1_product.md` §2，为什么这么分层见 step2 §8。"""
+这套子命令需要三层子命令、两个位置参数和 `name=value` 形式的具名参数；通用链路（`consoleParsing._parse_options` + `consoleRegistry` 的命令表）假定一条命令只有一个位置参数、选项从工具签名派生，套不进去，硬塞进去 34 条既有命令的解析会跟着一起改，`mcp list`（原生）和 `mcp ls`（mcp2cli）两条入口也会变得分不清。
+
+`consoleTool.console()` 只在 `tokens[0] == "mcp"` 时进本模块，解析自带（只从 `consoleParsing` 借 `HELP_FLAGS` 与 `_error_payload`），别去改那条通用链路；改完跑 `tests/unit/service/funcToolService/test_console_mcp_usability_281.py`。命令写法见 `docs/design/2026-11-16-mcp-native-session/step1_product.md` §2，为什么这么分层见 step2 §8。"""
 from __future__ import annotations
 
 import json

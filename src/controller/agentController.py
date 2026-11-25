@@ -328,9 +328,10 @@ class AgentStopHandler(BaseHandler):
 class AgentCompactHandler(BaseHandler):
     """POST /agents/<agent_id>/compact.json - 手动触发上下文压缩（Compact）。
 
-    现象：业务上的拒绝被当成 500 故障报出去，或者为「Agent 不存在」加了一个永远走不到的 400 分支。
-    原因：只有「没装载进内存 / 正在执行 / 已经开始压缩 / 没有可压缩的历史」四种是用户能预期到的拒绝，其余（LLM 失败、摘要为空）必须照原样报 500；运行时「不存在」和「没装载」查的是同一个内存字典，区分不开。
-    要改这里：新增异常先确认状态码与 `error_code`，改完跑 `tests/unit/controller/test_agent_compact_handler.py`；完整映射表与两条副作用见 `docs/design/2026-11-06-agent-memory-system/step2_technical.md` §7.3。"""
+    只有「没装载进内存 / 正在执行 / 已经开始压缩 / 没有可压缩的历史」四种是用户能预期到的拒绝，翻成 400；其余（LLM 失败、摘要为空）必须照原样报 500，裹成业务拒绝就变成了掩盖故障。也别为「Agent 不存在」加 400 分支：运行时「不存在」和「没装载」查的是同一个内存字典，区分不开，那个分支永远走不到。
+
+    新增异常时先确认状态码与 `error_code`，改完跑 `tests/unit/controller/test_agent_compact_handler.py`；完整映射表与两条副作用见 `docs/design/2026-11-06-agent-memory-system/step2_technical.md` §7.3。
+    """
 
     async def post(self, agent_id_str: str) -> None:
         agent_id = int(agent_id_str)

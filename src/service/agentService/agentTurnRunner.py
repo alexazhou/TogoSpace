@@ -1290,33 +1290,11 @@ class AgentTurnRunner:
             logger.warning("[context-usage] 广播失败（不影响主流程）: agent_id=%s, error=%s", self.gt_agent.id, e)
 
     async def execute_manual_compact(self) -> AgentContextUsage | None:
-        """手动压缩入口：执行 compact 并返回压缩后的新用量。
+        """手动压缩入口：执行 compact 并返回压缩后的新用量；临界区由 `Agent.compact_context()` 占。
 
-        与自动路径共用 `_execute_compact`，区别是：
-        1. 先重载历史，保证「用户点按钮」这一刻的压缩基准是最新的；
-        2. 压缩后算一次新用量，**既作为接口返回值、也广播给其它打开的窗口**。
+        `reload_from_db()` 是整体覆盖 `_items`，一旦与 turn 或另一次 compact 交错，就会把对方刚写进内存的行抹掉，内存与库里的摘要正文分叉（点完看到 A，刷新变 B）。`insert_compact_summary` 走 `on_conflict_ignore` 再按 `(agent_id, seq)` 回读，撞号不报错、静默取库里那行，所以覆盖与并发必须互斥。
 
-        压缩后的 token 估算由 `_execute_compact` 返回（与活动记录展示同一个值），
-        这里不再重算；但手动路径没有后续的推理步骤，压缩完必须主动广播，
-        否则前端只能等下一次推理才发现值变了。
-
-        ## 并发前提（这条注释和实现同等重要）
-
-        `reload_from_db()` 是**整体覆盖 `_items`**。它一旦与 turn 或另一次 compact
-        交错，就会把对方刚写进内存的行抹掉；而 `insert_compact_summary` 走
-        `on_conflict_ignore` + 按 `(agent_id, seq)` 回读，撞号不报错、静默取库里那行
-        ⇒ 内存与库的摘要正文分叉（用户点完看到 A，刷新变 B）。
-
-        所以本方法**必须**在 `_compacting` 临界区内运行：
-        - 与 turn 互斥：`JobConsumer.consume()` 取 job 前等 `is_compacting` 归位；
-        - 与另一次手动 compact 互斥：`Agent.compact_context()` 进门
-          `try_acquire_manual_compact()` 占用，已占用即抛 `CompactInProgressError`
-          （**拒绝，不排队**——排队等于让「点了两次」变成「压了两次」）。
-
-        **下面的实现不在方法内获锁**：临界区由最外层 `Agent.compact_context()` 负责
-        占用与释放（见该方法的注释——离接口层越近，将来被插入 await 破坏原子性的
-        概率越低）。这里只断言前提成立：绕过临界区直接调用本方法，会与 turn 抢同一份
-        `_history`，那种情况下宁可当场失败也不要静默产出分叉的数据。
+        本方法内不获锁，临界区由最外层 `Agent.compact_context()` 占用与释放；这里只断言前提成立——绕过临界区直接调用宁可当场失败，也不要产出分叉的数据。
         """
         if not self._compacting:
             raise RuntimeError(

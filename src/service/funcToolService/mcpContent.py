@@ -1,8 +1,8 @@
 """把 MCP 工具结果里的图片、音频和内嵌资源写成临时文件，只把文件路径交给模型。
 
-现象：截图类工具不传 `filePath` 时，旧代码会把近 1MB 的 base64 字符串整段塞进对话，模型读不懂，还占掉大量上下文，也没有任何「这是图片」的标记。
-原因：MCP 返回的 `content[]` 有 `text` / `image` / `audio` / `resource_link` / `resource` 五种写法，旧代码只认 `text` 和 `data`，`type` 与 `mimeType` 全部丢掉，所以这里按 `content[].type` 分开处理。
-要改这里：任何分支都不许把 base64 或资源正文拼回文本，失败也返回带原因的占位文本，改完跑 `tests/unit/service/funcToolService/test_mcp_multimodal_content.py`；每种类型的处理与文件何时删除见 `docs/design/2026-08-16-agent-multimodal-support/step2_technical.md` §10。"""
+截图类工具不传 `filePath` 时，旧代码会把近 1MB 的 base64 字符串整段塞进对话，模型读不懂，还占掉大量上下文，也没有任何「这是图片」的标记。MCP 返回的 `content[]` 有 `text` / `image` / `audio` / `resource_link` / `resource` 五种写法，旧代码只认 `text` 和 `data`，`type` 与 `mimeType` 全部丢掉，所以这里按 `content[].type` 分开处理。
+
+任何分支都不许把 base64 或资源正文拼回文本，失败也返回带原因的占位文本；改完跑 `tests/unit/service/funcToolService/test_mcp_multimodal_content.py`。每种类型的处理与文件何时删除见 `docs/design/2026-08-16-agent-multimodal-support/step2_technical.md` §10。"""
 from __future__ import annotations
 
 import base64

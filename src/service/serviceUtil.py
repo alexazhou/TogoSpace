@@ -1,26 +1,8 @@
-"""服务生命周期注解：统一接管进程级服务的启动/停止契约。
+"""服务生命周期注解：统一接管进程级服务的启动与停止。
 
-契约（设计文档 v1.6）：
+状态判定只在这里做：服务自己再判一遍，就会出现「已启动又启动」「关两次报错」。`service_start_wrapper` 只认 `Idle` / `Stopped` 两态、只启动一次、失败必回滚（`on_error=_reset`，且 `on_error` 自身抛错只记 warning、不掩盖原始异常）；`service_stop_wrapper` 幂等，其余状态都真正释放并回到 `Stopped`。启动失败后资源没释放、下次重试拿到半初始化对象，就是漏了回滚这一条。
 
-- ``service_start_wrapper``：管理状态、捕获异常（记录后**原样向上抛**）、确保**只启动一次**、
-  失败**必回滚**。``startup`` 允许态 = ``{Idle, Stopped}``；``Starting`` / ``Running`` / ``Stopping`` /
-  ``Error`` 再 ``startup`` 一律抛 ``TogoException(error_code="SERVICE_ALREADY_STARTED")``，
-  且不执行 body、不改写状态。``Error`` 的恢复路径固定为 ``shutdown() → startup()``。
-- ``service_stop_wrapper``：**幂等**停止；仅 ``Idle``（从未启动）/``Stopped``（重复关闭）态 no-op 并告警，
-  其余状态（含 ``Error``）都会真正执行释放逻辑并回 ``Stopped``；body 抛错不 re-raise，但会留痕
-  （``fine=False`` + ``error``），避免清理失败被静默抹平。
-
-回滚（``on_error``）：
-
-- 每个持有资源/有副作用的服务提供**未被注解装饰**的纯清理协程 ``_reset()``（幂等）；
-  ``startup`` 挂 ``on_error=_reset``，``shutdown`` body 复用同一个 ``_reset()``，避免两份清理逻辑漂移。
-- 回滚是 **best-effort**：``on_error()`` 自身抛错只 warning，**绝不掩盖原始启动异常**。
-
-> 同步/异步兼容：仓库中存在同步实现的服务方法（如 ``skillService.startup``、``schedulerService.shutdown``），
-> 且被业务代码与测试以同步方式调用。注解会保留被装饰函数的同步/异步特性——异步函数返回可 await 的协程，
-> 同步函数同步执行——从而在不改动既有调用点的前提下统一生命周期语义。
-
-分层：放在 ``service/`` 层（可依赖 model/constants），避免 ``util`` 层反向依赖 ``model``。硬严格，不设灰度开关。
+每个持有资源的服务提供一个未被装饰的幂等 `_reset()`，`shutdown` 复用同一个，避免两份清理漂移；注解保留被装饰函数的同步/异步特性，别改成一律 async。
 """
 from __future__ import annotations
 

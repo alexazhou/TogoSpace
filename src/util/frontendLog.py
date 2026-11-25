@@ -1,8 +1,8 @@
 """接收前端 console 日志，写进 `{STORAGE_ROOT}/logs/backend/frontend/frontend.log`。
 
-现象：开关关着的机器上会凭空多出一个空的 `frontend.log`；反过来，只信前端自觉的话，任何能连上 ws 的客户端都能往磁盘写日志。
-原因：`RotatingFileHandler` 一构造就会建文件，所以只能在「开关确认打开、且确实有一条要写」之后才建；前端的开关只用来省流量，真正决定写不写盘的是后端的 `TOGOSPACE_FRONTEND_DEBUG`。
-要改这里：别在 `init_backend_logger` 阶段建文件、保持 `lazy=True`，改完跑 `tests/unit/util/test_frontend_log.py`；两道开关、单条截断与时间戳见 `docs/tech/08_debugging/frontend_log_bridge.md`。"""
+开关关着的机器上会凭空多出一个空的 `frontend.log`，所以建文件只能发生在「开关确认打开、且确实有一条要写」之后：`RotatingFileHandler` 一构造就会建文件，不能在 `init_backend_logger` 阶段就挂。前端的开关只用来省流量，真正决定写不写盘的是后端的 `TOGOSPACE_FRONTEND_DEBUG`——只信前端自觉的话，任何能连上 ws 的客户端都能往磁盘写日志。
+
+改这里时保持 `logUtil` 里那条 `lazy=True`，改完跑 `tests/unit/util/test_frontend_log.py`；两道开关、单条截断与时间戳见 `docs/tech/08_debugging/frontend_log_bridge.md`。"""
 
 from __future__ import annotations
 

@@ -190,27 +190,11 @@ class RoomMessageStore:
             self._agent_seq_read = converted
 
     async def escalate_to_immediate(self, db_id: int) -> GtRoomMessage:
-        """把一条已发出的普通消息升级为「立即注入」。
+        """把一条已发出的普通消息升级为「立即注入」：只置标志位，不清空 seq、不移动位置、不排序。
 
-        升级**只置标志位**：不清空 seq、不移动位置、不排序。
-        顺序在消息发出的那一刻就固定了，升级改变的是「什么时候读」，不是「排在哪」。
+        顺序在消息发出那一刻就固定，升级改变的是「什么时候读」而不是「排在哪」，所以不能靠重排实现。只查内存窗口的话，Operator 对一条已被窗口淘汰的排队消息点「升级」会直接 ValueError，这是真实的功能回退；窗口外走 DB 兜底（按 id 查单条 → 校验 `room_id` → 置位），查出的对象不塞回窗口。
 
-        内存窗口内命中走快路径；**已被窗口淘汰**（更早的历史）走 DB fallback：
-        按 id 查单条 → 校验 `room_id` → 置位。不这么做的话，Operator 对一条
-        窗口外的排队消息点「升级」会直接 ValueError，是真实功能回退。
-
-        fallback 查出的对象**不塞回内存窗口**：它只用于置 `insert_immediately`，
-        不参与 seq 分配 / 顺序 / 未读判定，落库 + 广播后即丢弃。
-
-        允许升级：单聊中任意发往 AI 接收方、且该接收方尚未读取的消息
-        （既覆盖 Operator 发给 AI 的排队消息，也覆盖 Agent 之间单聊的排队消息）。
-
-        拒绝条件：
-        - 消息不存在 → ValueError
-        - 消息不属于本房间 → ValueError（防越权升级别的房间消息）
-        - SYSTEM 消息 → ValueError（系统消息没有「立即引导」语义）
-        - 房间内没有 AI 接收方（如 AI 发给 Operator 的消息）→ ValueError
-        - 已被任一 AI 接收方读取 → RuntimeError（读都读过了，再升级无意义）
+        拒绝条件：消息不存在或不属于本房间、SYSTEM 消息、房间内没有 AI 接收方 → ValueError；已被任一 AI 接收方读取 → RuntimeError。
         """
         msg = next((m for m in self._messages if m.id == db_id), None)
         if msg is None:

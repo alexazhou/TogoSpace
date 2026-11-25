@@ -170,28 +170,11 @@ def normalize_container_note(note: str | None) -> str | None:
 
 
 def build_container_name(*, team_id: int, agent_id: int, agent_name: str, record_id: int) -> str:
-    """生成容器名 `agent-t<team_id>-<name>-<record_id>`，非法字符回退为 `agent-t<team_id>-<agent_id>-<record_id>`。
+    """生成容器名 `agent-t<team_id>-<name>-<record_id>`，名字不可用时回退成 `agent-t<team_id>-<agent_id>-<record_id>`。
 
-    唯一性由 `record_id`（`agent_containers.id`，全局唯一）保证，不再需要
-    「在 1..3 中挑空闲编号」：两个同名 Agent 即使算出相同的可读前缀，记录 ID
-    也不同，容器名必然不同。前后缀只用于 `docker ps` 里辨认归属。
+    唯一性来自 `record_id`（`agent_containers.id` 全局唯一），前后缀只用于在 `docker ps` 里辨认归属——拿可读名当唯一性来源，两个同名 Agent 会算出同一个容器名。Agent 名允许中文、空格、emoji（`workspaceUtil.validate_dir_name` 只禁了路径分隔符等），直接拼进容器名会被 Docker 拒（它只认 `[a-zA-Z0-9][a-zA-Z0-9_.-]*`），所以先小写化并把非法字符压成 `-`，压空了才回退 agent_id。
 
-    Agent 名可以含中文、空格、emoji（`validate_dir_name` 只禁了路径分隔符等），
-    但 Docker 容器名必须是 `[a-zA-Z0-9][a-zA-Z0-9_.-]*`。因此：
-    - 先小写化并把非法字符压成 `-`；
-    - 若结果被削空（如纯中文名 → 全被替换），回退到 agent_id，保证可读且合法。
-
-    **长名不截断**：Docker 对容器名长度本身没有限制（它不是 hostname），
-    截断只会让 `docker ps` 更难辨认。
-
-    Args:
-        team_id: 所属 Team ID（便于在 `docker ps` 中按团队辨认）
-        agent_id: Agent ID（可读名回退用）
-        agent_name: Agent 名称（可含任意 Unicode）
-        record_id: `agent_containers.id`，容器名的唯一性来源
-
-    Returns:
-        合法的 Docker 容器名，形如 `agent-t2-xiao-mei-42` 或 `agent-t2-7-42`。
+    别截断长名：Docker 对容器名长度没有限制（它不是 hostname），截断只会让 `docker ps` 更难辨认。
     """
     sanitized = _CONTAINER_NAME_SAFE.sub("-", (agent_name or "").strip().lower())
     # 修剪首尾的分隔符（Docker 要求以字母数字开头）
@@ -733,28 +716,11 @@ async def list_agent_containers(
     current_container_id: str | None = None,
     docker_available: bool | None = None,
 ) -> list[ContainerRuntimeInfo]:
-    """列出该 Agent 全部活跃自建容器，并实时填状态（§3.4 / §8）。
+    """列出该 Agent 全部活跃自建容器并填实时状态；docker 缺失时不失败，状态记为 `unknown`。
 
-    两类记录的取状态方式不同：
-    - 已回填 `container_id`：按 `container_id` inspect；
-    - 预记录（`container_id IS NULL`）：按 `container_name` inspect，**并且必须校验
-      label**。不校验就会把宿主上同名的外部容器当成自己的（§2.1 预记录可见性）。
+    inspect 是并发发的：3 个容器串行、每个 3s 超时，列表接口要卡 9s，不能这么慢。已回填 `container_id` 的按 ID inspect；预记录（`container_id IS NULL`）只能按容器名 inspect，且必须校验 label，否则会把宿主上同名的外部容器当成自己的。
 
-    inspect 是并发发的：3 个容器串行 3s 超时会卡 9s，列表接口不能这么慢。
-
-    Args:
-        agent_id: 目标 Agent
-        current_container_id: 该 Agent 当前所处容器（用于 `is_entered`）
-        docker_available: 外部已探测的 daemon 可用性；None 表示本函数自己探测
-
-    Returns:
-        按 `record_id` 升序的容器信息列表（含预记录，`container_id` 为 None）。
-
-    Note:
-        **本函数不因 docker 缺失而失败**。没装 Docker CLI 和 daemon 没起必须表现一致
-        （都返回记录、状态全 `unknown`）：只让其中一种整体失败，用户就会拿到空列表，
-        以为自己的容器都没了。所以 `get_cli()` 的异常在这里被吞成 `docker_available=False`；
-        需要区分两种环境问题的调用方走 `is_docker_available()` / 具体工具的错误码。
+    `get_cli()` 的异常要吞成 `docker_available=False`——没装 CLI 与 daemon 没起必须表现一致（都返回记录、状态 `unknown`），只让其中一种整体失败，用户会以为容器全没了。
     """
     records = await gtAgentContainerManager.list_active_by_agent(agent_id)
 
@@ -903,28 +869,9 @@ async def update_container_note(
     record_id: int | None = None,
     note: str | None = None,
 ) -> GtAgentContainer:
-    """修改自建容器的说明（`note`），只改 DB 字段，不碰 docker。
+    """修改自建容器的说明（`note`）：只改 DB 字段、不碰 docker；未传与传空串都是清空。
 
-    与 `create_container` 的 note 口径**完全一致**（同一个 `normalize_container_note`）：
-    上限 `MAX_CONTAINER_NOTE_LENGTH` 字符、超长报错不截断、空串/纯空白归一成 `None`
-    （即「清空说明」）。两者共用同一个归一函数，避免「创建时能写 200 字、修改时
-    只认 100 字」这类只在修改路径上出现的契约漂移。
-
-    **未传 `note`（`None`）与传空串是同一件事：清空。** 这与 `save_*` 那类 PATCH
-    接口「省略即保持现值」的语义不同，是有意的：本工具只有一个可变字段，
-    引入「省略=不改」会让「改了个寂寞」也能返回成功，模型无法分辨到底有没有写进去。
-
-    Args:
-        agent_id: 发起方 Agent（归属校验）
-        container_id: 12 位短 ID
-        record_id: `agent_containers.id`（预记录、还没有短 ID 的容器只能用这个）
-        note: 新说明；`None` / 空串 = 清空
-
-    Raises:
-        TogoException: 参数非法 / 记录不存在或不属于当前 Agent / note 超长
-
-    Returns:
-        已更新的记录（带新的 `note`）
+    本工具只有一个可变字段，与 `save_*` 那类接口「省略即保持不变」的语义不同是有意的：把 `None` 当成「保持原值」，「什么都没改」也会返回成功，模型分不清到底写没写。归一统一走 `normalize_container_note`：上限 `MAX_CONTAINER_NOTE_LENGTH`、超长报错不截断、空串与纯空白归一成 `None`，与 `create_container` 共用同一个归一出入口——否则创建能写 200 字、修改只认 100 字这类漂移只在修改路径上出现。
     """
     record = await _resolve_owned_record(
         agent_id, container_id=container_id, record_id=record_id
@@ -947,26 +894,11 @@ async def delete_container(
     record_id: int | None = None,
     current_container_id: str | None = None,
 ) -> GtAgentContainer:
-    """删除自建容器并软删除记录（§5.4）。
+    """删除自建容器并软删除记录：先 `rm`，再把记录标记成 `deleted = 1`。
 
-    两种寻址方式二选一：`container_id`（12 位短 ID）或 `record_id`（表主键，
-    预记录只能用这个）。两者都传或都不传都报 `container_invalid_params`。
+    `container_id`（12 位短 ID）与 `record_id`（表主键）二选一，都传或都不传报 `container_invalid_params`，调用方也说不清到底删了哪个。预记录按名字删除必须先校验 label，不匹配时只处理 DB 记录、绝不 `rm`，否则会把宿主上同名的外部容器一起删掉。
 
-    删除顺序是「先 rm 再标记软删除」，且 `rm` 报「容器不存在」视为已删除。
-    预记录走 `container_name` + label 校验后 best-effort `rm`：
-    label 不匹配时**只处理 DB 记录，绝不 rm**——这是防误删外部同名容器的关键。
-
-    Args:
-        agent_id: 发起方 Agent（归属校验）
-        container_id: 12 位短 ID
-        record_id: `agent_containers.id`
-        current_container_id: 当前所处容器；删除它会先被拒绝（`container_in_use`）
-
-    Raises:
-        TogoException: 参数非法 / 记录不存在 / 正在使用 / 删除失败
-
-    Returns:
-        已标记 `deleted = 1` 的记录（调用方取 `container_id` 作为 `deleted_container_id`）
+    `rm` 报「容器不存在」视为已删除；删当前所在的容器要先被拒绝（`container_in_use`）。
     """
     record = await _resolve_owned_record(
         agent_id,

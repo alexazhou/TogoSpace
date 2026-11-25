@@ -1,27 +1,10 @@
-"""`console` 工具：把 16 个团队管理工具收敛成一条命令行。
+"""`console` 的解析层：切词、认子命令、校验输入来源；路由与鉴权都不在这里。
 
-设计依据是仓库根 `draft_v_console.md`（只读），落地口径见 #154 的 D1–D6。
-本模块负责三件事，顺序也是执行顺序：
+设计依据是 `draft_v_console.md`（设计稿，**未入库**，只有 `tests/unit/service/funcToolService/test_console_meta.py` 与 `tests/integration/test_funcToolService/test_console_tool.py` 按它断言），落地见 #154 的 D1–D6。
 
-1. **解析**：`shlex` 切词（绝不 `eval`、绝不调 shell，D5），认出子命令；
-2. **校验输入来源**：内联 JSON 与 `--from payload` 二选一且互斥（D1、CC3）。
+选项白名单与「哪些选项是不带值的开关」不在这里手写：两者都从 `ResolvedCommand` 派生，而它又从被转发工具的 JSON Schema 派生，手写一份就会和签名各说一套。`--dry-run` 这类新增布尔参数因此自动成为开关，不会被当成「需要值的选项」把下一个 token 吃掉。权限也不在这里判（#160 起）：`console` 自己不再重算一遍权限，而是把调用转发给等价的原工具，由唯一执行入口 `AgentToolRegistry.execute_tool_call` 鉴权，这样「原工具调不了、console 却能调」的错位在结构上不可能出现。
 
-3. **路由**在 `consoleTool`：它只负责「命令 → 目标工具 + 参数」。
-
-选项白名单与「哪些选项是不带值的开关」**不在这里手写**（#196 P2）：两者都从命令对象
-（`ResolvedCommand`）派生，而它又从被转发工具的 JSON Schema 派生（`consoleSchema`）。
-`--dry-run` 这类新增布尔参数因此自动成为开关，不会被解析器当成「需要值的选项」把下一
-个 token 吃掉。
-
-选项名支持**双轨**（真名 + 别名，见 `Arg.alias`）：白名单同时认两者，但 `options` 字典
-里**存用户写下的原名**。原因是既有用例把 `options["remove-field"]` 当契约钉住了；归一
-（别名 → 工具参数名）只在 `consoleTool` 组装转发参数时做。
-
-**权限校验不在这里**（#160 起）：`console` 自己不再重算一遍权限，而是把调用
-转发给等价的原工具，由唯一执行入口 `AgentToolRegistry.execute_tool_call` 做鉴权。
-这样「原工具调不了、console 却能调」的错位在结构上不可能出现——判定只有一份实现。
-命令的转发目标由工具声明承载（`ToolSpec.console` 的 `ConsoleCommand` + 函数签名），
-不是「权限查表的键」。
+切词只用 `shlex`，不 `eval`、不调 shell（D5）；内联 JSON 与 `--from payload` 二选一且互斥（D1、CC3）。选项名支持双轨（真名 + `Arg.alias`），白名单同时认两者，但 `options` 里存用户写下的原名——既有用例把 `options["remove-field"]` 当契约钉住了，归一留给路由层。
 """
 
 from __future__ import annotations
@@ -189,31 +172,11 @@ def _unknown_option_error(spec: CommandSpecLike, name: str, *, value: str | None
 def _parse_options(
     spec: CommandSpecLike, tokens: list[str]
 ) -> tuple[list[str], dict[str, Any], str | None]:
-    """把 token 拆成 (位置参数, 选项, 输入来源)。
+    """把 token 拆成 (位置参数, 选项, 输入来源)；`--from` 单独提取，不进 `options`。
 
-    `--from` 是输入来源选择器，单独提取，不进 `options`（它不在 `spec.options` 里，
-    否则会被「未知选项」误报）。
+    同一个选项重复出现不能直接覆盖，否则前一个值被悄悄丢掉；别名与真名混写（`--remove-field a --clear_fields b`）还要归一，不然转发参数里会留两个同义键。去重按换算后的目标名计数：数组型按出现顺序聚合、标量型报 `duplicate_option`、布尔开关幂等（末次生效），聚合键取首次写下的原名。
 
-    白名单与布尔开关都按 `spec` 派生（#196 P2）：`spec.options` 是真名 + 别名，
-    `spec.boolean_options` 是 schema 里 `type: boolean` 的那批（含其别名形态）。
-    `options` 里存的是**用户写下的原名**（别名不归一），归一由路由层做。
-
-    ## 重复选项（#218，翻 #187 裁定④）
-
-    同一个参数重复出现时按**归一后的目标名**计数（`--remove-field` 与
-    `--clear_fields` 算同一个），再按类型分流：
-
-    - **数组型**（schema `type: array`：`--status` / `--member_names` /
-      `--remove-field` 等）：按出现顺序**聚合**。值存成「每次出现的原始字符串」
-      列表，CSV 拆分与去重保序统一由 `consoleTool._split_csv` 做（那里已支持
-      list 入参），解析层不再自己拆逗号 —— 否则同一件事有两个实现。
-    - **标量型**（string / integer / object）：报 `duplicate_option`。覆盖式赋值
-      会**静默丢掉前一个值**，那正是 #187-④ 后来被 Operator 翻案的行为。
-    - **布尔开关**：幂等，重复出现不报错（末次显式值生效）。
-
-    聚合落在**首次写下的原名**这个键上：别名与真名混写（`--remove-field a
-    --clear_fields b`）必须合并成同一个键，否则路由层归一后会在 `args` 里看到
-    两个同义键、后一个覆盖前一个 —— 聚合就白做了。
+    别在这里拆逗号：CSV 拆分与去重保序由 `consoleTool._split_csv` 做，本层只把每次出现的原始字符串按顺序存进列表。
     """
     positional: list[str] = []
     options: dict[str, Any] = {}

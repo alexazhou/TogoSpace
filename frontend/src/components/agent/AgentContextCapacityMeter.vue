@@ -1,26 +1,7 @@
 <script setup lang="ts">
-/**
- * 上下文容量进度条 —— Agent 活动弹窗左侧舞台区域，`AgentCardBase` 与状态面板之间。
- *
- * ## 色温判据用绝对值，不用 `ratio` 比 0.85
- *
- * 红区判据是 `used_tokens >= compact_trigger_tokens`，不是 `ratio >= 0.85`。
- * 原因：`trigger = floor(limit * ratio)` 向下取整，`97484 / 114688 = 84.9993%`,
- * 而自动压缩恰好在 `used >= trigger` 那一刻执行——用 ratio 比 0.85 的话，
- * 红区在数学上是个 1 token 宽的窗口，几乎永远进不去。
- * 用绝对值判，则「红区 ⇔ 已到压缩线」这个语义恒成立，且 `compact_trigger_ratio`
- * 被用户改掉后前端自动跟随，不用改代码。
- *
- * 琥珀下限用 `limit_tokens * WARN_RATIO`（纯视觉分档，留在前端当常量）。
- * 业务阈值（trigger）来自后端，视觉分档（0.70）留在前端，二者分工要分清。
- * 若用户把 `compact_trigger_ratio` 调到 < 0.70，琥珀区间自然为空（红区先到）——
- * **不做 min/clamp 兜底**，空就是对的。
- *
- * ## 顺序：先判色温，后 clamp 宽度
- *
- * `ratio` 可能 > 1（估算值 vs 配置值口径不同，真实可发生）。如果先把 ratio
- * 夹到 1 再判色温，超限状态就被抹平成「刚好满」；所以：
- * 色温用原始 `used / trigger` 判 → 宽度才 `Math.min(100, ...)`。
+/** 上下文容量进度条：红区判据用绝对值 `used_tokens >= compact_trigger_tokens`，不比 `ratio`。
+ * `trigger = floor(limit * ratio)` 向下取整，`97484 / 114688 = 84.9993%`：用 `ratio >= 0.85` 判红区，数学上只剩 1 token 宽的窗口，几乎永远进不去。用绝对值判，「红区 ⇔ 已到压缩线」恒成立，用户改 `compact_trigger_ratio` 后前端自动跟随；琥珀下限 `limit_tokens * WARN_RATIO` 只是视觉分档。
+ * 先按原始 `used / trigger` 判色温，再对宽度做 `Math.min(100, ...)`——反过来会把超限状态抹平成刚好满。触发比例小于 `WARN_RATIO` 时琥珀区间空着是对的，不要 min/clamp 兜底。
  */
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';

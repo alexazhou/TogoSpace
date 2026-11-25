@@ -1,23 +1,8 @@
-"""console 命令表：由工具声明**惰性自举**的派生物（设计 §4）。
+"""console 命令表：把 `@tool(...)` 里的 `ConsoleCommand` 声明加函数签名，派生出一张可路由、可渲染 help 的表。
 
-本模块只有一件事：把 `@tool(...)` 里的 `ConsoleCommand` 声明 + 工具函数签名，变成
-「运行时可路由、可渲染 help 的命令表」。console 从这一刻起**不认识任何具体工具名**：
+命令表一旦手抄，新增或改名参数时表和签名就各说一套。本模块不认识任何具体工具名，命令全部从声明派生；`build()` 是纯函数，不碰全局也不 import `core` / `tools`（`tools` 在 `get_table()` 内延迟 import），否则单测只能整包导入才跑得起来。`get_table()` 只负责「确保 `tools` / `consoleTool` 已导入再收表」。
 
-| 旧实现 | 现实现 |
-| --- | --- |
-| `consoleCommands.COMMAND_SPECS`（手抄 34 条） | `build(declared_tools())` 派生 |
-| `consoleCommands._OPTION_ALIASES`（按命令 key 索引） | `Arg.alias`（跟着声明走） |
-| `consoleSchema.param_schemas(tool_name)`（`getattr(tools, name)`） | `ResolvedCommand.tool.callable` 的签名 |
-| `core._declared_visibility` / `LEGACY_CONVERGED_TOOLS` / `CONTAINER_TOOL_NAMES` | `ToolSpec.visibility` / `ToolSpec.group` |
-
-## 三条防循环硬约束（设计 §4.1 C-a / C-b / C-c）
-
-- **C-b**：`build()` 是**纯函数**（不碰 `core`、不写全局），`get_table()` 才负责「确保
-  `tools` / `consoleTool` 已完整导入 → 按 `toolSpec` 收集列表建表」。单测构造假工具
-  一律直接调 `build()`；`clear_cache()` 供测试重置。
-- **C-a/C-c**：本模块顶层**不 import `core` / `tools`**（`tools` 在 `get_table()` 内延迟
-  import），help 的 `HELP_SUMMARY` / `HELP_DETAIL` 由 `consoleTool` 用 PEP 562 惰性
-  生成，不再在 import 期立即求值。
+单测用 `build()` 造假工具、`clear_cache()` 重置。设计见 §4.1。
 """
 
 from __future__ import annotations

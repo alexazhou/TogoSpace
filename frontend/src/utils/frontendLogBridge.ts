@@ -1,7 +1,7 @@
 /** 把前端 console 日志经 ws 送到后端，由后端写进 `{STORAGE_ROOT}/logs/backend/frontend/frontend.log`。
- * 现象：浏览器形态下 `desktopLog.ts` 直接 return，那一侧完全没有落库能力；ws 又比首屏脚本晚连上，排查白屏最需要的最早几行会丢。
- * 原因：桌面和浏览器都要装，连上之前先排进队列 `MAX_QUEUE`；前端开关只用来省流量，真正决定写不写盘的是后端的 `TOGOSPACE_FRONTEND_DEBUG`。
- * 要改这里：别让日志绕过 `MAX_QUEUE` 直接发，也别改 `desktopLog.ts` 的行为；两道开关与三态见 `docs/tech/08_debugging/frontend_log_bridge.md`。
+ * 桌面和浏览器都要装：浏览器形态下 `desktopLog.ts` 直接 return，那一侧完全没有落库能力；ws 又比首屏脚本晚连上，排查白屏最需要的最早几行会丢，所以连上之前先排进队列 `MAX_QUEUE`。
+ * 前端开关只用来省流量，真正决定写不写盘的是后端的 `TOGOSPACE_FRONTEND_DEBUG`。
+ * 别让日志绕过 `MAX_QUEUE` 直接发，也别改 `desktopLog.ts` 的行为；两道开关与三态见 `docs/tech/08_debugging/frontend_log_bridge.md`。
  */
 
 import {

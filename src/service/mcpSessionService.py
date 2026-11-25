@@ -1,8 +1,8 @@
 """MCP 原生 session service：为每个 `(team_id, agent_id)` 各自维护一条长连接会话。
 
-现象：把一条连接给两个 Agent 复用、或者让 transport 和 `ClientSession` 待在不同的 asyncio Task，关闭时会抛 anyio 跨 Task 报错，stdio 子进程和 HTTP 客户端也一起泄漏。
-原因：mcp SDK 的这两个对象都必须进出同一个 Task，所以每条连接由一个专用 owner task 用 `AsyncExitStack` 持有；身份只能来自 `ToolCallContext`，命令行参数改不了它。
-要改这里：新增或改动连接逻辑时保持「进入和退出都在 owner task 内」，改完跑 `tests/integration/test_funcToolService/test_mcp_session_service.py`；会话键、连接键与状态机见 `docs/design/2026-11-16-mcp-native-session/step2_technical.md` §3.1 / §4.1。"""
+把一条连接给两个 Agent 复用、或者让 transport 和 `ClientSession` 待在不同的 asyncio Task，关闭时会抛 anyio 跨 Task 报错，stdio 子进程和 HTTP 客户端也一起泄漏。mcp SDK 的这两个对象都必须进出同一个 Task，所以每条连接由一个专用 owner task 用 `AsyncExitStack` 持有；身份只能来自 `ToolCallContext`，命令行参数改不了它。
+
+新增或改动连接逻辑时保持「进入和退出都在 owner task 内」，改完跑 `tests/integration/test_funcToolService/test_mcp_session_service.py`；会话键、连接键与状态机见 `docs/design/2026-11-16-mcp-native-session/step2_technical.md` §3.1 / §4.1。"""
 from __future__ import annotations
 
 import asyncio

@@ -1,8 +1,8 @@
 """把 legacy tool 的 JSON Schema 翻译成命令行的样子：选项名、类型、是否必填，供 help 与解析共用。
 
-现象：手写一份 help 或选项白名单，等于把同一件事记了两遍；新增参数或改了名字，副本不会报错，任何用例也不会变红。
-原因：`tools.py` 的函数签名和 docstring 才是模型看到的参数说明，`consoleTool.HELP_DETAIL` 这类手抄副本与它之间没有任何自动检查（`taskService` 的手抄 `clear_fields` 就出过同类问题）。
-要改这里：加参数只改 `tools.py`，别手抄进 `HELP_DETAIL` / `CommandSpec.options`，也别在本层校验值是否合法（那归 `#189`）；改完跑 `tests/unit/service/funcToolService/test_console_kebab_option.py`，背景见 `docs/tech/11_refactor/console_tool_review.md` 第五节。"""
+手写一份 help 或选项白名单，等于把同一件事记了两遍，新增参数或改了名字，副本不会报错，任何用例也不会变红——`tools.py` 的函数签名和 docstring 才是模型看到的参数说明，`consoleTool.HELP_DETAIL` 这类手抄副本与它之间没有任何自动检查（`taskService` 的手抄 `clear_fields` 就出过同类问题）。
+
+加参数只改 `tools.py`，别手抄进 `HELP_DETAIL` / `CommandSpec.options`，也别在本层校验值是否合法（那归 `#189`）；改完跑 `tests/unit/service/funcToolService/test_console_kebab_option.py`，背景见 `docs/tech/11_refactor/console_tool_review.md` 第五节。"""
 
 from __future__ import annotations
 

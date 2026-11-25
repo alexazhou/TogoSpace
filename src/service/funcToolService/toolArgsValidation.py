@@ -1,32 +1,8 @@
-"""tool call 参数的 JSON Schema 校验（#189）。
+"""按 JSON Schema 校验 tool call 的参数，返回「哪个字段、期望什么、收到什么」加固定 error_code。
 
-## 为什么需要这一层
+不校验的话，模型给错参数只能等 `func(**args)` 抛 `TypeError`，返回给它的是英文解释器文案，既没有字段级信息也不是固定结构，模型没法自己改。校验规则不在这里手写：schema 只有一处来源——本地工具取 `get_function_metadata()` 的 `parameters`，TSP 远端取 `OpenAITool.function.parameters`，同一份下发给模型。
 
-改造前，模型给错参数（类型错、漏必填、枚举值非法）时，错误只能靠 `func(**args)` 抛的
-`TypeError` 兜住，最终变成 `Invalid arguments for function xxx: got an unexpected ...`
-这类**英文解释器文案**返回给模型 —— 既不含「哪个字段、期望什么、收到什么」的字段级
-信息，也不是稳定结构（模型难以自纠，人排查时只能靠猜）。本模块把「按 schema 校验」
-收敛成唯一实现，返回**字段级 + 稳定 error_code** 的结构化失败返回体。
-
-## 单一事实源（硬约束）
-
-schema 一律来自已有信息，**禁止为任何工具另写一份校验规则**：
-
-- 本地工具：`funcToolType.get_function_metadata()` 的 `parameters`
-  （与 `FuncTool.to_openai_tool()` 下发给模型的是同一个函数产出的同一份结构）；
-- TSP 远端工具：`OpenAITool.function.parameters`，它由 `tspDriver._load_tsp_tools()`
-  用 `OpenAIFunctionParameter(**tool.input_schema)` 构造，同样是下发给模型的同源结构。
-
-## 兜底口径（小马哥 1015 / 1020 裁定）
-
-schema **不可用**（提取抛异常、结构不是 dict、`check_schema` 判定非法）时：
-**记一条 warning + 跳过校验**，绝不拦死正常调用。理由是远端 schema 由对端决定，
-后端无法保证其合法性；「因为 schema 坏了所以工具永远调不通」比「这次没校验」严重得多。
-
-warning 文案固定为「工具参数 schema 不可用，已跳过校验」+ `tool=` + `reason=`，
-便于 grep 与用例断言。**兜底只作用于出问题的那个工具**：解析发生在按工具取 schema 的
-那一处，不会有「整个校验入口 except: pass」这种全局失能写法。
-"""
+schema 提取失败或 `check_schema` 判定非法时只记一条 warning 并跳过校验、不要拦死调用——这条兜底是小马哥 1015 / 1020 裁定的：远端 schema 由对端决定，后端保证不了它的合法性，「因为 schema 坏了所以工具永远调不通」比「这次没校验」严重得多。兜底只作用于出问题的那个工具，warning 文案与 `tool=` / `reason=` 保持固定（用例按它断言）。"""
 
 from __future__ import annotations
 
@@ -266,11 +242,11 @@ def _truncate(text: str) -> str:
 
 
 def _is_ignorable_null(error: ValidationError, schema: Dict[str, Any]) -> bool:
-    """单个参数整体传 `null` 时报的错在这里放过——只对 `schema=` 传进来的外部 schema 生效。
+    """单个参数整体传 `null` 时报的错在这里放过，只对 `schema=` 传进来的外部 schema 生效。
 
-    现象：放过范围一放宽，用户就会看到数据库原样抛出的 `NOT NULL constraint failed`；放宽到数组元素上，`{"tags": [null]}` 这种非法参数会直接发给 TSP 远端。
-    原因：只有对方给的 schema 说不清「这个字段能不能是 null」时才有必要放过；本仓库的 schema 由 TypeAdapter 生成、已经写清，所以 `func=` 路径一律严格。
-    要改这里：`len(error.absolute_path) != 1` 必须继续直接返回 `False`，改完跑 `tests/unit/service/funcToolService/test_tool_schema_nullable_tsp.py`；为什么见 `docs/tech/12_common/tool_args_validation.md`。"""
+    放过范围一放宽，用户就会看到数据库原样抛出的 `NOT NULL constraint failed`；放宽到数组元素上，`{"tags": [null]}` 这种非法参数会直接发给 TSP 远端。只有对方给的 schema 说不清「这个字段能不能是 null」时才有必要放过，本仓库的 schema 由 TypeAdapter 生成、已经写清，所以 `func=` 路径一律严格。
+
+    唯一不能动的是 `len(error.absolute_path) != 1` 这一支直接返回 `False`；改完跑 `tests/unit/service/funcToolService/test_tool_schema_nullable_tsp.py`，判据表与两次打回的实测见 `docs/tech/12_common/tool_args_validation.md`。"""
 
     if error.instance is not None or error.validator not in ("type", "enum"):
         return False
@@ -315,28 +291,11 @@ def _describe(error: ValidationError) -> str:
 
 
 def _unwrap_nullable_any_of(error: ValidationError) -> ValidationError:
-    """把 `anyOf:[X, {"type":"null"}]` 的错误「降回」X 自身的错误，只为**保住文案**。
+    """把 `anyOf:[X, {"type": "null"}]` 的错误换回 X 自身的错误，只为保住报错文案。
 
-    ## 为什么需要这一步（#195 返工的 S1）
+    `Optional[Literal[...]]` 的值不合法时，报错会落在 `validator="anyOf"`，用户看到的是「不满足 anyOf 约束 [{...}, {...}]」，比原来的「只能取 ['TODO','ON_HOLD'] 之一」难读得多。`enum` 属于 `_NULL_SENSITIVE_KEYS`、不能压成 `type: [string, null]`（否则 enum 会咬住 null），所以 schema 里必须保留 anyOf 两支。
 
-    #195 之前 `Optional[Literal['TODO','ON_HOLD']]` 被剥成 `{"enum": [...], "type": "string"}`，
-    传非法值时 jsonschema 报 `validator="enum"` ⇒ 用户看到
-    「参数 status 只能取 ['TODO', 'ON_HOLD'] 之一」。
-
-    #195 之后 schema 保留 `anyOf:[{enum:...,type:string},{type:null}]`（`enum` 属
-    `_NULL_SENSITIVE_KEYS`，**不能**扁平化成 `type:[string,null]`，否则 enum 会咬住 null），
-    于是 jsonschema 改报 `validator="anyOf"` ⇒ 文案退化成
-    「不满足 anyOf 约束 [{'enum': [...], 'type': 'string'}, {'type': 'null'}]」，
-    **对模型和用户都更难读**。这是本单引入的可见退化，必须修掉。
-
-    ## 边界（别把它做成「吞掉 anyOf」）
-
-    - 只在 `validator == "anyOf"`、`validator_value` 恰好是两支、且**其中一支恰为
-      `{"type": "null"}`** 时展开 —— 这正是 `Optional[T]` 的形态；
-    - 多分支 `Union[str, int]`（三支、无 null）**不展开**，保留 anyOf 描述
-      —— 那种形态本来就没有「某个单一约束」可说；
-    - 展开只影响**文案**，错误码/排序/是否放行的判定都在外面，一字不动。
-    """
+    只在 `validator == "anyOf"`、恰好两支、且其中一支正是 `{"type": "null"}` 时展开；`Union[str, int]` 这种多分支不展开。展开只影响文案，是否放行由外层判。"""
 
     if error.validator != "anyOf":
         return error
@@ -371,11 +330,11 @@ def validate_tool_args(
     func: Optional[Callable[..., Any]] = None,
     schema: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """校验一次 tool call 的参数；通过返回 `None`，不通过返回 `{"success": False, "error_code": "invalid_tool_args", ...}`。
+    """校验一次 tool call 的参数：通过返回 `None`，不通过返回 `{"success": False, "error_code": "invalid_tool_args", ...}`。
 
-    现象：把外部 schema 这一路也收紧，`read_file{encoding: null}` 这种对端本来就接受的写法会被整批拒掉。
-    原因：放不放行取决于 schema 从哪来——`func=` 的由本仓库生成、写清了能不能为 null，一律严格；`schema=` 的由对端提供、说不清，才用 `_is_ignorable_null` 放过单个参数整体为 null。
-    要改这里：看的是「有没有传 `schema`」，不是「字段是否必填」，改完跑 `tests/unit/service/funcToolService/test_tool_schema_nullable_tsp.py`；两条路径的分流表见 `docs/tech/12_common/tool_args_validation.md`。"""
+    放不放行取决于 schema 从哪来：`func=` 的由本仓库生成、写清了能不能为 null，一律严格；`schema=` 的由对端提供、说不清，才用 `_is_ignorable_null` 放过单个参数整体为 null。看的是「有没有传 `schema`」，不是「字段是否必填」——把它收紧，`read_file{encoding: null}` / `grep_search{path: null}` 这种 gtsp 本体实测 ACCEPT 的写法会被整批拒掉（38 报的阻断项 B1）。
+
+    改完跑 `tests/unit/service/funcToolService/test_tool_schema_nullable_tsp.py`；两条路径的分流表与参数语义见 `docs/tech/12_common/tool_args_validation.md`。"""
 
     # ⚠️ 分流依据必须是「schema 从哪来」，不能看「字段是否必填」。
     # `schema is None` 进来时才是本地路径（下面用 `func` 现取 schema）；

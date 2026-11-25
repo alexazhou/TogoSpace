@@ -1,8 +1,8 @@
 """把任意 MCP / OpenAPI / GraphQL 服务变成一条 `mcp_call` 工具，实际执行交给 mcp2cli。
 
-现象：一次 `mcp_call` 超时返回后，接下来几十秒里其他 `mcp_call` 也会一起变慢——`asyncio.wait_for` 只是不再等结果，跑 mcp2cli 的那个线程还握着 `_STDOUT_LOCK`，要等它真正结束才放开。
-原因：mcp2cli 把结果 `print` 到 stdout、出错直接 `sys.exit(1)`，只能截获整个进程的 stdout，多个线程同时跑会互相拿到对方的结果，所以这里一次只让它跑一个。
-要改这里：别改成逐段调用 `load_openapi_spec` / `execute_openapi`（等于把 mcp2cli 的分派逻辑抄一遍），改完跑 `tests/unit/service/funcToolService/test_mcp_call.py`；完整理由见 `docs/design/2026-11-08-agent-mcp-support/step2_technical.md` §9。"""
+一次 `mcp_call` 超时返回后，接下来几十秒（无上界，实测 74.92s）里其他 `mcp_call` 也会一起变慢：`asyncio.wait_for` 只是不再等结果，跑 mcp2cli 的线程还握着 `_STDOUT_LOCK`，要等它真正结束才放开。上游的 30 / 60 秒是单次操作超时（connect 与 read 各自计时），服务端慢速滴流可以让总时长任意长。
+
+因为 mcp2cli 把结果 `print` 到 stdout、出错直接 `sys.exit(1)`，只能截获整个进程的 stdout，多个线程同时跑会互相拿到对方的结果，所以一次只让它跑一个。别改成逐段调用 `load_openapi_spec` / `execute_openapi`（等于把 mcp2cli 的分派逻辑抄一遍）；改完跑 `tests/unit/service/funcToolService/test_mcp_call.py`，完整理由见 `docs/design/2026-11-08-agent-mcp-support/step2_technical.md` §9。"""
 from __future__ import annotations
 
 import asyncio
@@ -477,29 +477,10 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
     try:
         payload = json.loads(out)
     except json.JSONDecodeError:
-        # #282（方案 A，Operator 2026-11-16 02:19 选型）：**非 JSON 输出不等于失败**，
-        # 改按「进程退出码」判成败 —— 能走到这里就等价于退出码 0：
-        # `_main_impl` 正常返回（未 `sys.exit`），而 mcp2cli 的失败路径是 `sys.exit(1)`
-        # 并被上面的 `except SystemExit` 接走（⇒ `mcp2cli_exit`、success=False）。
-        # 库调用路径**拿不到 returncode**，所以「正常返回」就是 0 的唯一可用证据。
+        # 非 JSON 输出不等于失败（#282 方案 A，Operator 2026-11-16 02:19 选型）：能走到这里说明 `_main_impl` 正常返回，等价于退出码 0。
         #
-        # 旧注释写「防御性分支，当前不可达（#202 复验 B5）」，其假设是「`--json` 会让上游
-        # `output_result` 把任何非 JSON 响应体包成合法 JSON 字符串」。**该假设已被实测推翻**
-        # （#282，Operator 02:19 首先发现）：mcp2cli 的 **CLI 自己 print 的控制台文本**
-        # 不经过 `output_result` 包装 —— `--session-start` / `--session-stop` /
-        # `--session-list` 都是「操作成功 + 输出纯文本」，例如
-        # `Session 'ctx7' started (PID 27570)`、`No active sessions.`。
-        # 旧行为把它们全判成 `mcp2cli_bad_json`（操作成功却报失败），误导使用者重试。
-        #
-        # 这里**不按开关名做白名单**（方案 B 已被否）：任何文本型输出都走这条统一兜底，
-        # 形态与「JSON 成功」完全一致 —— 原文进 `result`、`result_type="string"`，
-        # 超限时按同一条截断规则只下发 `raw_excerpt`（不下发 result）。
-        #
-        # 已知边界（#284 / B52-N1）：**stdout 里混入非 JSON 文本不再可区分**。改前这种
-        # 「噪音 + payload」会被判 `mcp2cli_bad_json`（失败）；方案 A 之后只要 mcp2cli
-        # 正常返回就按成功，原文进 `result`、`result_type="string"`，于是「混入的噪音」
-        # 与「上游确实返回纯文本」在返回体上完全同形。这是「以退出码为准」的必然代价：
-        # 要判失败，必须让 mcp2cli 真的非 0 退出（拿不到 returncode 的库调用路径判不了）。
+        # mcp2cli 的 CLI 自己 print 的控制台文本（`Session 'ctx7' started`、`No active sessions.`）不经过 output_result 包装，按 JSON 判失败会把「操作成功」报成 `mcp2cli_bad_json`，使用者会去重试。库调用路径拿不到 returncode，「正常返回」就是退出码 0 的唯一可用证据。
+        # 不按开关名做白名单，任何文本型输出都走这条统一分支：原文进 `result`、`result_type="string"`、超限时只下发 `raw_excerpt`。已知边界（#284 / B52-N1）：stdout 里混入的非 JSON 文本不再可区分，它与「上游确实返回纯文本」在返回体上完全同形。
         payload = out
 
     # 真截断：超限时**不下发 result**。只截 `raw_excerpt` 而照样把完整 payload 塞进
