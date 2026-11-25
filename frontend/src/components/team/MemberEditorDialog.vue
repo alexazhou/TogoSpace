@@ -563,7 +563,8 @@ const selectedMemberAvatarSeed = computed(() => props.memberName.trim());
 .member-soul-input::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 999px;
-  border: 2px solid var(--scrollbar-track);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .member-soul-input::-webkit-scrollbar-thumb:hover {

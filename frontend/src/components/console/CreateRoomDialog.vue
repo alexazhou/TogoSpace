@@ -426,7 +426,8 @@ watch(
 .create-room-members-grid::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 999px;
-  border: 2px solid var(--scrollbar-track);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .create-room-member {
