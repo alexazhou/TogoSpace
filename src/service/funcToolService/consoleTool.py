@@ -426,42 +426,186 @@ def _split_csv(raw: Any) -> list[str]:
     return list(dict.fromkeys(p.strip() for p in parts if p.strip()))
 
 
-def _parse_array_literal(text: str, *, name: str, command: str) -> list[str]:
-    """`[` 开头的值按 **JSON 数组字面量**解析（#219）：元素必须是字符串、不 trim。"""
+_DEFAULT_ARRAY_ITEM_KINDS = frozenset({"string"})
+"""调用方没传 schema 时的数组元素类型兜底（内部函数与历史用例的默认面）。"""
+
+
+def _array_example(item_kinds: frozenset[str]) -> str:
+    """该数组参数的示例字面量——与 help 形态注同源（`consoleSchema.array_shape_and_example`）。"""
+    return cs.array_shape_and_example(item_kinds)[1]
+
+
+_ARRAY_KIND_LABELS = {"string": "字符串", "integer": "整数", "object": "对象"}
+
+
+def _array_kinds_label(item_kinds: frozenset[str]) -> str:
+    """元素类型的可读名（报错文案用），顺序固定便于用例断言。"""
+    order = [kind for kind in ("string", "integer", "object") if kind in item_kinds]
+    return " / ".join(_ARRAY_KIND_LABELS.get(kind, kind) for kind in order) or "字符串"
+
+
+def _csv_hint(name: str, item_kinds: frozenset[str]) -> str:
+    """逗号分隔写法的可照抄形态；元素只收对象时没有 CSV 写法。"""
+    if "string" in item_kinds:
+        return f"--{name} a,b"
+    if "integer" in item_kinds:
+        return f"--{name} 1,2"
+    return ""
+
+
+def _coerce_csv_elements(
+    text: str, *, name: str, command: str, item_kinds: frozenset[str]
+) -> list[Any]:
+    """CSV 段 → 元素列表：元素类型按 schema 收敛，整数逐项走正整数收敛。
+
+    缺了这一步，`--depends-on 42,44` 会把 `['42','44']` 原样转给第 2 跳，被 schema
+    校验拒成「应为 integer，实际收到 '42'」——这正是 need_fix_4 的 B1。
+    """
+    parts = [part.strip() for part in str(text).split(",") if part.strip()]
+    if "string" in item_kinds:
+        return parts
+    if "integer" not in item_kinds:
+        raise ConsoleError(
+            "invalid_option_value",
+            f"--{name} 的元素是对象，不能用逗号分隔的写法；"
+            f"请写成 JSON 数组（如 '{_array_example(item_kinds)}'），或把配置放进 --from payload。",
+            example=f"{command} --{name} '{_array_example(item_kinds)}'",
+        )
+    converted: list[Any] = []
+    for part in parts:
+        try:
+            converted.append(
+                _require_positive_int(part, what=f"--{name} 的元素", command=command)
+            )
+        except ConsoleError as exc:
+            raise ConsoleError(
+                "invalid_option_value",
+                f"--{name} 的元素必须是正整数，收到 {part!r}。",
+                example=f"{command} --{name} '{_array_example(item_kinds)}'",
+            ) from exc
+    return converted
+
+
+def _validate_array_element(
+    item: Any,
+    *,
+    index: int,
+    name: str,
+    command: str,
+    item_kinds: frozenset[str],
+) -> Any:
+    """单个 JSON 数组元素按 schema 的元素类型校验并放行。
+
+    `bool` 必须单独拦：`True/False` 是 `int` 的子类，放过去就变成 id `1/0`。
+    """
+    example = _array_example(item_kinds)
+
+    def reject(reason: str) -> ConsoleError:
+        return ConsoleError(
+            "invalid_option_value",
+            f"--{name} 的 JSON 数组第 {index} 个元素{reason}；"
+            f"该参数的元素应为{_array_kinds_label(item_kinds)}（如 '{example}'）。",
+            example=f"{command} --{name} '{example}'",
+        )
+
+    if isinstance(item, bool):
+        raise reject("是布尔值（True/False 会被当成 1/0，这里不接受）")
+    if isinstance(item, str):
+        if "string" in item_kinds:
+            return item
+        raise reject("是字符串")
+    if isinstance(item, int):
+        if "integer" not in item_kinds:
+            raise reject("是整数")
+        if item <= 0:
+            raise reject("不是正整数")
+        return item
+    if isinstance(item, dict):
+        if "object" in item_kinds:
+            return item
+        raise reject("是对象")
+    raise reject(f"的类型是 {type(item).__name__}")
+
+
+def _parse_array_literal(
+    text: str,
+    *,
+    name: str,
+    command: str,
+    item_kinds: frozenset[str] = _DEFAULT_ARRAY_ITEM_KINDS,
+) -> list[Any]:
+    """`[` 开头的值按 **JSON 数组字面量**解析：元素类型按 schema 校验，字符串元素不 trim。
+
+    报错示例从 `array_shape_and_example` 取（不再写死 `["a","b"]`）：示例必须能照着
+    写成功，否则错误提示本身就是第二个 bug（need_fix_4 §二 B2）。
+    """
+    example = _array_example(item_kinds)
+    example_option = f"{command} --{name} '{example}'"
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
+        csv_part = _csv_hint(name, item_kinds)
+        csv_hint = f"，或改用逗号分隔（{csv_part}）" if csv_part else ""
         raise ConsoleError(
             "invalid_option_value",
             f"--{name} 的值以 `[` 开头，按 JSON 数组解析失败：{exc.msg}"
             f"（第 {exc.lineno} 行第 {exc.colno} 列）。"
-            f"要么写成合法的 JSON 数组（如 '[\"a\",\"b\"]'），要么改用逗号分隔"
-            f"（--{name} a,b），或把配置放进 --from payload。",
-            example=f"{command} --{name} '[\"a\",\"b\"]'",
+            f"JSON 数组含双引号或空格时，外层请用单引号包裹（如 '{example}'）{csv_hint}；"
+            f"复杂结构建议 --from payload。",
+            example=example_option,
         ) from exc
     if not isinstance(parsed, list):
         raise ConsoleError(
             "invalid_option_value",
             f"--{name} 的值以 `[` 开头，但解析结果是 {type(parsed).__name__}，需要 JSON 数组。",
-            example=f"{command} --{name} '[\"a\",\"b\"]'",
+            example=example_option,
         )
-    items: list[str] = []
-    for index, item in enumerate(parsed):
-        if not isinstance(item, str):
-            raise ConsoleError(
-                "invalid_option_value",
-                f"--{name} 的 JSON 数组第 {index} 个元素是 {type(item).__name__}，"
-                f"这里只接受字符串元素（如 '[\"a\",\"b\"]'）。",
-                example=f"{command} --{name} '[\"a\",\"b\"]'",
-            )
-        items.append(item)
-    return items
+    return [
+        _validate_array_element(
+            item, index=index, name=name, command=command, item_kinds=item_kinds
+        )
+        for index, item in enumerate(parsed)
+    ]
 
 
-def _split_option_values(raw: Any, *, name: str, command: str) -> list[str]:
-    """数组型选项原始值 → 去重保序列表（逐值段判断 `[` 形态，多次出现逐段合并）。"""
+def _explicit_empty_json_array(raw: Any) -> bool:
+    """是否显式写了 JSON 空数组字面量（`'[]'` / `' [] '`）——B3 的空值分流依据。
+
+    「空结果」有两种来源，语义相反：显式 `'[]'` 是「清空 / 一个都不要」，全空白是
+    「这次没提供」。只看 `if not items` 会把两者混成一个 `None`，于是
+    `task update <id> --depends-on '[]'` 变成 `no_update_action`（B3）。
+    """
     segments = raw if isinstance(raw, (list, tuple)) else [raw]
-    merged: list[str] = []
+    for segment in segments:
+        if segment is None:
+            continue
+        text = str(segment).strip()
+        if not text.startswith("["):
+            continue
+        try:
+            if json.loads(text) == []:
+                return True
+        except json.JSONDecodeError:
+            continue
+    return False
+
+
+def _split_option_values(
+    raw: Any,
+    *,
+    name: str,
+    command: str,
+    item_kinds: frozenset[str] | None = None,
+) -> list[Any]:
+    """数组型选项原始值 → 元素列表（逐值段判断 `[` 形态，多次出现逐段合并）。
+
+    `item_kinds` 缺省按 `string` 收（内部函数与历史用例的默认面），转发路径由
+    `_convert_option` 从 schema 取出元素类型传进来。含 `object` 时**不去重**：`dict`
+    不可 hash，且工作流节点数组允许同一成员跨节点出现（`[7, 8, 7]` 是合法流程）。
+    """
+    kinds = item_kinds or _DEFAULT_ARRAY_ITEM_KINDS
+    segments = raw if isinstance(raw, (list, tuple)) else [raw]
+    merged: list[Any] = []
     for segment in segments:
         if segment is None:
             continue
@@ -469,14 +613,21 @@ def _split_option_values(raw: Any, *, name: str, command: str) -> list[str]:
         if not text:
             continue
         if text.startswith("["):
-            merged.extend(_parse_array_literal(text, name=name, command=command))
+            merged.extend(_parse_array_literal(text, name=name, command=command, item_kinds=kinds))
         else:
-            merged.extend(_split_csv(text))
-    return list(dict.fromkeys(item for item in merged if item))
+            merged.extend(_coerce_csv_elements(text, name=name, command=command, item_kinds=kinds))
+    if "object" in kinds:
+        return merged
+    return list(dict.fromkeys(item for item in merged if item != ""))
 
 
-def _convert_option(raw: Any, *, kind: str, name: str, command: str) -> Any:
-    """按 schema 声明的类型把选项值转成工具要的形态。"""
+def _convert_option(
+    raw: Any, *, kind: str, name: str, command: str, prop: dict | None = None
+) -> Any:
+    """按 schema 声明的类型把选项值转成工具要的形态。
+
+    `prop` 是该参数的 schema 片段，只有数组型用得到（元素类型决定怎么转、示例怎么写）。
+    """
     if kind == "boolean":
         if isinstance(raw, bool):
             return raw
@@ -484,7 +635,13 @@ def _convert_option(raw: Any, *, kind: str, name: str, command: str) -> Any:
     if kind == "integer":
         return _require_positive_int(raw, what=f"--{name}", command=command)
     if kind == "array":
-        return _split_option_values(raw, name=name, command=command) or None
+        item_kinds = cs.array_item_kinds(prop or {})
+        items = _split_option_values(raw, name=name, command=command, item_kinds=item_kinds)
+        if items:
+            return items
+        # 显式 `'[]'` ⇒ []（能真清空依赖、能表达「不授权任何技能」）；纯空白 ⇒ None
+        # （`--status ''` 仍 ≡ 未提供，#228 的契约不能在这条路上破掉）。
+        return [] if _explicit_empty_json_array(raw) else None
     if kind == "object":
         text = str(raw).strip()
         if not text.startswith("{"):
@@ -518,7 +675,13 @@ def _option_args(cmd: registry.ResolvedCommand, options: dict[str, Any]) -> dict
     for name, raw in options.items():
         real = cmd.normalize_option(name)
         kind = cmd.option_kinds.get(real) or cmd.option_kinds.get(name) or "string"
-        args[real] = _convert_option(raw, kind=kind, name=cc.to_kebab(real), command=cmd.key)
+        args[real] = _convert_option(
+            raw,
+            kind=kind,
+            name=cc.to_kebab(real),
+            command=cmd.key,
+            prop=cmd.param_schemas.get(real),
+        )
     return args
 
 

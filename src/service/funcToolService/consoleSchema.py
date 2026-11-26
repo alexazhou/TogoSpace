@@ -120,6 +120,70 @@ def param_kind(prop: dict) -> str:
     return "string"
 
 
+_ARRAY_ITEM_FALLBACK = frozenset({"string"})
+"""数组元素类型取不到时的兜底：按 `string` 收下，与 `param_kind` 的兜底同思路。"""
+
+
+def array_item_kinds(prop: dict) -> frozenset[str]:
+    """数组参数的**元素**类型集合（`items.type` / `items.anyOf`，去掉 `null`）。
+
+    为什么顶层 `param_kind` 只到 `array` 就停：`consoleParsing` 的重复选项聚合按顶层
+    类别分流（数组聚合、标量报 `duplicate_option`），把元素类型塞进 `param_kind` 会
+    连带改掉那条逻辑。元素类型只有转换与 help 两处需要，所以单独一个纯函数。
+
+    全仓实际存在三种形态：`{"type": "string"}`（`member_names` / `status`）、
+    `{"type": "integer"}`（`depends_on`）、`anyOf: [{"type": "object"},
+    {"type": "integer"}]`（`stages` / `append_stages`）。取不到就当 `{"string"}`。
+    """
+    kinds: set[str] = set()
+
+    def collect(spec: Any) -> None:
+        if not isinstance(spec, dict):
+            return
+        declared = spec.get("type")
+        if isinstance(declared, str):
+            kinds.add(declared)
+        elif isinstance(declared, list):
+            kinds.update(str(item) for item in declared)
+        for branch in spec.get("anyOf") or ():
+            collect(branch)
+
+    collect(prop.get("items"))
+    kinds.discard("null")
+    return frozenset(kinds) or _ARRAY_ITEM_FALLBACK
+
+
+def array_shape_and_example(item_kinds: frozenset[str]) -> tuple[str, str]:
+    """数组参数的「命令行写法」与「报错示例字面量」——**同一处产出**（修 B2）。
+
+    两件事必须同源：help 里说支持的写法，和报错里让人照抄的示例，只要有一处按「数组」
+    统一写死，就会出现 help 说 `["a","b"]`、实际元素要整数（`depends_on` / `stages`）
+    的情形——照着示例写必然再错一次（need_fix_4 §二 B2）。所以形态注与示例如今都从
+    这个函数取，按元素类型分档。
+    """
+    if "object" in item_kinds:
+        if "integer" in item_kinds:
+            return (
+                "CSV（7,9）、JSON 数组（'[{\"owner_id\":7}]' 或 '[7,9]'）或重复出现；"
+                "复杂结构建议 --from payload",
+                '[{"owner_id":7}]',
+            )
+        return (
+            "JSON 数组（'[{\"k\":\"v\"}]'）；复杂结构建议 --from payload",
+            '[{"k":"v"}]',
+        )
+    if "integer" in item_kinds:
+        return (
+            "CSV（1,2）、JSON 数组（'[1,2]'）或重复出现，三种写法等价",
+            "[1,2]",
+        )
+    return (
+        "CSV（a,b）、JSON 数组（'[\"a\",\"b\"]'）或重复出现，三种写法等价；"
+        "复杂结构建议 --from payload",
+        '["a","b"]',
+    )
+
+
 def param_kinds(tool_name: str) -> dict[str, str]:
     """参数名 → 类型类别（`integer` / `boolean` / `array` / `object` / `string`）。
 
@@ -185,7 +249,7 @@ def _kebab(name: str) -> str:
     return kebab
 
 
-def _shape_note(kind: str) -> str:
+def _shape_note(kind: str, prop: dict | None = None) -> str:
     """按类型类别给「这行参数在命令行上怎么写」的形态标注（#219 需求 2）。
 
     为什么只标 array / object：string / integer / boolean 的形态已经由
@@ -195,11 +259,13 @@ def _shape_note(kind: str) -> str:
     CSV 写法（#219 D2：对 integer/object 不可执行）。help 是模型选写法
     的依据，形态必须写在参数行上、不能只写在实现里。
 
-    文案须与解析行为一致：数组型逗号/JSON/重复三种写法等价
-    （consoleTool._split_option_values），object 只收 JSON object 字面量。
+    数组的文案**按元素类型分档**（`array_shape_and_example`）：`depends_on` 收整数、
+    `stages` 收对象或整数，统一写 `["a","b"]` 会让照着 help 写的人一定失败
+    （need_fix_4 §三.3）。文案须与解析行为一致，两处共用同一个函数。
     """
     if kind == "array":
-        return "（形态：CSV（a,b）、JSON 数组（[\"a\",\"b\"]）或重复出现，三种写法等价；复杂结构建议 --from payload）"
+        note, _example = array_shape_and_example(array_item_kinds(prop or {}))
+        return f"（形态：{note}）"
     if kind == "object":
         return "（形态：JSON object（{\"k\":\"v\"}）；复杂结构建议 --from payload）"
     return ""
@@ -232,7 +298,7 @@ def describe_param(
     head = f"--{_kebab(name)} <{kind}>" if kind != "boolean" else f"--{_kebab(name)}"
     if aliases:
         head += "（别名 " + " / ".join("--" + alias for alias in aliases) + "）"
-    shape = _shape_note(kind)
+    shape = _shape_note(kind, prop)
     positional = f"（{positional_label}）" if positional_label else ""
     note = _first_clause(prop.get("description"))
     tail = f"（{marker}）" + (f" {note}" if note else "")
