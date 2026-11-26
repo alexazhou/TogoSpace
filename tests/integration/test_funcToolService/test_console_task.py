@@ -331,13 +331,13 @@ class TestConsoleTaskCommand(_ConsoleTaskEntryBase):
         """
         from service.funcToolService import consoleTool as ct
 
-        baseline = ct._help_text(["help", "task", "update"])["help"]
+        baseline = ct._help_text(["help", "task", "update"])["text"]
         assert "reviewer_id" in baseline
 
         extended = frozenset(set(ALLOWED_CLEAR_FIELDS) | {"zz_fake_field"})
         monkeypatch.setattr(ct, "ALLOWED_CLEAR_FIELDS", extended, raising=True)
 
-        after = ct._help_text(["help", "task", "update"])["help"]
+        after = ct._help_text(["help", "task", "update"])["text"]
         assert "zz_fake_field" in after, (
             "扩了 ALLOWED_CLEAR_FIELDS 但 help 候选没跟着变 ⇒ 候选集合不是从该常量派生的。\n"
             f"扩前：{baseline!r}\n扩后：{after!r}"
@@ -742,12 +742,12 @@ class TestConsoleTaskCommand(_ConsoleTaskEntryBase):
         """`help task` 与 `help task update` 都能给出详情（否则模型只能瞎试）。"""
         from service.funcToolService.consoleTool import _help_text
 
-        summary = _help_text(["help"])["help"]
+        summary = _help_text(["text"])["text"]
         assert "task" in summary
         for action in ("ls", "get", "update"):
             detail = _help_text(["help", "task", action])
             assert detail["success"] is True
-            assert f"task {action}" in detail["help"]
+            assert f"task {action}" in detail["text"]
 
     # ==================================================================
     # #222 A6：`task create` 从真入口建单（含唤醒提示透传/追加）

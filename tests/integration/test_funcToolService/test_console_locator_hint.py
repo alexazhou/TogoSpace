@@ -147,7 +147,7 @@ class TestConsoleLocatorHint(ServiceTestCase):
         """真入口 `help dept get`：位置参数单列一段，行名复用签名 token（#323 方案 B）。"""
         result = await self._call("help dept get")
         assert result["success"] is True, result
-        detail = result.get("help", "")
+        detail = result.get("text", "")
         assert "位置参数：" in detail, f"真 help 输出没有「位置参数：」段：{detail!r}"
         section = detail.split("位置参数：", 1)[1]
         assert any(ln.startswith("  <id> ") for ln in section.splitlines()), (

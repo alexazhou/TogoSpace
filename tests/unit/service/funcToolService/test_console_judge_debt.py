@@ -57,7 +57,7 @@ class TestD1DedupKeepsOrder:
 # --------------------------------------------------------------------------- #
 
 
-class TestD2EmptyArrayToNone:
+class TestD2EmptyValueSplit:
     """空值分流：**显式 `'[]'` → `[]`**、**纯空白 → `None`**（need_fix_4 §七 模块 1）。
 
     原判据把两者一并钉成 `None`（当时只有 `or None` 一条实现），代价是 CLI 无法表达

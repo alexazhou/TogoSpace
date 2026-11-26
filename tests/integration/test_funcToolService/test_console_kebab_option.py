@@ -182,6 +182,6 @@ class TestConsoleKebabEntry(ServiceTestCase):
         """真入口 `help task ls`：只见 --title-keyword，不见 --title_keyword（M3）。"""
         result = await self._call("help task ls")
         assert result["success"] is True, result
-        detail = result.get("help", "")
+        detail = result.get("text", "")
         assert "--title-keyword" in detail, f"真 help 没展示 kebab 主形态：{detail!r}"
         assert "--title_keyword" not in detail, f"真 help 混入旧名：{detail!r}"

@@ -106,7 +106,7 @@ class TestTaskLsForwardsRaw:
         help 是模型唯一能读到的口径：若它还说「上游会自动补」，模型就无从解释
         `auto_filled_filters` 是谁写的，也想不到可以用 `--scope team` 查全团队。
         """
-        help_text = _run("help task ls")["help"]
+        help_text = _run("help task ls")["text"]
 
         assert "全缺时由 list_tasks 自身补 --scope self" in help_text, help_text
         assert "auto_filled_filters" in help_text, help_text
@@ -188,19 +188,19 @@ class TestUsageLineRecommendsPayload:
     """A5：有 array/object 参数的命令，用法行末尾补推荐；没有的不补。"""
 
     def test_complex_param_command_recommends_payload(self) -> None:
-        help_text = _run("help room create")["help"]
+        help_text = _run("help room create")["text"]
         usage = help_text.splitlines()[0]
         assert "--from payload" in usage, f"用法行没给推荐：{usage!r}"
         assert "复杂参数建议优先" in usage, usage
 
     def test_simple_command_has_no_recommendation(self) -> None:
         """对照组：`dept ls` 没有复杂参数，不该出现这句（否则成了噪音、也失去指示作用）。"""
-        usage = _run("help dept ls")["help"].splitlines()[0]
+        usage = _run("help dept ls")["text"].splitlines()[0]
         assert "复杂参数建议优先" not in usage, usage
 
     def test_update_command_also_covered(self) -> None:
         """`task update` 的 `--clear_fields` 是数组 ⇒ 同样要推荐（不是只给 create 加）。"""
-        usage = _run("help task update")["help"].splitlines()[0]
+        usage = _run("help task update")["text"].splitlines()[0]
         assert "复杂参数建议优先" in usage, usage
 
 
@@ -219,7 +219,7 @@ class TestMcpBasePathNote:
 
     @pytest.mark.parametrize("command", ["help openapi", "help openapi call", "help openapi list"])
     def test_help_mentions_missing_servers_limitation(self, command: str) -> None:
-        help_text = _run(command)["help"]
+        help_text = _run(command)["text"]
         assert "servers" in help_text, help_text
         assert "base path" in help_text, help_text
         # 得给一条可执行的出路，不能只说「有坑」
@@ -256,7 +256,7 @@ class TestTaskCreateForwarding:
         这里钉「用户能读到的那句话仍在 help 里」——help 由 `create_task` 的 docstring
         派生，docstring 掉了这句话，模型就再也不知道建完要另发 `send_chat_msg`。
         """
-        help_text = _run("help task create")["help"]
+        help_text = _run("help task create")["text"]
 
         assert "不会唤醒执行人" in help_text, help_text
         assert "send_chat_msg" in help_text, help_text
@@ -272,7 +272,7 @@ class TestTaskCreateForwarding:
         assert post_process is None
         # P1 删表后命令表不再有 `success_hint` 字段（那句提醒归 `create_task` 自己的
         # 返回体），对照组改成查：同一句提示不会从别的 create 命令漏出来。
-        dept_help = _run("help dept create")["help"]
+        dept_help = _run("help dept create")["text"]
         assert "不会唤醒执行人" not in dept_help, dept_help
 
 

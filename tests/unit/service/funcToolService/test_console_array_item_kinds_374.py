@@ -95,7 +95,8 @@ class TestShapeAndExample:
             ct._convert_option("[a,b]", kind="array", name="depends-on", command="task create", prop=prop)
         example = excinfo.value.extra["example"]
         literal = example.split("--depends-on ", 1)[1].strip("'")
-        assert f"（{literal!r}" or literal in cs.describe_param("depends_on", prop, required=False)
+        # (#375 清理 #374 遗留) 原先这里还有一条 `assert f"（{literal!r}" or …` ——
+        # 非空 f-string 恒真，是条无效断言，已删；真正的判据是下面这条。
         assert literal in cs.describe_param("depends_on", prop, required=False), (
             f"help 与报错示例不同源：help={cs.describe_param('depends_on', prop, required=False)!r} "
             f"example_literal={literal!r}"

@@ -1373,7 +1373,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         for name in ("alice", "bob", "charlie"):
             result = await self._call("help", _context=self._ctx(name))
             assert result["success"] is True
-            assert "dept" in result["help"]
+            assert "dept" in result["text"]
 
 
 class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):

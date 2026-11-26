@@ -261,7 +261,7 @@ def test_help_detail_no_longer_says_only_the_last_wins() -> None:
     """
     from service.funcToolService import consoleTool as ct
 
-    detail = ct._help_text(["help", "task", "update"])["help"]
+    detail = ct._help_text(["help", "task", "update"])["text"]
     assert "只有最后一个生效" not in detail, f"#187-④ 的旧语义仍留在 help 里：{detail}"
     assert "数组型选项可重复出现" in detail, f"新语义没写进 task update 的 help：{detail}"
     assert "duplicate_option" in detail, f"help 没给出标量重复的错误码：{detail}"
