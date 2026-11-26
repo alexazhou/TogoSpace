@@ -165,6 +165,37 @@ export function buildImageMetaText(image: ActivityImage): string {
 }
 
 export const TOOL_RESULT_PREVIEW_MAX_CHARS = 2000;
+
+/**
+ * 工具返回体里的**元信息键**：说的是"这次调用怎么样了"，不是"业务数据是什么"。
+ *
+ * 为什么需要这份名单：`resolveRawToolResult` 原先按 `[message, content, text]` 取第一个
+ * 非空值，于是 `{message: "共 3 个任务", tasks: [...]}` 只显示那句 summary，**业务数据被
+ * 悄悄吞掉**（卡片上看着"成功了但没内容"）。现在把 `message` 与业务数据分开：先显示
+ * `message`，再把剩下的键当数据附在后面。
+ *
+ * 关键取舍：名单是**白名单式的元信息**，其余键一律当业务数据 ⇒ 后端新增字段时默认
+ * **会被显示**（漏显示比多显示更难被发现）；反过来若写成"业务数据白名单"，新字段
+ * 默认被吞，就回到原来的 bug。
+ *
+ * `is_error` / `truncated` / `result_type` / `is_new_created` / `dry_run` 都在这里：
+ * 它们会影响"怎么读这个结果"，但重复显示在卡片上没有信息增量。
+ */
+const META_KEYS = new Set<string>([
+  'success',
+  'error_code',
+  'is_error',
+  'message',
+  'hint',
+  'note',
+  'example',
+  'auto_filled_filters',
+  'resolved_from_registry',
+  'truncated',
+  'result_type',
+  'is_new_created',
+  'dry_run',
+]);
 export const TOOL_ARGUMENTS_PREVIEW_MAX_CHARS = 500;
 
 export function truncatePreview(value: string, maxChars: number, singleLine = false): string {
@@ -540,11 +571,32 @@ function resolveRawToolResult(t: Translate, activity: AgentActivity, toolName: s
   }
   if (typeof toolResult === 'object') {
     const candidate = toolResult as { message?: unknown; content?: unknown; text?: unknown };
-    const preferredText = [candidate.message, candidate.content, candidate.text]
+    // ① 格式化正文优先：`text` / `content` 是"已经排好版的正文"
+    //    （help、mcp list/call 文本模式、read_file），直接显示，不再套 JSON。
+    // 两者都在时保持改动前的相对次序（content 先于 text），只把 message 让到后面。
+    const bodyText = [candidate.content, candidate.text]
       .map((item) => stripAnsi(safeTrimEnd(item)))
       .find(Boolean);
-    if (preferredText) {
-      return preferredText;
+    if (bodyText) {
+      return bodyText;
+    }
+    // ② 纯 `message` 回执 vs `message` + 业务数据：后者不许被前者遮蔽。
+    const messageText = stripAnsi(safeTrimEnd(candidate.message));
+    if (messageText) {
+      const record = toolResult as Record<string, unknown>;
+      const dataEntries = Object.fromEntries(
+        Object.entries(record).filter(([key]) => !META_KEYS.has(key)),
+      );
+      if (Object.keys(dataEntries).length === 0) {
+        return messageText;
+      }
+      try {
+        return `${messageText}\n${JSON.stringify(dataEntries, null, 2)}`;
+      } catch {
+        // 业务数据里有循环引用等无法序列化的值：退回只显示 message ——
+        // 宁可少显示数据，也不要把整张卡片变成"解析失败"。
+        return messageText;
+      }
     }
     try {
       return JSON.stringify(toolResult, null, 2);

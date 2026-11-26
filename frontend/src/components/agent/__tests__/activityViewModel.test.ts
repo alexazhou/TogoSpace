@@ -233,3 +233,77 @@ describe('#213 ③ view-model：9 种 Activity 类型的字段映射', () => {
     expect(bashView.stdout).toContain('已截断');
   });
 });
+
+// #376 模块 3：`resolveRawToolResult` 的「正文优先 + message 不遮蔽业务数据」。
+//
+// 治的失效形态（Operator 截图那条）：`{message: "共 3 个任务", tasks: [...]}` 只显示
+// summary 那句，`tasks` 被 `[message, content, text].find(Boolean)` 悄悄吞掉——
+// 卡片上看着"成功了但没内容"，而且**没有任何报错**，只能靠人盯。
+describe('#376 模块 3：工具结果预览（正文优先 / message 不遮蔽数据）', () => {
+  function toolView(toolName: string, toolResult: unknown) {
+    return view({
+      activity_type: 'tool_call',
+      detail: toolName,
+      metadata: { tool_name: toolName, tool_result: toolResult },
+    });
+  }
+
+  it('console help 的 `text` 直接显示，不套 JSON', () => {
+    const v = toolView('console', { success: true, text: '# 帮助\n- task ls' });
+
+    expect(v.toolResult).toBe('# 帮助\n- task ls');
+    expect(v.toolResult).not.toContain('{');
+  });
+
+  it('`task ls`：message 首行在前，业务数据 `tasks` 不被吞', () => {
+    const tasks = [
+      { id: 1, title: '甲' },
+      { id: 2, title: '乙' },
+    ];
+    const v = toolView('console', { success: true, message: '共 2 个任务', tasks });
+
+    expect(v.toolResult.startsWith('共 2 个任务\n')).toBe(true);
+    expect(v.toolResult).toContain('"title": "甲"');
+    expect(v.toolResult).toContain('"title": "乙"');
+  });
+
+  it('`rm --dry-run`：`would_delete` 属于业务数据，必须显示', () => {
+    const v = toolView('console', {
+      success: true,
+      message: '将删除 1 个成员（dry_run，未执行）',
+      would_delete: [{ id: 7, name: 'togo2_dev' }],
+      dry_run: true,
+    });
+
+    expect(v.toolResult.startsWith('将删除 1 个成员')).toBe(true);
+    expect(v.toolResult).toContain('"would_delete"');
+    expect(v.toolResult).toContain('togo2_dev');
+    // `dry_run` 是元信息：卡片正文里不重复出现它自己
+    expect(v.toolResult).not.toContain('"dry_run"');
+  });
+
+  it('纯 message 回执（无业务数据）保持原样：不多出 JSON 尾巴', () => {
+    const v = toolView('finish_action', {
+      success: true,
+      message: '已结束本轮行动。',
+      hint: '不用重复调用',
+      error_code: null,
+      is_new_created: false,
+    });
+
+    expect(v.toolResult).toBe('已结束本轮行动。');
+  });
+
+  it('`text` 优先于 `message`（正文已排好版，再拼 message 是重复）', () => {
+    const v = toolView('console', { success: true, text: '正文', message: '摘要' });
+
+    expect(v.toolResult).toBe('正文');
+  });
+
+  it('只有业务数据、没有 message 时仍整体 JSON 化（原行为不回退）', () => {
+    const v = toolView('console', { success: true, count: 3, total: 9 });
+
+    expect(v.toolResult).toContain('"count": 3');
+    expect(v.toolResult).toContain('"total": 9');
+  });
+});
