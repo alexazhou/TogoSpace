@@ -22,6 +22,7 @@ from typing import Mapping, TextIO
 # litellm 在 import 时会同步请求远程价格表；backend_main 顶部已设置，这里提前设置作为防御。
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
+import appPaths
 import backend_main
 from util import configUtil
 
@@ -254,6 +255,10 @@ def main() -> int:
         return 2
 
     try:
+        # 桌面引导也是"启动引导"：外壳（tauri/src-tauri/src/lib.rs setup + config.rs load_or_create）
+        # 只建目录、写 desktop.json，不写 setting.json；首次启动时 load() 纯读会直接报错，
+        # 所以这里先把默认配置目录就绪，再读配置。
+        configUtil.ensure_config_dir(appPaths.CONFIG_DIR)
         configUtil.load()
         _apply_desktop_overrides(params)
     except Exception as exc:  # noqa: BLE001 — 启动期任何配置异常都要转成可读错误

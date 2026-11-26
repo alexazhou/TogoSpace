@@ -112,16 +112,42 @@ def test_load_reads_setting_json_once(tmp_path, monkeypatch):
 
 
 
-def test_load_creates_setting_json_when_missing(tmp_path):
-    """测试加载配置时自动创建 setting.json（README 在测试环境下不生成）。"""
-    configUtil.load(str(tmp_path), force_reload=True)
+def test_load_does_not_create_setting_json_when_missing(tmp_path):
+    """`load()` 是纯读：目录在但 `setting.json` 不在 ⇒ **报错，且不补模板**（#380）。
 
-    setting_file = tmp_path / "setting.json"
-    readme_file = tmp_path / "setting.README.md"
+    改造前这条路径会自动从模板补 `setting.json`（并顺手把 README 也写进去），
+    于是"只想读配置"的调用方被迫接受写盘。现在读路径必须拒绝，并由报错文案指认路径。
+    """
+    with pytest.raises(FileNotFoundError) as exc_info:
+        configUtil.load(str(tmp_path), force_reload=True)
 
+    assert "配置文件不存在" in str(exc_info.value)
+    assert str(tmp_path) in str(exc_info.value), "报错必须指认是哪个路径，不能只说'不存在'"
+    assert not (tmp_path / "setting.json").exists(), "读路径不许补模板"
+    assert not (tmp_path / "setting.README.md").exists(), "读路径不许写 README"
+
+
+def test_log_when_config_dir_missing(tmp_path):
+    """目录整条不存在 ⇒ 报"配置目录不存在"，且**不创建目录**（#380）。"""
+    missing = tmp_path / "nope"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        configUtil.load(str(missing), force_reload=True)
+
+    assert "配置目录不存在" in str(exc_info.value)
+    assert not missing.exists(), "读路径不许建目录"
+
+
+def test_ensure_config_dir_creates_setting_json_and_readme(tmp_path):
+    """初始化入口 `ensure_config_dir()` 负责三个副作用：建目录 + 模板 + README（#380）。"""
+    target = tmp_path / "fresh"
+    configUtil.ensure_config_dir(str(target))
+
+    setting_file = target / "setting.json"
+    readme_file = target / "setting.README.md"
+
+    assert target.is_dir()
     assert setting_file.is_file()
-    # README 在测试环境下不生成（_is_running_tests() 返回 True）
-    assert not readme_file.is_file()
+    assert readme_file.is_file(), "初始化入口必须放 README（不再按'是否在测试环境'跳过）"
 
     setting_data = json.loads(setting_file.read_text(encoding="utf-8"))
     assert setting_data["version"] == "v3"

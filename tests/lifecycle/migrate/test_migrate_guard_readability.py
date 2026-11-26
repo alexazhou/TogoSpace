@@ -51,7 +51,8 @@ def _config_dir(tmp_path: Path, db_path: Path, port: int = 0) -> Path:
     """造一个指向指定库的 config 目录（setting.json 由模板生成后改 db_path）。"""
     cfg_dir = tmp_path / "config"
     cfg_dir.mkdir(parents=True, exist_ok=True)
-    configUtil.load(str(cfg_dir))  # 从模板生成 setting.json / setting.README.md
+    # #380：`load()` 已是纯读，目录就绪改由 `ensure_config_dir()` 负责（建目录 + 模板 + README）。
+    configUtil.ensure_config_dir(str(cfg_dir))
     setting_path = cfg_dir / "setting.json"
     setting = json.loads(setting_path.read_text(encoding="utf-8"))
     setting["db_path"] = str(db_path)

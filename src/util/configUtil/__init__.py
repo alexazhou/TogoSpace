@@ -1,5 +1,6 @@
 from .core import (
     load,
+    ensure_config_dir,
     get_app_config,
     get_db_path,
     get_language,
@@ -18,6 +19,7 @@ from .core import (
 
 __all__ = [
     "load",
+    "ensure_config_dir",
     "get_app_config",
     "get_db_path",
     "get_language",

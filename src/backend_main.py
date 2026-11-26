@@ -188,6 +188,11 @@ async def main(
 
     if config_dir is not None:
         config_dir = os.path.abspath(config_dir)
+    else:
+        # **默认目录由引导负责就绪**：只在"用 appPaths.CONFIG_DIR"这一条路上做初始化，
+        # 且只做一次。显式传目录的人（`--config-dir`、测试）自己准备，引导不代劳——
+        # 否则又会变成"任何一次 load 都会往任意目录里写东西"。
+        configUtil.ensure_config_dir(appPaths.CONFIG_DIR)
 
     app_config: AppConfig = configUtil.load(config_dir)
     llmApiUtil.init()

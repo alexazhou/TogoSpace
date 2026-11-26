@@ -19,9 +19,29 @@ _cached_config_dir: str | None = None
 _cached_preset_dir: str | None = None
 
 
-def _is_running_tests() -> bool:
-    """检测当前是否在 pytest 测试环境中运行。"""
-    return "PYTEST_CURRENT_TEST" in os.environ
+def ensure_config_dir(config_dir: str) -> None:
+    """把配置目录**准备好**（建目录 + 补 `setting.json` + 同步 `setting.README.md`）。
+
+    **写盘副作用只允许发生在这里**，`load()` 是纯读（见 `_load_setting` 的注释）。
+    调用约定：
+    - 应用启动引导对 `appPaths.CONFIG_DIR` 调一次：命令行入口是 `backend_main.main()`，
+      桌面入口是 `desktopEntry.main()`（它比 `backend_main` 更早读配置，外壳只建目录、
+      不写 `setting.json`）；两者都只传 `appPaths.CONFIG_DIR`，不接受外部传入的目录；
+    - 显式传目录的人（测试、脚本、`--config-dir`）**自己负责准备**，
+      要么先调本函数，要么自己放好 `setting.json`。
+
+    为什么不靠"检测是否在测试环境"来跳过写盘（改造前的做法）：
+    `PYTEST_CURRENT_TEST` 只在 pytest **用例进程内**存在，任何用例之外的进程
+    （脚本 / 子进程 / 一行 `python -c`）都没有它 ⇒ 跳过失效 ⇒ 直接把 README
+    写进仓库内的配置目录。判断"谁在调"永远不如**把副作用集中到一个显式入口**可靠。
+
+    Args:
+        config_dir: 目标配置目录（不存在会被创建）。不做默认值兜底——默认目录由
+            启动引导自己传 `appPaths.CONFIG_DIR`，避免这里偷偷改写到别的目录。
+    """
+    os.makedirs(config_dir, exist_ok=True)
+    _copy_template_if_missing("config_template.json", config_dir, "setting.json")
+    sync_file_if_changed("docs/setting.README.md", config_dir, "setting.README.md")
 
 
 def _resolve_config_dir(config_dir: str | None) -> str:
@@ -107,19 +127,29 @@ def sync_file_if_changed(src_name: str, dest_dir: str, dest_name: str | None = N
 
 
 def _load_setting(config_dir: str) -> SettingConfig:
+    """读取 `setting.json`。**纯读：绝不建目录、绝不写盘。**
+
+    改造前这里塞了三个写盘副作用（`makedirs` / 补 `setting.json` / 同步 README），
+    于是**任何**调 `load(某目录)` 的人都被强制接受副作用——包括只想读配置的测试与
+    一行 `python -c` 脚本，结果把 README 写进了仓库里的配置目录。
+    现在读路径只负责"读"，目录就绪交给 `ensure_config_dir()`。
+
+    报错必须**能指认是哪个路径**，不许静默用默认值兜底：调用方漏了准备目录时，
+    报"目录不存在"比拿一份默认配置跑下去安全得多。
+    """
     path = os.path.join(config_dir, "setting.json")
 
-    # 自动创建配置目录
-    os.makedirs(config_dir, exist_ok=True)
+    if not os.path.isdir(config_dir):
+        raise FileNotFoundError(
+            f"配置目录不存在：{config_dir}（读配置不会自动创建目录；"
+            f"启动引导请先调用 configUtil.ensure_config_dir，测试请自己准备目录）"
+        )
 
     if not os.path.isfile(path):
-        # 从模板复制配置文件
-        _copy_template_if_missing("config_template.json", config_dir, "setting.json")
-
-    # 每次启动同步 README 文档（不存在或内容不一致时更新）
-    # 测试环境下跳过，避免在测试配置目录生成不必要的文件
-    if not _is_running_tests():
-        sync_file_if_changed("docs/setting.README.md", config_dir, "setting.README.md")
+        raise FileNotFoundError(
+            f"配置文件不存在：{path}（读配置不会自动补模板；"
+            f"请先调用 configUtil.ensure_config_dir 或自行放置 setting.json）"
+        )
 
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
