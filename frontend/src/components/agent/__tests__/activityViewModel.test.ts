@@ -310,7 +310,10 @@ describe('#376 模块 3：工具结果预览（正文优先 / message 不遮蔽�
 
 // 元信息键集是**契约**（小马哥 01:55）：验收侧要能 import 后直接断言，不靠读代码。
 describe('#376 模块 3：META_KEYS 键集（契约）', () => {
-  it('包含裁定既定的 11 项键', () => {
+  // 约定 = 小马哥 01:22 的 11 项下限 + 01:55/02:02 裁定纳入的 `truncated` / `result_type`
+  // = 13 项。判据用**逐项相等**（不是"包含"）：白名单悄悄扩张/收缩都要在这里红，
+  // 这正是这条判据存在的理由。
+  it('与约定的 13 项逐项相等', () => {
     const agreed = [
       'success',
       'error_code',
@@ -323,11 +326,11 @@ describe('#376 模块 3：META_KEYS 键集（契约）', () => {
       'resolved_from_registry',
       'is_new_created',
       'dry_run',
+      'truncated',
+      'result_type',
     ];
 
-    for (const key of agreed) {
-      expect(META_KEYS.has(key), `缺键 ${key}`).toBe(true);
-    }
+    expect([...META_KEYS].sort()).toEqual([...agreed].sort());
   });
 
   it('业务数据键不在名单里（否则数据会被静静地吞掉）', () => {
