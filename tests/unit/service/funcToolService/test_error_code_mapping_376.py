@@ -100,8 +100,14 @@ def _bare_failure_dicts() -> list[tuple[str, str]]:
 
 
 def test_converged_code_distribution() -> None:
-    """九类已收敛的 66 处，按最终码分组后的处数必须与裁定一致。"""
-    counter = Counter(code for _, _, code in _failure_calls())
+    """九类已收敛的 66 处，按最终码分组后的处数必须与裁定一致。
+
+    `AGENT_NOT_FAILED` **不计入九类分布**：它是 B5 专项（wake 对非 FAILED 成员），
+    不属于 §二 B4 点名的那九类场景；混进来会让"九类 70 处"这个口径说不清。
+    """
+    counter = Counter(
+        code for _, _, code in _failure_calls() if code != "AGENT_NOT_FAILED"
+    )
 
     assert dict(counter) == EXPECTED_CODES, (
         "九类码分布与裁定不一致：\n"
@@ -110,16 +116,19 @@ def test_converged_code_distribution() -> None:
     )
 
 
-def test_backlog_count_is_44() -> None:
-    """九类之外仍有 44 处手写失败字典（110 无码 − 66 已收敛），本批**不动**。
+def test_backlog_count_is_43() -> None:
+    """九类之外仍有 43 处手写失败字典，本批**不动**。
 
     读数为什么放判据里：`156 处 backlog` 是「226 − 70」算出来的，
-    而 44 是「无码 110 − 已收敛 66」——两个口径必须能对上，
-    否则报告里的"只做了九类"就会被处数悄悄推翻（越做越多或越做越少都算违约）。
+    而无码字典数是「110 − 66（九类收敛）− 1（B5 的 wake，属九类之外的专项）」= 43——
+    两个口径必须能对上，否则报告里的"只做了九类"就会被处数悄悄推翻。
+
+    这条读到 44 就该红：本批 B5 收掉的那处（`wake_up_agent` 非 FAILED 分支）
+    不在九类里，没算进来时这里会多一个（第一版就是 44，被四目录全量跑到才暴露）。
     """
     bare = _bare_failure_dicts()
 
-    assert len(bare) == 44, f"backlog 处数变了：{len(bare)}（期望 44）"
+    assert len(bare) == 43, f"backlog 处数变了：{len(bare)}（期望 43）"
     # 顺手钉住"没有越界"：backlog 里若混入九类文案，说明有处漏收敛
     nine_marks = ("未找到成员", "未找到部门", "未找到房间", "未找到角色模板", "当前没有可用的团队上下文")
     leaked = [seg for _, seg in bare if any(m in seg for m in nine_marks)]
@@ -227,3 +236,10 @@ def test_ambiguous_message_keeps_specific_code_and_no_leak() -> None:
     assert sorted(found) == ["invalid_reviewer", "invalid_stage_owner"], (
         f"二义文案的码变了：{sorted(found)}（期望既有两个具体码原样保留）"
     )
+
+
+def test_agent_not_failed_is_the_only_b5_code() -> None:
+    """B5 的 `agent_not_failed` 恰好 1 处（wake 非 FAILED 分支），且不在九类分布里。"""
+    codes = [code for _, _, code in _failure_calls() if code == "AGENT_NOT_FAILED"]
+
+    assert len(codes) == 1, f"agent_not_failed 处数异常：{len(codes)}"
