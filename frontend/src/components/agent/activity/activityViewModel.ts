@@ -180,8 +180,11 @@ export const TOOL_RESULT_PREVIEW_MAX_CHARS = 2000;
  *
  * `is_error` / `truncated` / `result_type` / `is_new_created` / `dry_run` 都在这里：
  * 它们会影响"怎么读这个结果"，但重复显示在卡片上没有信息增量。
+ *
+ * **导出是为了机器可验**：验收侧 import 后直接断言键集，不用读代码或靠 DOM 比对
+ * 反推；也就是说"哪些键算元信息"是**契约**，不是实现细节。
  */
-const META_KEYS = new Set<string>([
+export const META_KEYS = new Set<string>([
   'success',
   'error_code',
   'is_error',

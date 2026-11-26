@@ -243,3 +243,56 @@ def test_agent_not_failed_is_the_only_b5_code() -> None:
     codes = [code for _, _, code in _failure_calls() if code == "AGENT_NOT_FAILED"]
 
     assert len(codes) == 1, f"agent_not_failed 处数异常：{len(codes)}"
+
+
+#: 二义文案的「同一成因恒定同码同文」判据（小马哥 01:55 追加）：
+#: 每处都用**同一段文案 + 同一个码**覆盖"不存在"与"不属于当前团队"两个成因，
+#: 外部无法据此推断存在性；两处各自再区分"缺的是节点负责人还是验收人"。
+AMBIGUOUS_SITES = {
+    "节点负责人必须是本团队成员": ("invalid_stage_owner", "agent_id"),
+    "验收人必须是本团队成员": ("invalid_reviewer", "agent_id"),
+}
+
+
+def _dicts_with_code(path: Path) -> list[tuple[str, list[str], str]]:
+    """返回文件里所有带 `error_code` 的字典：(文案源码, 键列表, 码字面量)。"""
+    text = path.read_text(encoding="utf-8")
+    out: list[tuple[str, list[str], str]] = []
+    for node in ast.walk(_parse(path)):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = [k.value if isinstance(k, ast.Constant) else None for k in node.keys]
+        if "error_code" not in keys or "message" not in keys:
+            continue
+        out.append(
+            (
+                ast.get_source_segment(text, node.values[keys.index("message")]) or "",
+                [k for k in keys if isinstance(k, str)],
+                getattr(node.values[keys.index("error_code")], "value", "?"),
+            )
+        )
+    return out
+
+
+def test_ambiguous_sites_merge_two_causes_into_one_code_and_text() -> None:
+    """二义成因必须"同码同文"：一段文案 + 一个码同时覆盖「不存在」与「不属于当前团队」。
+
+    这条是**机检**版的"不泄漏存在性"：只要有人把它拆成两个分支（哪怕码相同、只是文案
+    分成"不存在"/"不属于本团队"），外部就能从返回文案反推对象是否存在，判据立刻红。
+    也防后来人把它当 bug「顺手拆开」再改一遍。
+    """
+    dicts = _dicts_with_code(TASK_SERVICE)
+
+    for fragment, (expected_code, extra_token) in AMBIGUOUS_SITES.items():
+        hits = [item for item in dicts if fragment in item[0]]
+        assert len(hits) == 1, f"{fragment!r} 应当只有一处合并文案，实际 {len(hits)} 处"
+
+        msg_src, keys, code = hits[0]
+        assert code == expected_code, f"{fragment!r} 的码变了：{code}"
+        # 两个成因写在同一段文案里（"不存在" + "不属于当前团队"），没有第二条分支
+        assert "不存在" in msg_src and "不属于当前团队" in msg_src, (
+            f"{fragment!r} 的文案被拆开了（外部可据此推断存在性）：{msg_src}"
+        )
+        assert extra_token in msg_src, f"{fragment!r} 丢了定位信息：{msg_src}"
+        # 字典只有这两个键，没有按成因分叉的附加字段
+        assert sorted(keys) == ["error_code", "message", "success"], f"{fragment!r} 多了键：{keys}"

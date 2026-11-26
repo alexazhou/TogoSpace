@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildActivityView, type Translate } from '../activity/activityViewModel';
+import { META_KEYS, buildActivityView, type Translate } from '../activity/activityViewModel';
 import type { AgentActivity } from '../../../types';
 
 // #213 ③ S-2② 判据：view-model 对 9 种 Activity 类型的字段映射逐项单测。
@@ -305,5 +305,34 @@ describe('#376 模块 3：工具结果预览（正文优先 / message 不遮蔽�
 
     expect(v.toolResult).toContain('"count": 3');
     expect(v.toolResult).toContain('"total": 9');
+  });
+});
+
+// 元信息键集是**契约**（小马哥 01:55）：验收侧要能 import 后直接断言，不靠读代码。
+describe('#376 模块 3：META_KEYS 键集（契约）', () => {
+  it('包含裁定既定的 11 项键', () => {
+    const agreed = [
+      'success',
+      'error_code',
+      'is_error',
+      'message',
+      'hint',
+      'note',
+      'example',
+      'auto_filled_filters',
+      'resolved_from_registry',
+      'is_new_created',
+      'dry_run',
+    ];
+
+    for (const key of agreed) {
+      expect(META_KEYS.has(key), `缺键 ${key}`).toBe(true);
+    }
+  });
+
+  it('业务数据键不在名单里（否则数据会被静静地吞掉）', () => {
+    for (const key of ['tasks', 'would_delete', 'deleted', 'count', 'total']) {
+      expect(META_KEYS.has(key), `${key} 不该算元信息`).toBe(false);
+    }
   });
 });
