@@ -63,7 +63,6 @@ EX_CONFIG_LIST = "mcp config list"
 EX_CONFIG_ADD = "mcp config add <server-name> <server-url>"
 EX_RESOURCE = "mcp resource <server-name> <resource-uri>"
 EX_SESSION = "mcp session start"
-EX_LEGACY_OPENAPI = "mcp ls <spec-path-or-url>   /   mcp call --kind openapi <spec-path-or-url> --tool <tool-name>"
 
 
 #: 布尔开关（出现即 True，不吞下一个 token）。
@@ -71,17 +70,15 @@ _BOOL_FLAGS = frozenset({"schema", "brief", "all-parameters", "overwrite", "help
 #: 需要值的选项（`--k v` 或 `--k=v`）。
 _VALUE_FLAGS = frozenset(
     {
+        # 只列**当前子命令集合实际消费**的选项（need_fix_4 §七模块4.1）：`kind` / `tool` /
+        # `extra` / `name` / `target` 是已移除的旧语法（`mcp ls <spec>` / `mcp call --tool`）
+        # 留下的，留着它们只会让 `--kind x` 这类死选项"吃掉"后面的值，报错更难读。
         "output",
         "stdio",
         "args",
         "protocol",
         "note",
         "config",
-        "kind",
-        "tool",
-        "extra",
-        "name",
-        "target",
     }
 )
 
@@ -369,7 +366,7 @@ async def _cmd_list(positional: list[str], options: dict[str, Any], context: Any
         return _forward(
             "list_mcp_servers",
             {},
-            post_process=None if mode == "json" else _render_list_overview,
+            post_process=_only_mcp_servers if mode == "json" else _render_list_overview,
         )
 
     # 临时 HTTP 来源（未注册）：**必须先于点式分派判断**。
@@ -617,10 +614,35 @@ async def _cmd_call(positional: list[str], options: dict[str, Any], context: Any
 # --------------------------------------------------------------------------- #
 
 
+def _only_mcp_servers(body: dict[str, Any]) -> dict[str, Any]:
+    """只保留 `kind == "mcp"` 的登记项——`mcp` 子树的列表口径与 openapi/graphql 对齐。
+
+    need_fix_4 §七模块4.2 / B7：三条子树的 list 各管一种 kind，但 `mcp list` 与
+    `mcp config list` 原本把 openapi/graphql 的登记也一起列了，模型看到 `mcp list`
+    里有 openapi 项，就会拿它去敲 `mcp call <名称>`，然后被当成 MCP server 连接失败。
+    过滤后**不静默**：被挡掉的条数写进 `note` 并指路到对应子命令。
+    """
+    servers = body.get("servers")
+    if not isinstance(servers, list):
+        return body
+    kept = [item for item in servers if str(item.get("kind") or "").lower() == "mcp"]
+    dropped = len(servers) - len(kept)
+    body["servers"] = kept
+    if "count" in body:
+        body["count"] = len(kept)
+    if dropped:
+        body["note"] = (
+            f"另有 {dropped} 个非 mcp 登记项未列出；OpenAPI / GraphQL 服务请分别用 "
+            "`openapi config list` / `graphql config list` 查看。"
+        )
+    return body
+
+
 def _render_list_overview(body: dict[str, Any]) -> dict[str, Any]:
     """`mcp list` 无参的文本形态：配置概览 + 两条入口路标（`tools.py` 返回体不动）。"""
+    body = _only_mcp_servers(body)
     servers = body.get("servers") or []
-    lines = [f"已配置 {len(servers)} 个 server"]
+    lines = [f"已配置 {len(servers)} 个 MCP server"]
     for summary in servers:
         state = "启用" if summary["enable"] else "已禁用"
         lines.append(
@@ -629,21 +651,28 @@ def _render_list_overview(body: dict[str, Any]) -> dict[str, Any]:
         )
     lines.append(f"看某个 server 的工具：{EX_LIST}")
     lines.append(f"临时来源（MCP）：mcp list <server-url> --brief   /   {EX_LIST_STDIO}")
-    lines.append(f"OpenAPI / GraphQL 直传（旧路径，语义不变）：{EX_LEGACY_OPENAPI}")
+    lines.append(
+        "OpenAPI / GraphQL 服务是独立命令，不在这份列表里："
+        "openapi list <spec-or-name> / graphql list <url-or-name>"
+    )
     body["text"] = "\n".join(lines)
     return body
 
 
 def _render_config_list(body: dict[str, Any]) -> dict[str, Any]:
     """`mcp config list --output text` 的人读渲染（在工具返回体之后追加，不改原字段）。"""
+    body = _only_mcp_servers(body)
     servers = body.get("servers") or []
-    lines = [f"已配置 {len(servers)} 个 server"]
+    lines = [f"已配置 {len(servers)} 个 MCP server"]
     for summary in servers:
         lines.append(
             f"  {summary['name']}  [{summary['kind']}/{summary['protocol'] or '-'}]  "
             f"{summary['target_masked']}  {'启用' if summary['enable'] else '已禁用'}"
         )
     lines.append(f"看某个 server 的工具：{EX_LIST}")
+    note = body.get("note")
+    if note:
+        lines.append(str(note))
     body["text"] = "\n".join(lines)
     return body
 
@@ -673,7 +702,9 @@ async def _cmd_config(positional: list[str], options: dict[str, Any], context: A
             )
         text_mode = _output_mode(options) == "text"
         return _forward(
-            "list_mcp_servers", {}, post_process=_render_config_list if text_mode else None
+            "list_mcp_servers",
+            {},
+            post_process=_only_mcp_servers if not text_mode else _render_config_list,
         )
     if action == "get":
         if not rest:
@@ -688,6 +719,16 @@ async def _cmd_config(positional: list[str], options: dict[str, Any], context: A
                 _ERROR_NOT_FOUND,
                 f"没有名为 {rest[0]!r} 的已配置 server；{EX_CONFIG_LIST} 可看全部。",
                 example=EX_CONFIG_LIST,
+            )
+        entry_kind = str(getattr(entry, "kind", "") or "").lower()
+        if entry_kind != "mcp":
+            # B7：`mcp config get <openapi 名>` 原本照常返回一条 openapi 配置，让
+            # "mcp 子树只管 mcp"这条口径在 get 上漏掉。这里不返回配置正文，只说清归属。
+            raise ConsoleError(
+                "mcp_kind_mismatch",
+                f"{rest[0]!r} 属于 {entry_kind}，不是 mcp；请改用 "
+                f"`{entry_kind} config get {rest[0]}`。",
+                example=f"{entry_kind} config get {rest[0]}",
             )
         return {"success": True, "server": registry.entry_summary(entry)}
     if action == "add":
@@ -986,16 +1027,15 @@ def help_payload(tokens: list[str]) -> dict[str, Any]:
         subject = token.lower()
         break
     if not subject:
-        return {"success": True, "text": MCP_HELP_SUMMARY, "help": "mcp"}
+        return {"success": True, "text": MCP_HELP_SUMMARY}
     detail = MCP_HELP_DETAIL.get(subject)
     if detail is None:
         return {
             "success": True,
             "text": MCP_HELP_SUMMARY,
-            "help": "mcp",
             "note": f"没有 {subject!r} 的单独帮助，已给出总览。",
         }
-    return {"success": True, "text": detail, "help": f"mcp {subject}"}
+    return {"success": True, "text": detail}
 
 
 # --------------------------------------------------------------------------- #

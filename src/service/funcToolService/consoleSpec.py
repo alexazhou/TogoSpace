@@ -117,6 +117,26 @@ def _parse_tokens(tokens: list[str]) -> tuple[list[str], dict[str, Any]]:
     return positional, options
 
 
+def _kind_hint(kind: str) -> str:
+    """`<kind> list` 无参时的下一步提示（need_fix_4 §七模块4.2 / B6）。
+
+    原先这里原样透传工具给的 `hint`，而那条 hint 是 **mcp** 的口径
+    （`mcp list <名称>` / `mcp ls <spec>`），在 openapi/graphql 的返回体里指向的
+    全是别的子树的命令。现在按当前子树生成，且只出现本子树真实存在的写法。
+    """
+    if kind == "openapi":
+        return (
+            "看某个 OpenAPI 服务的操作：`openapi list <spec-path-or-name>`；"
+            "登记新服务：`openapi config add <name> <spec-path-or-url>`。"
+            "MCP server 请用 `mcp list`。"
+        )
+    return (
+        "看某个 GraphQL 服务的操作：`graphql list <endpoint-url-or-name>`；"
+        "登记新服务：`graphql config add <name> <endpoint-url>`。"
+        "MCP server 请用 `mcp list`。"
+    )
+
+
 def _filter_servers_by_kind(kind: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
     def _post(result: dict[str, Any]) -> dict[str, Any]:
         if not result.get("success"):
@@ -128,6 +148,9 @@ def _filter_servers_by_kind(kind: str) -> Callable[[dict[str, Any]], dict[str, A
         updated = dict(result)
         updated["servers"] = servers
         updated["count"] = len(servers)
+        # 工具层的 hint 是 mcp 口径（`mcp list <名称>` / `mcp ls <spec>`），在本子树里
+        # 指向死语法；换成当前 kind 的下一步。
+        updated["hint"] = _kind_hint(kind)
         return updated
 
     return _post
@@ -161,7 +184,7 @@ def help_payload(tokens: list[str]) -> dict[str, Any]:
             "注意：OpenAPI spec 里若没有 servers，base path 会丢，运行时不会报错——需要补 servers 或改用完整 target。"
         )
     summary = "\n".join(lines)
-    return {"success": True, "text": summary, "help": cmd}
+    return {"success": True, "text": summary}
 
 
 async def dispatch(command: str, tokens: list[str], context: Any) -> dict[str, Any]:
@@ -251,6 +274,16 @@ async def dispatch(command: str, tokens: list[str], context: Any) -> dict[str, A
                 entry = await registry.resolve_name(args_rest[0])
                 if entry is None:
                     raise ConsoleError(_ERROR_NOT_FOUND, f"没有名为 {args_rest[0]!r} 的配置。")
+                entry_kind = str(getattr(entry, "kind", "") or "").lower()
+                if entry_kind != cmd:
+                    # B7：`openapi config get <mcp 名>` 原本照常返回 mcp 配置，等于
+                    # 把"三棵子树各管一种 kind"在 get 上放空。这里明确归属并指路。
+                    raise ConsoleError(
+                        "spec_kind_mismatch",
+                        f"{args_rest[0]!r} 属于 {entry_kind}，不是 {cmd}；请改用 "
+                        f"`{entry_kind} config get {args_rest[0]}`。",
+                        example=f"{entry_kind} config get {args_rest[0]}",
+                    )
                 return {"success": True, "server": registry.entry_summary(entry)}
             if action == "add":
                 _reject_unknown_options(options, frozenset({"note", "config", "overwrite", "output"}), ex["config_add"])

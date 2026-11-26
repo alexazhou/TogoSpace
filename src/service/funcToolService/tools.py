@@ -277,8 +277,10 @@ _MCP_CALL_DEFAULT_KIND = "openapi"
 #: `mcp ls` 无参时的固定提示（#281 P3）。一段话**同时覆盖「有配置 / 无配置」**两种状态
 #: —— 这正是 Operator 02:12 否掉动态拼装的理由之一：没有任何 server 时拼不出真实名称。
 MCP_LS_HINT: str = (
-    "本列表是已配置的 server（`mcp config list` 是同一份数据的纯配置视角）。\n"
-    "看某个 server 的工具清单：`mcp list <名称>`（MCP 原生）/ `mcp ls <spec-path-or-url>`（OpenAPI·GraphQL 直传）。\n"
+    "本列表是已配置的 MCP server（`mcp config list` 是同一份数据的纯配置视角）。\n"
+    "看某个 server 的工具清单：`mcp list <名称>`（MCP 原生）。\n"
+    "OpenAPI / GraphQL 服务是独立命令，不在这份列表里：`openapi list <spec-or-name>` / "
+    "`graphql list <url-or-name>`。\n"
     "还没有 server 时先登记，例如：\n"
     "  mcp config add ctx7 https://mcp.context7.com/mcp"
 )
@@ -287,8 +289,9 @@ MCP_LS_HINT: str = (
 #: `--args` 的键名抄该工具的 `parameters`。不按 parameters 生成骨架（那是动态拼装）。
 MCP_LS_CALL_HINT: str = (
     "调用工具：mcp call <server-name>.<工具名> --args '{\"参数名\":\"值\"}'"
-    "   （工具名取上面的 name 字段，参数名见各工具的 parameters；"
-    "kind=openapi/graphql 的注册项仍可用 mcp call <名称> --tool <工具名>）"
+    "   （工具名取上面的 name 字段，参数名见各工具的 parameters）。"
+    "OpenAPI / GraphQL 服务请用各自的命令：openapi call <spec-or-name> --tool <工具名> / "
+    "graphql call <url-or-name> --tool <工具名>"
 )
 
 #: `mcp call` / `mcp ls <URL>` 按默认 `openapi` 解析失败时的提示（#281 P4）：实测两条
@@ -2663,7 +2666,7 @@ async def create_task(
     description: str = '',
     reviewer_id: Optional[int] = None,
     stages: Optional[list[dict | int]] = None,
-    priority: str = 'NORMAL',
+    priority: Literal["HIGH", "NORMAL", "LOW"] = "NORMAL",
     parent_id: Optional[int] = None,
     depends_on: Optional[list[int]] = None,
     room_id: Optional[int] = None,
@@ -2731,7 +2734,9 @@ async def create_task(
 )
 async def update_task(
     task_id: int,
-    new_status: Optional[str] = None,
+    new_status: Optional[
+        Literal["TODO", "PENDING", "IN_PROGRESS", "ON_HOLD", "REVIEWING", "DONE", "CANCELLED"]
+    ] = None,
     note: str = '',
     reviewer_id: Optional[int] = None,
     clear_fields: Optional[list[ClearField]] = None,

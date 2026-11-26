@@ -38,7 +38,7 @@ from typing import Any, Optional
 _SKIPPED_PARAMS = ("_context",)
 
 #: 参数说明截断长度（help 里每个参数一行，太长会把 help 撑回「全量 schema」的体积）。
-_DESCRIPTION_MAX = 48
+_DESCRIPTION_MAX = 120
 
 
 @functools.lru_cache(maxsize=None)
@@ -221,15 +221,19 @@ def boolean_params(tool_name: str) -> frozenset[str]:
 
 
 def _first_clause(description: Any) -> str:
-    """取说明文字的第一句（help 里一行一个参数，不能把整段 docstring 搬进来）。"""
+    """取说明文字的**第一句**——help 一行一个参数，不能把整段说明搬进来。
+
+    只按句末的 `。` 切（need_fix_4 §三.2）：旧实现还按 `，` / `；` / `;` 切，于是
+    「目标状态，可选 TODO、PENDING、…、CANCELLED」被切在第一个逗号上，枚举整段消失；
+    `--stages` / `--depends-on` 的说明也在第一个分号处腰斩。句内标点不是句子边界，
+    截断的事交给 `_DESCRIPTION_MAX`。
+    """
     if not isinstance(description, str):
         return ""
     text = description.strip().replace("\n", " ")
-    for sep in ("；", "。", "，", ";"):
-        cut = text.find(sep)
-        if cut > 0:
-            text = text[:cut]
-            break
+    cut = text.find("。")
+    if cut > 0:
+        text = text[:cut]
     text = text.strip()
     if len(text) > _DESCRIPTION_MAX:
         text = text[:_DESCRIPTION_MAX].rstrip() + "…"
@@ -271,6 +275,40 @@ def _shape_note(kind: str, prop: dict | None = None) -> str:
     return ""
 
 
+def _extract_enum(prop: dict) -> list[Any]:
+    """参数的可选值列表（顶层 `enum` / `items.enum` / `anyOf` 分支的 `enum`）。
+
+    为什么要有：`--priority` 的可选值原本只写在 tools.py 的说明文字里，而说明被
+    `_DESCRIPTION_MAX` 截断后枚举会整段消失（need_fix_4 §三.2 / B6）——模型只能靠猜。
+    枚举是**结构化**信息（schema 里有 `enum`），从 schema 取就不会被截断。
+    顺序按声明顺序去重，便于 help 稳定可断言。
+    """
+    values: list[Any] = []
+
+    def collect(spec: Any) -> None:
+        if not isinstance(spec, dict):
+            return
+        for value in spec.get("enum") or ():
+            if value not in values:
+                values.append(value)
+        for branch in spec.get("anyOf") or ():
+            collect(branch)
+
+    collect(prop)
+    collect(prop.get("items"))
+    return values
+
+
+def _enum_note(prop: dict, rendered: str) -> str:
+    """可选值标注；**渲染文本里已完整含全部枚举值时不再追加**（避免同一行印两遍）。"""
+    values = _extract_enum(prop)
+    if not values:
+        return ""
+    if all(str(value) in rendered for value in values):
+        return ""
+    return "（可选值：" + " | ".join(str(value) for value in values) + "）"
+
+
 def describe_param(
     name: str,
     prop: dict,
@@ -302,7 +340,9 @@ def describe_param(
     positional = f"（{positional_label}）" if positional_label else ""
     note = _first_clause(prop.get("description"))
     tail = f"（{marker}）" + (f" {note}" if note else "")
-    return f"{head}{shape}{positional}{tail}"
+    body = f"{head}{shape}{positional}{tail}"
+    # 枚举标注只在渲染文本还没完整包含全部可选值时才加（need_fix_4 §七模块2.2）。
+    return f"{head}{_enum_note(prop, body)}{shape}{positional}{tail}"
 
 
 def describe_positional(token: str, prop: dict, *, required: bool) -> str:
@@ -321,7 +361,8 @@ def describe_positional(token: str, prop: dict, *, required: bool) -> str:
     marker = "必填" if required else "可选"
     note = _first_clause(prop.get("description"))
     tail = f"（{marker}）" + (f" {note}" if note else "")
-    return f"{token} <{kind}>{tail}"
+    head = f"{token} <{kind}>"
+    return f"{head}{_enum_note(prop, head + tail)}{tail}"
 
 
 def describe_tool_params(

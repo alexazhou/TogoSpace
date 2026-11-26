@@ -77,6 +77,12 @@ def _build_help_summary(specs: Optional[tuple[registry.ResolvedCommand, ...]] = 
         "graphql list|call <url-or-name> --tool <name>"
     )
     lines.append("用法：<资源> <操作> [位置参数] [--选项 ...]")
+    # need_fix_4 §三.5：定位规则原先散在各命令的 overlay 里，模型得先 help 到具体操作才
+    # 知道该传 id 还是名称，而传错定位形态是 invalid_argument_count 的第一大来源。
+    lines.append(
+        "定位规则：get/update 用正整数 <id>；agent dm|wake 与 role 用 <名称>；"
+        "dept|room rm 支持 <id> 或 --name 二选一"
+    )
     lines.append("create/update 的配置输入（可选）：'<json>' 或 --from payload（payload 字段传 JSON object），也可只用 --选项")
     lines.append(
         "选项重复：数组型（如 --status / --member-names）可重复出现，按出现顺序聚合并去重保序；"
@@ -152,8 +158,23 @@ _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
         "定位只接受 agent_id（同名成员不再歧义），--name 表示改成的新名称。",
         "没有任何字段可改时返回 no_update_action（不许静默成功）。",
     ),
+    # dept get / room get：与 agent get 同一句矛盾（参数描述说的是**工具签名**可以
+    # id 或 name 二选一，命令行只有一个位置槽）。need_fix_4 §三.4 只点名 agent get，
+    # 这里把同一句一并统一，避免三条 get 的定位口径各说一套。
+    "dept get": (
+        "定位只有位置参数 <id>：按名称请先用 `dept ls` 取 ID；工具层的 name 参数只能用 --from payload 传。",
+    ),
+    "room get": (
+        "定位只有位置参数 <id>：按名称请先用 `room ls` 取 ID；工具层的 name 参数只能用 --from payload 传。",
+    ),
     "agent get": (
-        "按名字查询走运行时列表：离职成员报 member_not_on_board，在职未加载报 agent_runtime_not_loaded。",
+        # need_fix_4 §三.4：旧文案写「按名字查询走运行时列表」，与参数行「不接受按名称
+        # 定位」直接打架——照着这行去按名字查必然被 invalid_target 拒。这里只说 id
+        # 查询会碰到的运行时候选，不再暗示有「按名字」这条路。
+        "状态与房间取自运行时：离职成员报 member_not_on_board，在职未加载报 agent_runtime_not_loaded。",
+        # 参数描述里的「与 name 二选一」讲的是**工具签名**；命令行只有一个位置槽，
+        # 不传 id 就没有 name 这条路。不写清楚，位置参数行读起来仍然自相矛盾。
+        "定位只有位置参数 <id>：按名称定位请先 `agent ls` 取 ID；工具层的 name 参数只能用 --from payload 传。",
     ),
     "agent dm": ("已有房间则直接返回。",),
     "room update": (
@@ -353,29 +374,54 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _resource_help(resource: str, visible: list[registry.ResolvedCommand]) -> str:
+    """`help <资源>`：**每条子命令一行**（用法 + 用途），末尾给下一步。
+
+    need_fix_4 §七模块2.3：旧实现只印一行 `task 的可用操作：ls | get | create | update`，
+    模型看得到操作名却不知道各自做什么，只能挨个 `help task <操作>` 试——一次试探就是
+    一轮工具调用。用途直接从工具 docstring 派生（`_tool_description`），与 `help
+    <资源> <操作>` 的「用途：」行同源，不会两处不一致。
+    """
+    lines: list[str] = [f"{resource} 的可用操作："]
+    for cmd in visible:
+        if cmd.resource != resource or not cmd.primary_action:
+            continue
+        description = _tool_description(cmd)
+        line = _usage_line(cmd)
+        lines.append(f"  {line} — {description}" if description else f"  {line}")
+    lines.append(f"详情：help {resource} <操作>")
+    return "\n".join(lines)
+
+
 def _help_text(tokens: list[str]) -> dict[str, Any]:
+    """`help` 的**唯一返回形态**：`{"success": True, "text": "<正文>"}`。
+
+    不再返回 `"help"` 键（need_fix_4 §七模块2.1 / §六）：同一段正文既在 `text` 又在
+    `help` 里，模型历史里就要为它付两遍 token；两个键还会随分支写法漂移（`help` 曾被
+    当成"资源名标记"塞 `"mcp"`），语义已经冲突。正文只有一个字段，读它的地方只有一处。
+    """
     table = registry.get_table()
     visible = table.visible_specs()
     visible_keys = {cmd.key for cmd in visible}
     if len(tokens) <= 1:
-        return {"success": True, "help": _render_help(_build_help_summary(visible))}
+        return {"success": True, "text": _render_help(_build_help_summary(visible))}
     resource = tokens[1].lower()
     action = tokens[2].lower() if len(tokens) > 2 else ""
     # 扩展子树的 help 由各自的窄解析器提供（P3 才 extension 化）。
     if resource == "mcp":
         payload = mcp_console.help_payload(["mcp"] + tokens[2:])
-        return {"success": True, "help": _render_help(str(payload.get("text") or ""))}
+        return {"success": True, "text": _render_help(str(payload.get("text") or ""))}
     if resource in ("openapi", "graphql"):
         payload = spec_console.help_payload([resource] + tokens[2:])
-        return {"success": True, "help": _render_help(str(payload.get("text") or ""))}
+        return {"success": True, "text": _render_help(str(payload.get("text") or ""))}
     key = f"{resource} {action}".strip()
     if key in visible_keys:
         detail = _help_detail_table().get(key)
         if detail is not None:
-            return {"success": True, "help": _render_help(detail)}
+            return {"success": True, "text": _render_help(detail)}
     available = [cmd.primary_action for cmd in visible if cmd.resource == resource and cmd.primary_action]
     if available:
-        return {"success": True, "help": f"{resource} 的可用操作：" + " | ".join(available)}
+        return {"success": True, "text": _render_help(_resource_help(resource, visible))}
     raise ConsoleError(
         "unknown_command",
         f"未知命令：'{key}'。可用资源：{' | '.join(table.resources)}",
@@ -666,6 +712,13 @@ def _convert_option(
                 f"--{name} 需要 JSON object，收到 {type(parsed).__name__}。",
             )
         return parsed
+    if kind == "string":
+        if cs._extract_enum(prop or {}) and not str(raw).strip():
+            # #228 契约（`--status ''` ≡ 未提供）在枚举参数上的落地：'' 不是合法枚举值，
+            # 直接透传会被 schema 的 Literal 拒成 invalid_tool_args，而用户本意是"没提供"。
+            # 非枚举字符串**不**这么做：`--note ''` 是「把备注清空」的合法写法。
+            return None
+        return raw
     return raw
 
 

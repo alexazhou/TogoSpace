@@ -300,6 +300,11 @@
       "priority": {
         "description": "优先级，HIGH / NORMAL / LOW，默认 NORMAL",
         "schema": {
+          "enum": [
+            "HIGH",
+            "NORMAL",
+            "LOW"
+          ],
           "type": "string"
         }
       },
@@ -1638,9 +1643,22 @@
       "new_status": {
         "description": "目标状态，可选 TODO、PENDING、IN_PROGRESS、ON_HOLD、REVIEWING、DONE、CANCELLED；省略或等于当前状态表示追加评论。权限：提交验收（→REVIEWING）只能由执行人发起，且任务须设有验收人；通过或打回验收（REVIEWING→DONE、REVIEWING→IN_PROGRESS）只能由验收人操作；取消（→CANCELLED）只能由验收人或创建人操作；其余流转只能由执行人操作。终态 DONE、CANCELLED 不可流转，只能追加评论；设有验收人的任务不能绕过验收直接到 DONE；依赖任务未全部 DONE 时 PENDING 不能转为 IN_PROGRESS。",
         "schema": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "enum": [
+                "TODO",
+                "PENDING",
+                "IN_PROGRESS",
+                "ON_HOLD",
+                "REVIEWING",
+                "DONE",
+                "CANCELLED"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
