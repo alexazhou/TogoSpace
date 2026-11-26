@@ -733,7 +733,7 @@ async def get_dept_info(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     from service import deptService
 
@@ -748,11 +748,11 @@ async def get_dept_info(
         target = _find_dept_node_by_name(root, normalized_name)
     elif normalized_name == "":
         # 显式传空串不等于「省略」：省略是「返回全树」，空串是一个不存在的名字。
-        return {"success": False, "message": "未找到部门: name="}
+        return toolResult.failure("未找到部门: name=", toolResult.NOT_FOUND)
     else:
         target = root
     if target is None:
-        return {"success": False, "message": f"未找到部门: {_locator_label(dept_id, normalized_name)}"}
+        return toolResult.failure(f"未找到部门: {_locator_label(dept_id, normalized_name)}", toolResult.NOT_FOUND)
 
     id_to_name = await _build_team_agent_name_map(team_id)
     return {"success": True, "dept": _serialize_dept_node(target, id_to_name)}
@@ -827,7 +827,7 @@ async def get_room_info(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     id_to_name = await _build_team_agent_name_map(team_id)
 
@@ -849,11 +849,11 @@ async def get_room_info(
             room_config = None
     elif normalized_name == "":
         # 显式传空串不等于「省略」：省略是「返回全部房间」，空串是一个不存在的名字。
-        return {"success": False, "message": "未找到房间: name="}
+        return toolResult.failure("未找到房间: name=", toolResult.NOT_FOUND)
     else:
         room_config = await gtRoomManager.get_room_by_team_and_name(team_id, normalized_name)
     if room_config is None:
-        return {"success": False, "message": f"未找到房间: {_locator_label(room_id, normalized_name)}"}
+        return toolResult.failure(f"未找到房间: {_locator_label(room_id, normalized_name)}", toolResult.NOT_FOUND)
 
     # 顶层键保持 `room`（单数对象）不变。
     return {"success": True, "room": await _room_view(room_config, id_to_name, detail=True)}
@@ -878,7 +878,7 @@ async def start_chat(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     if _context is None or not _context.agent_id:
         return {"success": False, "message": "无法获取当前 Agent 身份。"}
@@ -893,7 +893,7 @@ async def start_chat(
 
     target = name_to_agent.get(normalized)
     if target is None:
-        return {"success": False, "message": f"未找到成员: {normalized}"}
+        return toolResult.failure(f"未找到成员: {normalized}", toolResult.NOT_FOUND)
 
     self_id = _context.agent_id
     if target.id == self_id:
@@ -966,7 +966,7 @@ async def get_agent_info(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     from service import agentService, deptService
     from dal.db import gtScheduleJobManager
@@ -1018,7 +1018,7 @@ async def get_agent_info(
             # 把 ②③ 说成「未找到成员」都是误导：用户的实体明明存在，该做的是 reload。
             row = await gtAgentManager.get_agent_by_id(agent_id)
             if row is None or row.team_id != team_id:
-                return {"success": False, "message": f"未找到成员: {_locator_label(agent_id, normalized_name)}"}
+                return toolResult.failure(f"未找到成员: {_locator_label(agent_id, normalized_name)}", toolResult.NOT_FOUND)
             if row.employ_status != EmployStatus.ON_BOARD:
                 return {
                     "success": False,
@@ -1038,7 +1038,7 @@ async def get_agent_info(
             }
     elif normalized_name == "":
         # 显式传空串不等于「省略」：省略是「返回全部成员」，空串是一个不存在的名字。
-        return {"success": False, "message": "未找到成员: name="}
+        return toolResult.failure("未找到成员: name=", toolResult.NOT_FOUND)
     else:
         target_agent = next(
             (
@@ -1049,7 +1049,7 @@ async def get_agent_info(
             None,
         )
         if target_agent is None:
-            return {"success": False, "message": f"未找到成员: {_locator_label(None, normalized_name)}"}
+            return toolResult.failure(f"未找到成员: {_locator_label(None, normalized_name)}", toolResult.NOT_FOUND)
 
     return {"success": True, "agent": await _build_agent_dict(target_agent, detail=True)}
 
@@ -1070,14 +1070,14 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     from service import agentService
 
     team_agents = agentService.get_team_agents(team_id)
     target_agent = next((agent for agent in team_agents if agent.gt_agent.name == agent_name), None)
     if target_agent is None:
-        return {"success": False, "message": f"未找到成员: {agent_name}"}
+        return toolResult.failure(f"未找到成员: {agent_name}", toolResult.NOT_FOUND)
 
     if target_agent.status != AgentStatus.FAILED:
         return {"success": False, "message": f"{agent_name} 当前状态为 {target_agent.status.name}，无需唤醒。"}
@@ -1097,7 +1097,7 @@ async def reload_team(_context: ToolCallContext = None) -> dict:
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     from service import teamService
 
@@ -1164,7 +1164,7 @@ async def get_role_template(role_name: str, _context: ToolCallContext = None) ->
     """
     template = await gtRoleTemplateManager.get_role_template_by_name(role_name.strip())
     if template is None:
-        return {"success": False, "message": f"未找到角色模板: {role_name}"}
+        return toolResult.failure(f"未找到角色模板: {role_name}", toolResult.NOT_FOUND)
     return {"success": True, "role_template": template.to_json()}
 
 
@@ -1267,20 +1267,17 @@ async def _upsert_role_template(
     if type is not None:
         role_type = RoleTemplateType.value_of(type)
         if role_type is None:
-            return {"success": False, "message": "角色模板 type 只允许 SYSTEM 或 USER。"}
+            return toolResult.failure("角色模板 type 只允许 SYSTEM 或 USER。", toolResult.INVALID_TOOL_ARGS)
 
     existing = await gtRoleTemplateManager.get_role_template_by_name(normalized_name)
     if existing is None and role_type == RoleTemplateType.SYSTEM:
-        return {"success": False, "message": "SYSTEM 角色模板不允许通过工具创建。"}
+        return toolResult.failure("SYSTEM 角色模板不允许通过工具创建。", toolResult.PERMISSION_DENIED)
     if existing is not None and existing.type == RoleTemplateType.SYSTEM:
-        return {"success": False, "message": f"SYSTEM 角色模板 {normalized_name} 不允许通过工具修改。"}
+        return toolResult.failure(f"SYSTEM 角色模板 {normalized_name} 不允许通过工具修改。", toolResult.PERMISSION_DENIED)
     if existing is not None and role_type == RoleTemplateType.SYSTEM:
         # 只拦「已是 SYSTEM」还不够：USER -> SYSTEM 同样是写入内置语义，
         # 且会让模板从此不可再被本工具修改，必须一并拒绝。
-        return {
-            "success": False,
-            "message": f"不允许将角色模板 {normalized_name} 的类型从 USER 改为 SYSTEM。",
-        }
+        return toolResult.failure(f"不允许将角色模板 {normalized_name} 的类型从 USER 改为 SYSTEM。", toolResult.PERMISSION_DENIED)
     if existing is not None and overwrite is not True:
         return {
             "success": False,
@@ -1351,7 +1348,7 @@ async def create_agent(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
     existing = [
         agent
         for agent in await gtAgentManager.get_team_agents_by_names(team_id, [name.strip()])
@@ -1472,7 +1469,7 @@ async def _upsert_agent(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     if agent_id is None and name is None:
         return {
@@ -1509,7 +1506,7 @@ async def _upsert_agent(
     driver_supplied = driver is not None
     driver_type = DriverType.value_of(driver or DriverType.TSP.value)
     if driver_type is None:
-        return {"success": False, "message": "成员 driver 只允许 native、claude_sdk 或 tsp。"}
+        return toolResult.failure("成员 driver 只允许 native、claude_sdk 或 tsp。", toolResult.INVALID_TOOL_ARGS)
 
     error_msg = validate_tool_allow_specs(allow_tools or [])
     if error_msg is not None:
@@ -1532,7 +1529,7 @@ async def _upsert_agent(
     if agent_id is not None:
         existing = await gtAgentManager.get_agent_by_id(agent_id)
         if existing is None or existing.team_id != team_id:
-            return {"success": False, "message": f"未找到 ID 为 {agent_id} 的成员。"}
+            return toolResult.failure(f"未找到 ID 为 {agent_id} 的成员。", toolResult.NOT_FOUND)
     else:
         # 无 agent_id 时 name 就是定位键，上面已确保它存在。
         existing = await gtAgentManager.get_agent(team_id, normalized_name, status=None)
@@ -1599,7 +1596,7 @@ async def _upsert_agent(
     if normalized_role_template_name is not None:
         role_template = await gtRoleTemplateManager.get_role_template_by_name(normalized_role_template_name)
         if role_template is None:
-            return {"success": False, "message": f"未找到角色模板: {normalized_role_template_name}"}
+            return toolResult.failure(f"未找到角色模板: {normalized_role_template_name}", toolResult.NOT_FOUND)
 
     old_name = existing.name if existing is not None else ""
     agent = existing or GtAgent(
@@ -1724,7 +1721,7 @@ async def create_dept(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
     from dal.db import gtDeptManager
 
     if await gtDeptManager.get_dept_by_name(team_id, name.strip()) is not None:
@@ -1833,7 +1830,7 @@ async def _upsert_dept(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     if dept_id is None and name is None:
         return {
@@ -1865,7 +1862,7 @@ async def _upsert_dept(
     if dept_id is not None:
         existing = await gtDeptManager.get_dept_by_id(dept_id)
         if existing is None or existing.team_id != team_id:
-            return {"success": False, "message": f"未找到 ID 为 {dept_id} 的组织。"}
+            return toolResult.failure(f"未找到 ID 为 {dept_id} 的组织。", toolResult.NOT_FOUND)
     else:
         existing = await gtDeptManager.get_dept_by_name(team_id, normalized_name)
 
@@ -1942,7 +1939,7 @@ async def _upsert_dept(
 
     manager_agent = name_to_agent.get(normalized_manager) if normalized_manager is not None else None
     if manager_agent is None:
-        return {"success": False, "message": f"未找到成员: {normalized_manager}"}
+        return toolResult.failure(f"未找到成员: {normalized_manager}", toolResult.NOT_FOUND)
 
     # 解析 member_names → agent_ids，遇到找不到的立即报错
     resolved_ids: list[int] = []
@@ -1950,7 +1947,7 @@ async def _upsert_dept(
         mname = mname.strip()
         agent = name_to_agent.get(mname)
         if agent is None:
-            return {"success": False, "message": f"未找到成员: {mname}"}
+            return toolResult.failure(f"未找到成员: {mname}", toolResult.NOT_FOUND)
         resolved_ids.append(agent.id)
 
     # 负责人自动加入成员列表
@@ -2032,7 +2029,7 @@ async def create_room(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
     if await gtRoomManager.get_room_by_team_and_name(team_id, name.strip()) is not None:
         return {
             "success": False,
@@ -2122,7 +2119,7 @@ async def _upsert_room(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     if room_id is None and name is None:
         return {
@@ -2157,7 +2154,7 @@ async def _upsert_room(
     if room_id is not None:
         existing = await gtRoomManager.get_room_by_id(room_id)
         if existing is None or existing.team_id != team_id:
-            return {"success": False, "message": f"未找到 ID 为 {room_id} 的房间。"}
+            return toolResult.failure(f"未找到 ID 为 {room_id} 的房间。", toolResult.NOT_FOUND)
     else:
         existing = await gtRoomManager.get_room_by_team_and_name(team_id, normalized_name)
 
@@ -2197,11 +2194,11 @@ async def _upsert_room(
         mname = mname.strip()
         agent = name_to_agent.get(mname)
         if agent is None:
-            return {"success": False, "message": f"未找到成员: {mname}"}
+            return toolResult.failure(f"未找到成员: {mname}", toolResult.NOT_FOUND)
         resolved_ids.append(agent.id)
 
     if len(resolved_ids) < 2:
-        return {"success": False, "message": f"房间成员不足 2 人（当前 {len(resolved_ids)} 人）。"}
+        return toolResult.failure(f"房间成员不足 2 人（当前 {len(resolved_ids)} 人）。", toolResult.INVALID_STATE)
 
     # 按解析后的 ID 判重（名称数量拦不住 `["alice","alice"]`），与
     # `roomService._assert_room_agents_valid` 同口径直接报错，不静默去重。
@@ -2296,7 +2293,7 @@ async def delete_room(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     normalized_name = None if name is None else name.strip()
     if room_id is None and not normalized_name:
@@ -2309,11 +2306,11 @@ async def delete_room(
     if room_id is not None:
         target = await gtRoomManager.get_room_by_id(room_id)
         if target is None or target.team_id != team_id:
-            return {"success": False, "message": f"未找到房间: {_locator_label(room_id, normalized_name)}"}
+            return toolResult.failure(f"未找到房间: {_locator_label(room_id, normalized_name)}", toolResult.NOT_FOUND)
     else:
         target = await gtRoomManager.get_room_by_team_and_name(team_id, normalized_name)
         if target is None:
-            return {"success": False, "message": f"未找到房间: {_locator_label(None, normalized_name)}"}
+            return toolResult.failure(f"未找到房间: {_locator_label(None, normalized_name)}", toolResult.NOT_FOUND)
 
     try:
         await roomService.delete_managed_room(team_id, target.id, dry_run=dry_run)
@@ -2363,7 +2360,7 @@ async def delete_dept(
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "当前没有可用的团队上下文。"}
+        return toolResult.failure("当前没有可用的团队上下文。", toolResult.MISSING_CONTEXT)
 
     from dal.db import gtDeptManager
     from service import deptService
@@ -2379,7 +2376,7 @@ async def delete_dept(
     if dept_id is not None:
         target = await gtDeptManager.get_dept_by_id(dept_id)
         if target is None or target.team_id != team_id:
-            return {"success": False, "message": f"未找到组织: {_locator_label(dept_id, normalized_name)}"}
+            return toolResult.failure(f"未找到组织: {_locator_label(dept_id, normalized_name)}", toolResult.NOT_FOUND)
     else:
         target = await gtDeptManager.get_dept_by_name(team_id, normalized_name)
         if target is None:
@@ -2429,9 +2426,9 @@ async def delete_role_template(role_name: str, _context: ToolCallContext = None)
     normalized_name = role_name.strip()
     template = await gtRoleTemplateManager.get_role_template_by_name(normalized_name)
     if template is None:
-        return {"success": False, "message": f"未找到角色模板: {role_name}"}
+        return toolResult.failure(f"未找到角色模板: {role_name}", toolResult.NOT_FOUND)
     if template.type == RoleTemplateType.SYSTEM:
-        return {"success": False, "message": f"SYSTEM 角色模板 {template.name} 不允许通过工具删除。"}
+        return toolResult.failure(f"SYSTEM 角色模板 {template.name} 不允许通过工具删除。", toolResult.PERMISSION_DENIED)
 
     referenced_agents = list(
         await GtAgent.select()
@@ -2511,7 +2508,7 @@ async def send_chat_msg(
     """
     if _context is None:
         logger.warning("发送消息失败，聊天室上下文未设置")
-        return {"success": False, "message": "当前没有可用的房间上下文。"}
+        return toolResult.failure("当前没有可用的房间上下文。", toolResult.MISSING_CONTEXT)
 
     logger.info(f"发送消息: sender_id={_context.agent_id}, room={room_name}, msg={msg}")
 
@@ -2528,7 +2525,7 @@ async def send_chat_msg(
 
     if target_room is None:
         logger.warning(f"send_chat_msg: 目标房间不存在 room={room_name} team_id={_context.team_id}")
-        return {"success": False, "message": f"目标房间不存在: {room_name} (team_id={_context.team_id})"}
+        return toolResult.failure(f"目标房间不存在: {room_name} (team_id={_context.team_id})", toolResult.NOT_FOUND)
 
     if not target_room.can_post_message(_context.agent_id):
         logger.warning(
@@ -2565,7 +2562,7 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
     """
     if _context is None:
         logger.warning("结束行动失败，上下文未设置")
-        return {"success": False, "message": "当前没有激活的上下文。"}
+        return toolResult.failure("当前没有激活的上下文。", toolResult.MISSING_CONTEXT)
 
     job_type = _context.schedule_job.job_type if _context.schedule_job is not None else ScheduleJobType.ROOM_MESSAGE
 
@@ -2617,7 +2614,7 @@ finish 失败，你负责验收的任务【{agent_task.title}】依然为 review
     elif job_type == ScheduleJobType.ROOM_MESSAGE:
         if _context.chat_room is None:
             logger.warning("结束行动失败，聊天室上下文未设置")
-            return {"success": False, "message": "当前没有激活的房间上下文。"}
+            return toolResult.failure("当前没有激活的房间上下文。", toolResult.MISSING_CONTEXT)
 
         # 判定源：**本 agent 本轮在本房间发过言**（不是「调度器当前 turn 有内容」）。
         # 后者在「房间已不在该 agent 的 turn 上」（人工停止 / IDLE 唤醒 / 已推进到下一位）
@@ -2693,7 +2690,7 @@ async def create_task(
 
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "无法获取团队上下文"}
+        return toolResult.failure("无法获取团队上下文", toolResult.MISSING_CONTEXT)
 
     result = await taskService.create_task(
         team_id=team_id,
@@ -2771,7 +2768,7 @@ async def update_task(
 
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "无法获取团队上下文"}
+        return toolResult.failure("无法获取团队上下文", toolResult.MISSING_CONTEXT)
 
     # 「什么都没给」必须显式拒绝（#187 裁定①的附加硬要求：不许静默成功）。
     # P0 之前这条判定在 console 层（`_effective_action_names`），console 收敛成纯转发后
@@ -2842,7 +2839,7 @@ async def get_task_detail(
 
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "无法获取团队上下文"}
+        return toolResult.failure("无法获取团队上下文", toolResult.MISSING_CONTEXT)
 
     return await taskService.get_task(team_id=team_id, task_id=task_id, event_limit=event_limit)
 
@@ -2861,7 +2858,7 @@ async def get_task_event(
 
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "无法获取团队上下文"}
+        return toolResult.failure("无法获取团队上下文", toolResult.MISSING_CONTEXT)
 
     return await taskService.get_task_event(team_id=team_id, event_id=event_id)
 
@@ -2884,7 +2881,7 @@ async def list_task_events(
 
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "无法获取团队上下文"}
+        return toolResult.failure("无法获取团队上下文", toolResult.MISSING_CONTEXT)
 
     return await taskService.list_task_events(
         team_id=team_id,
@@ -2932,7 +2929,7 @@ async def list_tasks(
 
     ok, team_id = _require_team_context(_context)
     if not ok:
-        return {"success": False, "message": "无法获取团队上下文"}
+        return toolResult.failure("无法获取团队上下文", toolResult.MISSING_CONTEXT)
 
     # 纯空白关键字不算过滤条件：`LIKE '%%'` 会匹配全部任务，等于静默取消过滤。
     title_keyword = (title_keyword or "").strip() or None
@@ -2983,11 +2980,11 @@ async def load_skill(
         skill_name: 要加载的技能名称。仅能加载当前 Agent 已授权的技能，未授权的技能会被拒绝。
     """
     if not _context or not _context.agent_id:
-        return {"success": False, "message": "无法获取当前 Agent 上下文"}
+        return toolResult.failure("无法获取当前 Agent 上下文", toolResult.MISSING_CONTEXT)
 
     agent = await gtAgentManager.get_agent_by_id(_context.agent_id)
     if agent is None:
-        return {"success": False, "message": f"未找到 Agent（ID: {_context.agent_id}）"}
+        return toolResult.failure(f"未找到 Agent（ID: {_context.agent_id}）", toolResult.NOT_FOUND)
 
     allow_skills = agent.allow_skills
 

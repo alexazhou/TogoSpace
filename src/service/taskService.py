@@ -31,6 +31,7 @@ from dal.db import (
 from model.dbModel.base import atomic
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtAgentTaskStage import GtAgentTaskStage
+import toolResult
 from service import deptService
 
 logger = logging.getLogger(__name__)
@@ -1180,7 +1181,7 @@ async def create_task(
     """
     priority_enum = TaskPriority.value_of(priority.upper())
     if priority_enum is None:
-        return {"success": False, "message": f"无效的优先级：{priority}，有效值为 HIGH / NORMAL / LOW"}
+        return toolResult.failure(f"无效的优先级：{priority}，有效值为 HIGH / NORMAL / LOW", toolResult.INVALID_TOOL_ARGS)
 
     if stages is not None and reviewer_id is not None:
         return {
@@ -1267,10 +1268,10 @@ async def create_task(
         found_ids = {t.id for t in dep_tasks}
         missing = [d for d in dep_ids if d not in found_ids]
         if missing:
-            return {"success": False, "message": f"依赖任务不存在：{missing}"}
+            return toolResult.failure(f"依赖任务不存在：{missing}", toolResult.NOT_FOUND)
         wrong_team = [t.id for t in dep_tasks if t.team_id != team_id]
         if wrong_team:
-            return {"success": False, "message": f"依赖任务不属于当前团队：{wrong_team}"}
+            return toolResult.failure(f"依赖任务不属于当前团队：{wrong_team}", toolResult.PERMISSION_DENIED)
         if not explicit_on_hold and any(t.status != TaskStatus.DONE for t in dep_tasks):
             initial_status = TaskStatus.PENDING
 
@@ -1807,9 +1808,9 @@ async def _update_task_impl(
 
     task = await gtAgentTaskManager.get_task(task_id)
     if task is None:
-        return {"success": False, "message": f"任务不存在：task_id={task_id}"}
+        return toolResult.failure(f"任务不存在：task_id={task_id}", toolResult.NOT_FOUND)
     if task.team_id != team_id:
-        return {"success": False, "message": "任务不属于当前团队"}
+        return toolResult.failure("任务不属于当前团队", toolResult.PERMISSION_DENIED)
 
     old_status = task.status
 
@@ -2113,9 +2114,9 @@ async def get_task(
 
     task = await gtAgentTaskManager.get_task(task_id)
     if task is None:
-        return {"success": False, "message": f"任务不存在：task_id={task_id}"}
+        return toolResult.failure(f"任务不存在：task_id={task_id}", toolResult.NOT_FOUND)
     if task.team_id != team_id:
-        return {"success": False, "message": "任务不属于当前团队"}
+        return toolResult.failure("任务不属于当前团队", toolResult.PERMISSION_DENIED)
 
     task_dict = model_to_dict(task, recurse=False)
 
@@ -2179,13 +2180,13 @@ async def get_task_event(team_id: int, event_id: int) -> dict:
     """
     event = await gtAgentTaskEventManager.get_event(event_id)
     if event is None:
-        return {"success": False, "message": f"事件不存在：event_id={event_id}"}
+        return toolResult.failure(f"事件不存在：event_id={event_id}", toolResult.NOT_FOUND)
 
     task = await gtAgentTaskManager.get_task(event.task_id)
     if task is None:
-        return {"success": False, "message": f"事件不存在：event_id={event_id}"}
+        return toolResult.failure(f"事件不存在：event_id={event_id}", toolResult.NOT_FOUND)
     if task.team_id != team_id:
-        return {"success": False, "message": "事件不属于当前团队"}
+        return toolResult.failure("事件不属于当前团队", toolResult.PERMISSION_DENIED)
 
     event_dict = _serialize_event(event, truncate_content=False)
     event_dict["actor_name"] = await _resolve_actor_name(event.actor_id)
@@ -2211,9 +2212,9 @@ async def list_task_events(
     """
     task = await gtAgentTaskManager.get_task(task_id)
     if task is None:
-        return {"success": False, "message": f"任务不存在：task_id={task_id}"}
+        return toolResult.failure(f"任务不存在：task_id={task_id}", toolResult.NOT_FOUND)
     if task.team_id != team_id:
-        return {"success": False, "message": "任务不属于当前团队"}
+        return toolResult.failure("任务不属于当前团队", toolResult.PERMISSION_DENIED)
 
     events = await gtAgentTaskEventManager.list_events(task_id, limit=limit, before_id=before_id)
     total = await gtAgentTaskEventManager.count_events(task_id)

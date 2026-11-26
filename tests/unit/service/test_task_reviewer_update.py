@@ -574,7 +574,8 @@ async def test_task_lookup_happens_once_and_before_permission(dal):
     res = await taskService.update_task(team_id=1, caller_id=6, task_id=404, reviewer_id=21)
 
     assert res["success"] is False
-    assert res.get("error_code") is None
+    # #376 B4：失败体统一带码（本路径是「任务不存在」⇒ not_found）。
+    assert res.get("error_code") == "not_found"
     dal.task_dal.get_task.assert_awaited_once()
     dal.event_dal.append_event.assert_not_awaited()
 

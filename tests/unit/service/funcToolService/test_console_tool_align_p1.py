@@ -260,13 +260,15 @@ class TestP1aAgentLocator:
 
     @pytest.mark.asyncio
     async def test_id_not_in_db(self, monkeypatch):
-        """① 库里根本没有这个 id ⇒ 普通「未找到」，不带 error_code。"""
+        """① 库里根本没有这个 id ⇒ `not_found`（#376 B4 起失败体必须有码）。"""
         self._patch(monkeypatch, runtime=[], rows=[])
 
         result = await tools.get_agent_info(agent_id=99, _context=_ctx())
 
         assert result["success"] is False
-        assert "error_code" not in result
+        # #376 B4：原先"普通未找到不带码"是旧契约；现在统一给通用业务码 `not_found`，
+        # 仍与 ②③ 的具体码区分开（处置动作不同这件事没有回退）。
+        assert result["error_code"] == "not_found"
         assert result["message"] == "未找到成员: id=99"
 
     @pytest.mark.asyncio
