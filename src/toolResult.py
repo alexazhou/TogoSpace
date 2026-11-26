@@ -24,7 +24,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 #: 「实收参数原文」在报错里的最大展示长度，避免超长参数灌进模型上下文。
 MAX_INSTANCE_REPR = 80
@@ -89,3 +92,52 @@ INVALID_JSON_ARGS = "invalid_json_args"
 
 #: 参数不合法（类型/枚举/必填不符）。
 INVALID_TOOL_ARGS = "invalid_tool_args"
+
+#: 通用兜底码（#376 B4）：**只表示"这次失败了、但没有更具体的码"**，不携带语义。
+OPERATION_FAILED = "operation_failed"
+
+
+def ensure_error_code(
+    result: Any,
+    *,
+    code: str = OPERATION_FAILED,
+    where: str = "",
+) -> Any:
+    """出口兜底：**失败的返回体必须有 `error_code`**（#376 B4）。
+
+    为什么需要这道兜底：调用方（模型 / 前端 / 上层 Agent）只按 `error_code` 稳定自纠，
+    手写失败字典漏了码就等于"失败了但说不出为什么"，模型只能读文案猜；而手写字典有
+    226 处（见 `#376` 盘点），靠逐个补齐必然漏。这里在唯一出口上补一次。
+    注意：补的是**通用码**，不是"猜出来的语义码" —— 见 `OPERATION_FAILED` 的注释，
+    兜底一旦开始猜，就从"保证有码"变成"制造错误信息"。
+
+    三条边界：
+    1. **已有 code 一律不覆盖**（含 `invalid_tool_args` / `invalid_json_args` /
+       业务码等所有具体码）：兜底只填空白，不改判。
+    2. **只看 `success is False`**：成功体、以及没有 `success` 键的自定义返回体都不动
+       （它们不是"失败返回体"，不该被塞一个码）。
+    3. **只处理 dict**：返回体形状不是本函数的职责，非 dict 原样返回。
+
+    Args:
+        result: 工具返回体。
+        code: 要补的码，默认通用码；调用点不应传业务码（见第 1 条）。
+        where: 用于日志定位（一般传工具名），不写进返回体——返回体形状由
+            `failure` / `error_result` 定，这里不新增字段。
+    """
+
+    if not isinstance(result, dict):
+        return result
+    if result.get("success") is not False:
+        return result
+    if result.get("error_code"):
+        return result
+
+    logger.warning(
+        "工具失败返回体缺 error_code，补通用码: code=%s, tool=%s, message=%r",
+        code,
+        where or "<unknown>",
+        result.get("message"),
+    )
+    patched = dict(result)
+    patched["error_code"] = code
+    return patched

@@ -19,7 +19,7 @@ from .toolSpec import (
     resolve_effective_visibility,
 )
 from .toolArgsValidation import validate_tool_args
-from toolResult import error_result, invalid_json_args
+from toolResult import ensure_error_code, error_result, invalid_json_args
 from .consoleTool import console, console_triggers_self_interrupt
 from .funcToolType import FuncTool
 from . import tools as _tools  # noqa: F401 —— import 副作用：触发 49 个 @tool(...) 声明
@@ -183,14 +183,35 @@ async def run_tool_call(
     function_args: str | dict[str, Any],
     context: Optional[ToolCallContext] = None,
 ) -> dict[str, Any]:
-    """执行本地工具，返回结果字典。
+    """执行本地工具，返回结果字典（**带出口兜底：失败体必须有 `error_code`**）。
+
+    本函数是三个 driver 共同注册的 handler，因此也是本地工具的**唯一出口**；
+    兜底放在出口而不是散在各处 return 上，理由同 `toolResult` 的整体设计：
+    手写失败字典有 200+ 处，逐处补齐必漏。
+
+    - 失败体（`success is False`）缺码 ⇒ 补通用码 `operation_failed`；
+    - **已有码一律不覆盖**（`invalid_tool_args` / `invalid_json_args` / 业务码都不动）；
+    - 成功体不动。详见 `toolResult.ensure_error_code`。
+    """
+
+    result = await _dispatch_tool_call(function_args, context)
+    tool_name = context.tool_name if context is not None else ""
+    return ensure_error_code(result, where=tool_name)
+
+
+async def _dispatch_tool_call(
+    function_args: str | dict[str, Any],
+    context: Optional[ToolCallContext] = None,
+) -> dict[str, Any]:
+    """`run_tool_call` 的实际执行体（校验 + 调用 + 异常转换）。
 
     入参 `function_args` 有两种形态：
     - 模型侧调用传 **JSON 字符串**（`str`）；
     - console 转发（第 2 跳）传**已组装好的 dict**，跳过 JSON 往返。
 
-    这是**本地工具的唯一执行收口**（三个 driver 都把本函数注册为 handler），因此
-    schema 校验与内容错误（JSON 坏、参数类型不符）都在这里统一发生一次：
+    三个 driver 都把 `run_tool_call` 注册为 handler，所有本地工具调用都从那里进来，
+    因此 schema 校验与内容错误（JSON 坏、参数类型不符）在这里统一发生一次
+    （出口兜底在 `run_tool_call` 里，不在本函数）：
 
     1. `json.loads` 失败（仅 str 入参）⇒ 结构化失败返回体（#189 之前是**静默
        `args = {}` 继续执行**，坏 JSON 会让全可选参数的工具拿默认值真的跑起来）；
