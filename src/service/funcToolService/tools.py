@@ -1080,7 +1080,14 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
         return toolResult.failure(f"未找到成员: {agent_name}", toolResult.NOT_FOUND)
 
     if target_agent.status != AgentStatus.FAILED:
-        return {"success": False, "message": f"{agent_name} 当前状态为 {target_agent.status.name}，无需唤醒。"}
+        # 保持 `success: False`（B5）：改成 True 会误导模型以为"已通知到对方"。
+        # 文案必须指路 `send_chat_msg`——"催办任务"与"重启崩溃的消费循环"是两件事。
+        return toolResult.failure(
+            f"{agent_name} 当前状态为 {target_agent.status.name}，无需唤醒"
+            "（wake_up_agent 仅用于恢复 FAILED 状态的成员；如需通知 IDLE 成员处理事项，"
+            "请使用 send_chat_msg）。",
+            toolResult.AGENT_NOT_FAILED,
+        )
 
     target_agent.start_consumer_task()
     return {"success": True, "message": f"已成功唤醒 {agent_name}，该成员将重新进入调度循环。"}

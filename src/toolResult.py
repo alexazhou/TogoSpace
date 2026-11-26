@@ -116,6 +116,11 @@ INVALID_STATE = "invalid_state"
 #: 缺少执行必需的上下文（无团队 / 房间 / 当前 Agent 上下文）。
 MISSING_CONTEXT = "missing_context"
 
+#: 成员不处于 `FAILED` 状态，因此没有"唤醒"这回事（#376 B5）。
+#: 沿用 `agentController` 里已有的同名码（同一语义，不另造新词）；它**不是**
+#: `invalid_state` 的替代：这里要说的是"你该用 send_chat_msg"，泛化会丢掉指路。
+AGENT_NOT_FAILED = "agent_not_failed"
+
 #: 通用兜底码（#376 B4）：**只表示"这次失败了、但没有更具体的码"**，不携带语义。
 OPERATION_FAILED = "operation_failed"
 
