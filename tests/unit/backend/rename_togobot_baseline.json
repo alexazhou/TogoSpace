@@ -31,13 +31,12 @@
       "src/appPaths.py": 2,
       "src/constants.py": 1,
       "src/service/containerService/core.py": 1,
-      "src/tests/config/setting.README.md": 1,
       "tauri/README.md": 7,
       "tauri/src-tauri/src/config.rs": 1,
       "tauri/src-tauri/tauri.conf.json": 1,
       "tests/unit/service/containerService/test_container_lifecycle.py": 2
     },
-    "total": 62
+    "total": 61
   },
   "env_prefix": {
     "pattern": "TOGOSPACE_",
