@@ -58,9 +58,19 @@ class TestD1DedupKeepsOrder:
 
 
 class TestD2EmptyArrayToNone:
-    def test_empty_json_array_is_none(self) -> None:
-        """`[]`（空 JSON 数组）→ None：`clear_fields=[] ≡ 未提供`，不是「清空全部」。"""
-        assert _convert_array("[]") is None
+    """空值分流：**显式 `'[]'` → `[]`**、**纯空白 → `None`**（need_fix_4 §七 模块 1）。
+
+    原判据把两者一并钉成 `None`（当时只有 `or None` 一条实现），代价是 CLI 无法表达
+    「清空依赖」（`--depends-on '[]'` 被折成未提供 → `no_update_action`，need_fix_4 B3）。
+    契约变更后两条各自成立：`[]` 是**显式空数组**，`None` 是**没提供**。
+    `clear_fields=[] ≡ 未提供` 的那层语义没丢——它由 `tools.py` 的
+    `_is_blank_update_value([])` 负责，与本层分流正交（集成用例里钉住）。
+    """
+
+    def test_empty_json_array_is_empty_list(self) -> None:
+        """`'[]'`（显式空 JSON 数组）→ `[]`：这是「清空 / 一个都不要」，不是未提供。"""
+        assert _convert_array("[]") == []
+        assert _convert_array(" [] ") == []
 
     def test_empty_segment_is_none(self) -> None:
         """空值段与全空白值段同折 None（`--clear-fields ''` ≡ 未提供）。"""
@@ -72,10 +82,20 @@ class TestD2EmptyArrayToNone:
         """空段重复出现（#218 聚合后是 ['','']）仍折 None，不许冒出一个空列表。"""
         assert _convert_array(["", "  "]) is None
 
+    def test_explicit_empty_with_other_segments_is_not_empty(self) -> None:
+        """`'[]'` 与其他值混写时按并集走：`['[]', '42']` → [42]，不因空数组整体变空。"""
+        prop = {"type": "array", "items": {"type": "integer"}}
+        assert (
+            ct._convert_option(
+                ["[]", "42"], kind="array", name="depends-on", command="task update", prop=prop
+            )
+            == [42]
+        )
+
     def test_sensitive_field_variant(self) -> None:
-        """对 clear_fields（真清除语义的字段）同样成立——敏感语义逐名钉。"""
+        """`clear_fields` 的显式 `'[]'` 也返回 `[]`；「视为未提供」在工具层（见集成用例）。"""
         converted = ct._convert_option("[]", kind="array", name="clear_fields", command="task update")
-        assert converted is None
+        assert converted == []
 
 
 # --------------------------------------------------------------------------- #

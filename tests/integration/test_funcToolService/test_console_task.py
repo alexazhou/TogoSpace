@@ -92,8 +92,13 @@ def _build_registry() -> AgentToolRegistry:
     return registry
 
 
-class TestConsoleTaskCommand(ServiceTestCase):
-    """`task ls|get|update` 从真 console 入口到 DB 的端到端行为。"""
+class _ConsoleTaskEntryBase(ServiceTestCase):
+    """共享基座：真 console 入口 → 解析 → 路由 → 第 2 跳 → DB 的 setup 与辅助方法。
+
+    类名不以 `Test` 开头 ⇒ 不被收集。拆出基座是为了让 need_fix_4 的
+    `TestConsoleArrayCliNeedFix4` 不必继承 `TestConsoleTaskCommand`：否则父类的
+    35 条用例会被子类重复收集、整套重跑一遍（判据一样，纯属浪费）。
+    """
 
     @classmethod
     async def async_setup_class(cls):
@@ -160,6 +165,9 @@ class TestConsoleTaskCommand(ServiceTestCase):
         row = await gtAgentTaskManager.get_task(task_id)
         assert row is not None
         return row
+
+class TestConsoleTaskCommand(_ConsoleTaskEntryBase):
+    """`task ls|get|update` 从真 console 入口到 DB 的端到端行为。"""
 
     # ==================================================================
     # 判据 1：入口可达性 —— 真 console 入口 → 解析 → 路由 → 第 2 跳 → DB
@@ -861,3 +869,175 @@ class TestConsoleTaskCommand(ServiceTestCase):
         result = await self._call("task ls --status TODO --scope self", who="worker")
         assert result["success"] is True, result
         assert "auto_filled_filters" not in result, result
+
+
+class TestConsoleArrayCliNeedFix4(_ConsoleTaskEntryBase):
+    """need_fix_4 模块 1：CLI 数组参数按元素类型收敛（B1）、空数组透传（B3）、示例同源（B2）。
+
+    全部走**真 console 入口**（`AgentToolRegistry.execute_tool_call` → 第 2 跳 →
+    `taskService` → DB）：上一版三种数组写法之所以全失败，失败点在第 2 跳的 schema
+    校验，只测 `_convert_option` 的单元层断言看不到这条链路（need_fix_4 §二 B1）。
+    """
+
+    # ---------------- 辅助 ----------------
+
+    async def _create_with(self, client_command: str) -> dict:
+        """按「用户会敲的那一行」创建任务（标题按调用累加，避免同名歧义）。"""
+        return await self._call(client_command)
+
+    async def _closed_task(self) -> GtAgentTask:
+        """先造一个 DONE 任务，供依赖用例引用（依赖未 DONE 会把新任务压成 PENDING）。"""
+        task = await self._make_task(title=f"依赖源-{id(self)}", status=TaskStatus.DONE)
+        return task
+
+    # ---------------- B1：三种写法等价 ----------------
+
+    async def test_b1_csv_integer_array_writes_db(self):
+        """`--depends-on 42,44` 形态：CSV 元素按 schema 收敛成整数并真的落库。"""
+        dep_a, dep_b = await self._closed_task(), await self._closed_task()
+        result = await self._create_with(
+            f"task create --title CSV依赖 --assignee-id {self.ids['owner']} "
+            f"--depends-on {dep_a.id},{dep_b.id}"
+        )
+        assert result["success"] is True, f"CSV 写法仍然失败：{result}"
+        task = await self._reload(result["task_id"])
+        assert task.depends_on == [dep_a.id, dep_b.id], task.depends_on
+
+    async def test_b1_repeated_option_integer_array_writes_db(self):
+        """`--depends-on 42 --depends-on 44` 形态：重复出现按顺序聚合成整数列表。"""
+        dep_a, dep_b = await self._closed_task(), await self._closed_task()
+        result = await self._create_with(
+            f"task create --title 重复依赖 --assignee-id {self.ids['owner']} "
+            f"--depends-on {dep_a.id} --depends-on {dep_b.id}"
+        )
+        assert result["success"] is True, f"重复出现写法仍然失败：{result}"
+        task = await self._reload(result["task_id"])
+        assert task.depends_on == [dep_a.id, dep_b.id], task.depends_on
+
+    async def test_b1_json_integer_array_writes_db(self):
+        """`--depends-on '[42,44]'` 形态：JSON 整数数组不再被「只收字符串」拒掉。"""
+        dep_a, dep_b = await self._closed_task(), await self._closed_task()
+        result = await self._create_with(
+            f"task create --title JSON依赖 --assignee-id {self.ids['owner']} "
+            f"--depends-on '[{dep_a.id},{dep_b.id}]'"
+        )
+        assert result["success"] is True, f"JSON 整数数组仍然失败：{result}"
+        task = await self._reload(result["task_id"])
+        assert task.depends_on == [dep_a.id, dep_b.id], task.depends_on
+
+    async def test_b1_three_forms_are_equivalent(self):
+        """三种写法的落库结果**逐字节等价**（不是「各自能跑通」就算完）。"""
+        dep_a = await self._closed_task()
+        csv_result = await self._call(
+            f"task create --title 等价CSV --assignee-id {self.ids['owner']} --depends-on {dep_a.id}"
+        )
+        repeated_result = await self._call(
+            f"task create --title 等价重复 --assignee-id {self.ids['owner']} "
+            f"--depends-on {dep_a.id} --depends-on {dep_a.id}"
+        )
+        json_result = await self._call(
+            f"task create --title 等价JSON --assignee-id {self.ids['owner']} "
+            f"--depends-on '[{dep_a.id}]'"
+        )
+        for result in (csv_result, repeated_result, json_result):
+            assert result["success"] is True, result
+        deps = [
+            (await self._reload(result["task_id"])).depends_on
+            for result in (csv_result, repeated_result, json_result)
+        ]
+        assert deps[0] == deps[1] == deps[2] == [dep_a.id], deps
+
+    async def test_b1_stages_integer_and_object_forms(self):
+        """`--stages` 三种写法：整数 CSV、JSON 整数数组、JSON 对象数组都通。"""
+        owner = self.ids["rev_a"]
+        int_result = await self._call(
+            f"task create --title 节点整数 --assignee-id {self.ids['owner']} --stages {owner}"
+        )
+        assert int_result["success"] is True, f"`--stages {owner}` 失败：{int_result}"
+        json_int = await self._call(
+            f"task create --title 节点JSON整数 --assignee-id {self.ids['owner']} "
+            f"--stages '[{owner}]'"
+        )
+        assert json_int["success"] is True, f"`--stages '[{owner}]'` 失败：{json_int}"
+        json_obj = await self._call(
+            f"task create --title 节点JSON对象 --assignee-id {self.ids['owner']} "
+            f"--stages '[{{\"owner_id\":{owner}}}]'"
+        )
+        assert json_obj["success"] is True, f"`--stages '[{{\"owner_id\":{owner}}}]'` 失败：{json_obj}"
+
+        from service import taskService as task_service
+
+        for result in (int_result, json_int, json_obj):
+            task = await self._reload(result["task_id"])
+            # 节点链真值是 `agent_task_stages` 表（`GtAgentTask` 只有 current_stage 快照）
+            nodes = await task_service._load_stages(task)
+            assert len(nodes) == 2, f"节点链应为 [执行, {owner}]，实际 {nodes}"
+            assert task_service._stage_field(nodes[1], "owner_id") == owner, nodes
+
+    # ---------------- B2：报错示例必须能照着写成功 ----------------
+
+    async def test_b2_error_example_is_executable(self):
+        """照报错里的 `example` 抄一遍必须成功——示例错了就是第二个 bug（B2）。"""
+        bad = await self._call(
+            f"task create --title 示例校验 --assignee-id {self.ids['owner']} --depends-on '[a,b]'"
+        )
+        assert bad["success"] is False, bad
+        assert bad["error_code"] == "invalid_option_value", bad
+        example = bad["example"]
+        # 示例是「命令 + 选项」整行；把标题换成随机标题后原样执行（选项部分逐字照抄）
+        head, _, _tail = example.partition(" --")
+        assert head.startswith("task create"), example
+        executable = example.replace(head, f"task create --title 示例照抄 --assignee-id {self.ids['owner']}", 1)
+        result = await self._call(executable)
+        assert result["success"] is True, f"报错示例 `{example}` 照抄仍然失败：{result}"
+
+    async def test_b2_integer_array_error_example_uses_integer_literal(self):
+        """整数数组的示例是 `[1,2]` 而不是 `["a","b"]`（示例随元素类型走）。"""
+        bad = await self._call(
+            f"task create --title 示例类型 --assignee-id {self.ids['owner']} --depends-on '[x]'"
+        )
+        assert bad["success"] is False, bad
+        assert "[1,2]" in bad["example"], bad["example"]
+        assert '"a"' not in bad["example"], bad["example"]
+
+    # ---------------- B3：显式 '[]' 与「未提供」分开 ----------------
+
+    async def test_b3_explicit_empty_array_clears_depends_on(self):
+        """`task update <id> --depends-on '[]'` **真的清空**依赖（B3 的核心）。"""
+        dep = await self._closed_task()
+        created = await self._call(
+            f"task create --title 清空依赖 --assignee-id {self.ids['owner']} --depends-on {dep.id}"
+        )
+        assert created["success"] is True, created
+        task_id = created["task_id"]
+        assert (await self._reload(task_id)).depends_on == [dep.id]
+
+        result = await self._call(f"task update {task_id} --depends-on '[]'")
+        assert result["success"] is True, f"`--depends-on '[]'` 被当成未提供：{result}"
+        row = await self._reload(task_id)
+        assert not row.depends_on, f"依赖没有被清空：{row.depends_on}"
+
+    async def test_b3_allow_skills_empty_means_no_skill(self):
+        """`agent create --allow-skills '[]'` = 不授权任何技能（不是「授权全部」）。"""
+        result = await self._call(
+            "agent create --name noskill_374 --role-template-name console_task_role "
+            "--allow-skills '[]'"
+        )
+        assert result["success"] is True, result
+        agents = await gtAgentManager.get_team_all_agents(self.team_id)
+        created = next(a for a in agents if a.name == "noskill_374")
+        assert created.allow_skills == [], f"`'[]'` 被折成 None（= 全部技能）：{created.allow_skills}"
+
+    async def test_b3_blank_status_still_equals_absent(self):
+        """`--status ''` 仍 ≡ 未提供：不许因为「`'[]'` 透传」把空串契约一起改掉（#228）。"""
+        task = await self._make_task(title="空串状态", status=TaskStatus.TODO)
+        result = await self._call(f"task update {task.id} --status ''")
+        assert result["success"] is False, result
+        assert result["error_code"] == "no_update_action", result
+
+    async def test_b3_clear_fields_empty_array_still_no_action(self):
+        """`--clear-fields '[]'` 仍报 no_update_action（`[]` 在工具层 ≡ 未提供）。"""
+        task = await self._make_task(title="空数组清除字段", status=TaskStatus.TODO)
+        result = await self._call(f"task update {task.id} --clear-fields '[]'")
+        assert result["success"] is False, result
+        assert result["error_code"] == "no_update_action", result
