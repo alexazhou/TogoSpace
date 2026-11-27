@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, NoReturn, Optional
+from typing import Any, NoReturn, Optional, Sequence
 
 from constants import ALLOWED_CLEAR_FIELDS, ToolVisibility
 from exception import ForwardToolCall
@@ -374,8 +374,12 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _resource_help(resource: str, visible: list[registry.ResolvedCommand]) -> str:
+def _resource_help(resource: str, visible: Sequence[registry.ResolvedCommand]) -> str:
     """`help <资源>`：**每条子命令一行**（用法 + 用途），末尾给下一步。
+
+    形参收 `Sequence` 而不是 `list`：上游 `registry.get_table().visible_specs()` 返回的就是
+    `tuple[ResolvedCommand, ...]`（只读遍历，见 consoleRegistry.py:373），本函数只做 `for`
+    遍历与过滤，不需要可变序列，也不该为了迁就注解在调用点 `list(...)` 造一次拷贝。
 
     need_fix_4 §七模块2.3：旧实现只印一行 `task 的可用操作：ls | get | create | update`，
     模型看得到操作名却不知道各自做什么，只能挨个 `help task <操作>` 试——一次试探就是
