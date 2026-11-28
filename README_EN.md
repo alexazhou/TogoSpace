@@ -16,7 +16,7 @@ They split up work, hold discussions, assign tasks, review each other's output �
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#-quick-start)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[📦 Download Desktop App](https://github.com/alexazhou/TogoSpace/releases) · [🌐 Live Demo](https://demo.togoagent.org) · [🐳 Docker Deployment](docs/manual/DOCKER.md) · [💬 Community](#-community)
+[📦 Download Desktop App](https://github.com/alexazhou/TogoSpace/releases) · [🐳 Docker Deployment](docs/manual/DOCKER.md) · [💬 Community](#-community)
 
 </div>
 

@@ -16,7 +16,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#-快速开始)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[📦 下载桌面版](https://github.com/alexazhou/TogoSpace/releases) · [🌐 在线体验](https://demo.togoagent.org) · [🐳 Docker 部署](docs/manual/DOCKER.md) · [💬 加入交流群](#-交流群)
+[📦 下载桌面版](https://github.com/alexazhou/TogoSpace/releases) · [🐳 Docker 部署](docs/manual/DOCKER.md) · [💬 加入交流群](#-交流群)
 
 </div>
 
@@ -153,12 +153,6 @@ python3 -m venv .venv
 # 启动 Web 控制台
 cd frontend && npm install && npm run dev
 ```
-
-### 在线体验
-
-不想安装？先去 [演示站点](https://demo.togoagent.org) 看看。
-
----
 
 ## 💡 适合用来做什么
 
