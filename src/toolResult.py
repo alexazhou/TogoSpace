@@ -1,25 +1,8 @@
-"""工具失败返回体的**唯一构造点**（#189：简化异常处理逻辑）。
+"""构造工具失败返回体的唯一位置：`{"success": False, ...}` 只在这里拼。
 
-## 为什么必须只有一处
+转换散在四处（`tools._tool_error_result`、`core.run_tool_call` 兜底、`toolRegistry.execute_tool_call` 兜底、`tspDriver._execute_tsp_tool`）时，同一类异常走不同路径给出不同结构，模型没法按 `error_code` 自纠，人也只能照文案 grep。收敛成一个函数后只有一份实现：前缀、要不要带 `error_code`、键的顺序都不再各写一份。
 
-改造前，「异常 → `{"success": False, ...}`」的手工转换散在四个地方，各自决定：
-
-| 位置 | 文案前缀 | 是否带 `error_code` |
-| --- | --- | --- |
-| `tools._tool_error_result` | 无 | 有 |
-| `core.run_tool_call` 兜底 | `函数执行失败: ` | 有 |
-| `toolRegistry.execute_tool_call` 兜底 | `工具调用失败: ` | **无**（错误码在这里丢） |
-| `tspDriver._execute_tsp_tool` | `TSP 工具调用失败: ` | 无 |
-
-同一类业务异常在不同路径上给出不同结构，模型侧无法按 `error_code` 稳定自纠，人排查时
-也只能按文案 grep。本模块把这四处的**形状**收敛成一个函数：message 的前缀由调用点用
-`prefix` 指定（那是既有的对外文案契约，不归本单改），其余（取哪段文本、要不要带
-`error_code`、键的顺序）只有一份实现。
-
-## 不做的事
-
-- **不改文案前缀**：`函数执行失败:` / `工具调用失败:` 都有既有用例与模型提示词依赖。
-- 不吞 `ForwardToolCall`：它是控制流（#160），必须在调用点先放行，本模块不参与。
+`prefix` 仍由调用点传入（那是对外文案，有用例和提示词依赖），本模块不改前缀、也不吞 `ForwardToolCall`（它是控制流，要在调用点先放行）。
 """
 
 from __future__ import annotations

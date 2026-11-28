@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # 说明：旧实现用 `docstring.split("Args:")` + 「段内首个空行截断」，导致 5 类写法失效：
 #   ① 用「参数：」当段标题；② 正文提到 `Args:` 字面串；③ 段内出现空行；
 #   ④ 用 `Arguments:` / `Parameters:`；⑤ 全角冒号。
-# 现改为状态机：整行匹配段标题 + 段内空行不终止 + 续行拼接。
+# 状态机规则：整行匹配段标题 + 段内空行不终止 + 续行拼接。
 
 # 参数段标题（小写归一化后比对；半角 / 全角冒号都认）。
 _ARGS_SECTION_TITLES = frozenset({

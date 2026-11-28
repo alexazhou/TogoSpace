@@ -1,27 +1,8 @@
-"""`webfetch` 的取数与转换实现：HTTP 取 HTML → 转 Markdown，**不执行 JS**。
+"""`webfetch` 的实现：取 HTML 转成 Markdown，不执行 JavaScript。
 
-设计边界（#191 定版，不要在这里加可配置项）：
+单页读取只用 `beautifulsoup4` 解析服务端返回的 HTML，清洗固定用 `DROP_TAGS` 并丢弃整块 `<head>`，接受残留的导航文字——为去噪加复杂度不划算。用浏览器渲染或按站点写清洗规则，就会引入 Playwright 这类重依赖。
 
-1. **单页读取**：一次请求 + 至多 5 次重定向，不做爬取、不遍历站点、不遵守
-   robots.txt（理由：单页读取等价于用户自己打开这个链接，不构成站点遍历）。
-2. **不执行 JavaScript**：只用 `beautifulsoup4` 解析服务端返回的 HTML，没有
-   浏览器、没有 Playwright/Selenium。⇒ SPA / CSR 站点只能拿到空壳，这条限制
-   已写进工具描述，由模型自己判断要不要换方法。
-3. **清洗只做一次性固定小清单**：`DROP_TAGS` + `<head>` 整块不入正文。
-   不做基于 id/class 的站点适配规则、不做站点白/黑名单、不设「正文是否够干净」
-   的阈值、不做重试/回退分支 —— 单次转换、直出结果。
-   ⇒ **接受残留导航噪声**（`Navigation`、`[index]/[next]/[previous]`、breadcrumb），
-   这是有意的取舍：为去噪加复杂度不划算。
-4. **安全兜底**：拦内网/回环/链路本地地址，**先解析域名再判 IP**（防 DNS 绕过），
-   **每次重定向后重新校验目标**。
-5. **校验与连接必须用同一份解析结果**（#194）：`_assert_host_allowed` 是预检，只负责
-   「早拒」；真正生效的是注入到 `TCPConnector` 的 `_GuardedResolver` —— 它自己解析、
-   自己校验、**只把通过校验的 IP 交给 connector**。connector 只会连它返回的地址，
-   因此不存在「校验用的 IP」与「实际连接的 IP」不是同一个的时间窗（DNS rebinding TOCTOU）。
-   ⚠️ 这条不能用「连接前再校验一次」替代：那只是把时间窗挪个位置。
-
-返回结构沿用项目既有口径：`{success, message, error_code?}`，成功时 `message`
-是 Markdown 正文（或 `text/plain` 原文）。
+校验域名和建立连接不能分成两步：中间那段正是 DNS rebinding 的时间窗，请求能被打到内网。所以要拦内网 / 回环 / 链路本地地址、先解析域名再判 IP；`_assert_host_allowed` 只是早拒，真正生效的是注入 `TCPConnector` 的 `_GuardedResolver`（它自己解析、自己校验、只把通过校验的 IP 交给 connector），别用「连接前再校验一次」替代。
 """
 
 from __future__ import annotations

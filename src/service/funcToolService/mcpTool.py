@@ -1,87 +1,8 @@
-"""mcp2cli 接入（#202）：把任意 MCP / OpenAPI / GraphQL 服务压成**一条**工具入口。
+"""把任意 MCP / OpenAPI / GraphQL 服务变成一条 `mcp_call` 工具，实际执行交给 mcp2cli。
 
-## 为什么要这一层
+一次 `mcp_call` 超时返回后，接下来几十秒（无上界，实测 74.92s）里其他 `mcp_call` 也会一起变慢：`asyncio.wait_for` 只是不再等结果，跑 mcp2cli 的线程还握着 `_STDOUT_LOCK`，要等它真正结束才放开。上游的 30 / 60 秒是单次操作超时（connect 与 read 各自计时），服务端慢速滴流可以让总时长任意长。
 
-平台原来的外呼形态是「每接一个外部 API 就把整套 tool schema 喂给模型」。mcp2cli
-在运行时把任意 MCP server / OpenAPI spec / GraphQL endpoint 转成 CLI，模型只需要记住
-`mcp_call` 一个工具 + `--list` 一次拿命令清单，schema 开销从「N 套」降到「1 套」。
-
-## 执行方式：库调用；openapi / mcp / graphql 三态零子进程，mcp_stdio 起子进程
-
-`mcp2cli` 是 CLI 优先的项目，但它把分派逻辑抽成了 `_main_impl(argv)`——**读的是入参
-而不是 `sys.argv`**，因此可以在进程内直接调，不必 `Popen(sys.executable, ...)`。
-这躲开了 PyInstaller onedir 下「打包后的可执行文件当 python 解释器」的坑（方案 §4：
-只有 `--session-start` daemon 会用 `sys.executable -c`，本单不用 session 模式）。
-
-**「零子进程」只对 openapi / mcp / graphql 三态成立**：它们走 HTTP，进程内完成。
-`mcp_stdio` 例外——它按 Operator 要求保留，上游 `mcp.client.stdio.stdio_client` 会
-真的拉起本地子进程（这是该 kind 的定义，不是本层引入的开销）。
-
-调 `_main_impl` 而不是逐个拼公开函数（`load_openapi_spec` / `handle_mcp` /
-`execute_openapi` …）的原因：OpenAPI 的 `call` 分支要先用 `_build_main_parser()`
-建全局 parser、再 `build_argparse()` 出子命令 parser、再 `execute_openapi(args, …)`，
-自己拼等于把 mcp2cli 的分派逻辑抄一遍，抄完就与上游版本漂移。代价是**依赖了一个
-下划线开头的函数**：升级 mcp2cli 时必须复跑 `tests/unit/service/funcToolService/
-test_mcp_call.py` 的实跑用例。公开函数链（`load_openapi_spec → extract_openapi_commands
-→ list_openapi_commands(json_output=True)`）已单独复验可用，作为届时改写的退路。
-
-## 三个必须处理的点（都是「不跑崩」的技术必需，不是安全加固）
-
-1. mcp2cli 靠 `print` 出结果、**不 return** ⇒ 捕获 stdout/stderr；
-2. 错误路径会 `sys.exit(1)` ⇒ `try/except SystemExit` 兜住，**绝不让它杀掉后端进程**；
-3. 函数是**同步阻塞**的（起 HTTP 请求 / 本地 stdio 子进程）⇒ `asyncio.to_thread`
-   丢线程池，别卡事件循环。
-
-## 并发约束与**可用性代价**（#202 复验 B1）
-
-第 1 点的捕获手段是替换**进程级** `sys.stdout`，而 `to_thread` 让多个调用真并发 ⇒
-两个调用会互相截获对方的输出（实测 2 路并发 40 批：19 次拿到**另一个 target** 的
-结果）。所以模块级加一把 `threading.Lock`，把「替换 stdout → 跑 → 取回」整段串行化：
-同时只有一次 mcp2cli 在写那个全局流。
-
-**代价（必须知情，不许当白送）**：串行化意味着**一次慢调用会把进程内其余 `mcp_call`
-挡在门外**。实测读数见实现报告 §5.3（1 个慢 target 在飞时另一快 target 的耗时）。
-
-**已知限制：`timeout` 到点不释放锁**（不是 bug，是取舍，但必须写下来）。`call_mcp`
-用 `asyncio.wait_for` 包 `asyncio.to_thread`，超时只是**不再等结果**：那个 worker 线程
-仍在跑、**仍持着 `_STDOUT_LOCK`**，直到 mcp2cli 那次调用真正结束才释放。实测
-（慢 target 服务端 sleep=3s、`timeout=1`）：
-
-- 超时返回瞬间 `_STDOUT_LOCK.locked() = True`，约 +2.0s 后才变 False；
-- 连发 3 个 `timeout=1` 打同一慢 target，随后快 target 等了 **6.03s**（3 个孤儿 worker
-  依次持锁）；
-- 更严重的一层（**改前形态下实测**，无锁 + `io.StringIO`）：孤儿 worker 结束时
-  `redirect_stdout` 恢复**全局** `sys.stdout`，会把**在飞调用**自己的捕获流一起打掉
-  ⇒ 后续调用**拿到的是别人的结果**（实测快调用返回 `{'marker': 'SLOW'}`，应为 `MID`）。
-  当前实现（线程隔离 + 锁）已消掉这一层，用例 `test_call_after_timeout_still_succeeds`
-  钉住它。
-
-**所以「锁最多被持有 N 秒」这种说法不成立**，正确的表述是：锁被持有到上游那次调用真正
-结束为止，而这个时长**没有硬上界** —— 上游 `httpx.Client(timeout=30/60)` 是**单次操作**
-超时（connect/read 各自计时，不是总时长；见 mcp2cli `__init__.py:3493` `execute_openapi`），
-服务端慢速滴流即可让总时长任意长。实测：滴流 target 每 1.5s 发 1 字节、总时长约 78s，
-`timeout=2` 的调用 2.01s 就返回了，但随后快 target 被堵 **74.92s**（>60s，证明无 60s 封顶）。
-⇒ 一次超时后，锁可能还被占几十秒，这段时间内**所有** `mcp_call` 都在排队，而调用方
-看到的是 `success=False, mcp_call_timeout`，下一个调用却莫名变慢 —— 别把它当随机故障。
-收窄这个代价的两条路各自的问题：
-
-- 「每次调用独立捕获」做不到：`print` 写的是 `sys.stdout` 这个**全局名字**，不是
-  可注入的句柄，除非改上游或每调用开子进程；
-- 「走上游公开函数链」代价更大：OpenAPI 的 call 分支要先 `_build_main_parser()` 再
-  `build_argparse()` 再 `execute_openapi()`，自己拼 = 抄一遍上游分派逻辑（见上节），
-  且公开函数链同样 `print` 到 `sys.stdout`，**串味问题一模一样**。
-
-所以串行化是当前形态下「不串味」的最小代价方案，**不是因为它没有代价**。
-
-残余风险（已处理一部分）：持锁期间 `sys.stdout` / `sys.stderr` 仍是我们的捕获流，
-但捕获流按**线程**过滤（`_ThreadIsolatedStream`）——只有跑 mcp2cli 的那个 worker
-线程的写入进结果，其它线程的 `print` / 日志原样转发到真实流。因此「别的协程日志被吞」
-与「日志污染 JSON 输出」两个问题都已消除（实测读数见实现报告 §5.4）。
-仍存在的残余：`redirect_stdout` 期间 `sys.stdout` 这个**对象**确实被换掉了（若别处
-缓存了 `sys.stdout` 的旧引用、或依赖 `isinstance(sys.stdout, TextIOWrapper)` 判断，
-会看到替身）。要彻底消除得改上游或每调用开子进程，超出本单范围。
-回调给模型的 `truncated` / `result_type` 都按真实行为给，不按注释里的意图给。
-"""
+因为 mcp2cli 把结果 `print` 到 stdout、出错直接 `sys.exit(1)`，只能截获整个进程的 stdout，多个线程同时跑会互相拿到对方的结果，所以一次只让它跑一个。别改成逐段调用 `load_openapi_spec` / `execute_openapi`（等于把 mcp2cli 的分派逻辑抄一遍）；改完跑 `tests/unit/service/funcToolService/test_mcp_call.py`，完整理由见 `docs/design/2026-11-08-agent-mcp-support/step2_technical.md` §9。"""
 from __future__ import annotations
 
 import asyncio
@@ -556,29 +477,10 @@ def _run_argv_sync(argv: list[str], secrets: list[str] | None = None) -> dict[st
     try:
         payload = json.loads(out)
     except json.JSONDecodeError:
-        # #282（方案 A，Operator 2026-11-16 02:19 选型）：**非 JSON 输出不等于失败**，
-        # 改按「进程退出码」判成败 —— 能走到这里就等价于退出码 0：
-        # `_main_impl` 正常返回（未 `sys.exit`），而 mcp2cli 的失败路径是 `sys.exit(1)`
-        # 并被上面的 `except SystemExit` 接走（⇒ `mcp2cli_exit`、success=False）。
-        # 库调用路径**拿不到 returncode**，所以「正常返回」就是 0 的唯一可用证据。
+        # 非 JSON 输出不等于失败（#282 方案 A，Operator 2026-11-16 02:19 选型）：能走到这里说明 `_main_impl` 正常返回，等价于退出码 0。
         #
-        # 旧注释写「防御性分支，当前不可达（#202 复验 B5）」，其假设是「`--json` 会让上游
-        # `output_result` 把任何非 JSON 响应体包成合法 JSON 字符串」。**该假设已被实测推翻**
-        # （#282，Operator 02:19 首先发现）：mcp2cli 的 **CLI 自己 print 的控制台文本**
-        # 不经过 `output_result` 包装 —— `--session-start` / `--session-stop` /
-        # `--session-list` 都是「操作成功 + 输出纯文本」，例如
-        # `Session 'ctx7' started (PID 27570)`、`No active sessions.`。
-        # 旧行为把它们全判成 `mcp2cli_bad_json`（操作成功却报失败），误导使用者重试。
-        #
-        # 这里**不按开关名做白名单**（方案 B 已被否）：任何文本型输出都走这条统一兜底，
-        # 形态与「JSON 成功」完全一致 —— 原文进 `result`、`result_type="string"`，
-        # 超限时按同一条截断规则只下发 `raw_excerpt`（不下发 result）。
-        #
-        # 已知边界（#284 / B52-N1）：**stdout 里混入非 JSON 文本不再可区分**。改前这种
-        # 「噪音 + payload」会被判 `mcp2cli_bad_json`（失败）；方案 A 之后只要 mcp2cli
-        # 正常返回就按成功，原文进 `result`、`result_type="string"`，于是「混入的噪音」
-        # 与「上游确实返回纯文本」在返回体上完全同形。这是「以退出码为准」的必然代价：
-        # 要判失败，必须让 mcp2cli 真的非 0 退出（拿不到 returncode 的库调用路径判不了）。
+        # mcp2cli 的 CLI 自己 print 的控制台文本（`Session 'ctx7' started`、`No active sessions.`）不经过 output_result 包装，按 JSON 判失败会把「操作成功」报成 `mcp2cli_bad_json`，使用者会去重试。库调用路径拿不到 returncode，「正常返回」就是退出码 0 的唯一可用证据。
+        # 不按开关名做白名单，任何文本型输出都走这条统一分支：原文进 `result`、`result_type="string"`、超限时只下发 `raw_excerpt`。已知边界（#284 / B52-N1）：stdout 里混入的非 JSON 文本不再可区分，它与「上游确实返回纯文本」在返回体上完全同形。
         payload = out
 
     # 真截断：超限时**不下发 result**。只截 `raw_excerpt` 而照样把完整 payload 塞进

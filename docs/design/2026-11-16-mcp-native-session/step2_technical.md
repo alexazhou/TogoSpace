@@ -15,6 +15,7 @@
 1. **MCP 协议客户端**：直接使用后端 `.venv` 已集成的 **Python `mcp` SDK**（`mcp.ClientSession` + `stdio_client` / `sse_client` / `streamablehttp_client`），在后端现有 `asyncio` 事件循环中运行，不增加独立 daemon 进程。
 2. **CLI 解析选型**：**不引入 TypeScript/Node mcporter runtime**（避免桌面打包体积膨胀与跨语言进程管理），采用纯 Python 解析器实现 [产品文档 §2](./step1_product.md#2-cli-命令与示例) 与 [§4.1](./step1_product.md#41-产品契约细则选项参数转换与配置联动) 定义的命令语法。
 3. **OpenAPI / GraphQL 兼容**：已有 OpenAPI / GraphQL 外部调用保留现有 `mcpTool.py`（`mcp2cli`）路径，不纳入本次 `mcpSessionService` 范围。
+4. **打包产物可用性**：本服务只用 Python `mcp` SDK（`mcp==1.27.1`，`requirements.txt:21`），**不拉 daemon、不读 stdin、不依赖 `sys.executable` 子进程**，因此 PyInstaller onedir 产物（没有 Python 解释器）里同样可用 —— 这正是 `mcpTool._SESSION_EXTRA_REASON` 里「打包产物没有 Python 解释器」那条限制的替代路径。
 
 ---
 
@@ -103,3 +104,25 @@ Python `mcp` SDK 的 `stdio_client` / `sse_client` / `streamablehttp_client` 与
 ## 7. 验证与迁移说明
 
 详细开发步骤、历史代码清理与分层测试要求见 [开发任务表](./step3_tasks.md)。
+
+---
+
+## 8. console 子树实现备注（#359 搬迁）
+
+> 本节是 `src/service/funcToolService/consoleMcp.py` 模块 docstring 的原文搬迁（2026-11-25，#359 压缩注释：35 行压到 5 行）。`consoleSchema.py` 的说明已并入 [console_tool_review.md](../../tech/11_refactor/console_tool_review.md)（该文已覆盖派生层，按「尽量并入既有文档」不新建）。
+> 命令的写法与产品上的定义仍以 [step1_product.md](./step1_product.md) §2 / §4.1 为准，本节只记录「为什么这么实现」。
+
+### 8.1 为什么是「局部专用解析器」而不扩通用 console 框架
+
+通用 `consoleCommands` 的 spec 机制假定「一条命令 = 资源 + 动词 + 至多一个位置参数，选项面从某个既有工具签名派生」。本子树需要三层子命令（`mcp config list`）、双位置参数（`config add <name> <target>`、`resource <server> <uri>`）、`name=value` 具名参数与 `--output` 这类纯展示选项 —— 这些语义**只属于 mcp**。把它们塞进通用框架会让 34 条既有命令的解析路径一起变（风险与收益不成比例），所以这里自带一个窄解析器，`consoleTool.console()` 只在 `tokens[0] == "mcp"` 时短路进来。
+
+### 8.2 两条入口的分工（Q1=A，产品 §5「OpenAPI / GraphQL 能力保留，CLI 另行明确」）
+
+- `mcp list` / `mcp call <server>.<tool>` / `mcp resource` / `mcp session` ⇒ **MCP 原生路径**（Python `mcp` SDK，`mcpSessionService`）。
+- `mcp ls <path/URL>` / `mcp call --kind openapi|graphql …` ⇒ **既有 mcp2cli 路径**，原样委托 `tools.list_mcp_servers` / `tools.mcp_call`，行为与文案不变（它是 A 类不变量）。mcp2cli 侧的取舍见 [2026-11-08-agent-mcp-support/step2_technical.md §9](../2026-11-08-agent-mcp-support/step2_technical.md)。
+
+两条靠**命令词不同**（`list` vs `ls`）区分，不靠猜参数，所以无二义；`help` 里各给一条可复制示例，避免「能力保住了但用户不知道怎么用」。
+
+### 8.3 报错信息怎么写（产品 §4.1 第 3 条）
+
+语法错误 / 未知选项 / 缺目标 / 缺参数一律：固定错误码 + 一句话原因 + **一行可直接复制的固定占位符示例**，不动态拼装注册表实值。

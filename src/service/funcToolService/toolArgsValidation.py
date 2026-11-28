@@ -1,32 +1,8 @@
-"""tool call 参数的 JSON Schema 校验（#189）。
+"""按 JSON Schema 校验 tool call 的参数，返回「哪个字段、期望什么、收到什么」加固定 error_code。
 
-## 为什么需要这一层
+不校验的话，模型给错参数只能等 `func(**args)` 抛 `TypeError`，返回给它的是英文解释器文案，既没有字段级信息也不是固定结构，模型没法自己改。校验规则不在这里手写：schema 只有一处来源——本地工具取 `get_function_metadata()` 的 `parameters`，TSP 远端取 `OpenAITool.function.parameters`，同一份下发给模型。
 
-改造前，模型给错参数（类型错、漏必填、枚举值非法）时，错误只能靠 `func(**args)` 抛的
-`TypeError` 兜住，最终变成 `Invalid arguments for function xxx: got an unexpected ...`
-这类**英文解释器文案**返回给模型 —— 既不含「哪个字段、期望什么、收到什么」的字段级
-信息，也不是稳定结构（模型难以自纠，人排查时只能靠猜）。本模块把「按 schema 校验」
-收敛成唯一实现，返回**字段级 + 稳定 error_code** 的结构化失败返回体。
-
-## 单一事实源（硬约束）
-
-schema 一律来自已有信息，**禁止为任何工具另写一份校验规则**：
-
-- 本地工具：`funcToolType.get_function_metadata()` 的 `parameters`
-  （与 `FuncTool.to_openai_tool()` 下发给模型的是同一个函数产出的同一份结构）；
-- TSP 远端工具：`OpenAITool.function.parameters`，它由 `tspDriver._load_tsp_tools()`
-  用 `OpenAIFunctionParameter(**tool.input_schema)` 构造，同样是下发给模型的同源结构。
-
-## 兜底口径（小马哥 1015 / 1020 裁定）
-
-schema **不可用**（提取抛异常、结构不是 dict、`check_schema` 判定非法）时：
-**记一条 warning + 跳过校验**，绝不拦死正常调用。理由是远端 schema 由对端决定，
-后端无法保证其合法性；「因为 schema 坏了所以工具永远调不通」比「这次没校验」严重得多。
-
-warning 文案固定为「工具参数 schema 不可用，已跳过校验」+ `tool=` + `reason=`，
-便于 grep 与用例断言。**兜底只作用于出问题的那个工具**：解析发生在按工具取 schema 的
-那一处，不会有「整个校验入口 except: pass」这种全局失能写法。
-"""
+schema 提取失败或 `check_schema` 判定非法时只记一条 warning 并跳过校验、不要拦死调用——这条兜底是小马哥 1015 / 1020 裁定的：远端 schema 由对端决定，后端保证不了它的合法性，「因为 schema 坏了所以工具永远调不通」比「这次没校验」严重得多。兜底只作用于出问题的那个工具，warning 文案与 `tool=` / `reason=` 保持固定（用例按它断言）。"""
 
 from __future__ import annotations
 
@@ -261,83 +237,16 @@ def _build_validator(
 
 
 def _truncate(text: str) -> str:
-    """本地别名：字段级展示同样受 `toolResult.MAX_INSTANCE_REPR` 约束（口径只有一份）。"""
+    """本地别名：字段级展示同样受 `toolResult.MAX_INSTANCE_REPR` 限制（这个上限只有一处定义）。"""
     return truncate(text)
 
 
 def _is_ignorable_null(error: ValidationError, schema: Dict[str, Any]) -> bool:
-    """`null` 打到**单个非必填字段** ⇒ 忽略该错误。**仅用于外部 schema 路径。**
+    """单个参数整体传 `null` 时报的错在这里放过，只对 `schema=` 传进来的外部 schema 生效。
 
-    ## 启用范围（#195 返工，38 B1 打回后定）
+    放过范围一放宽，用户就会看到数据库原样抛出的 `NOT NULL constraint failed`；放宽到数组元素上，`{"tags": [null]}` 这种非法参数会直接发给 TSP 远端。只有对方给的 schema 说不清「这个字段能不能是 null」时才有必要放过，本仓库的 schema 由 TypeAdapter 生成、已经写清，所以 `func=` 路径一律严格。
 
-    `validate_tool_args` 只在 **`schema=` 传入（外部来源）** 时调用本函数；
-    **本地路径（`func=`，schema 由本仓库生成器产出）一律严格，不豁免任何 null。**
-
-    理由：豁免成立的前提是「schema 里表达不出 null 的合法性」。这条前提对**外部
-    schema 仍然成立** —— 对端用的不是本仓库的生成器（实测 gtsp v0.4.19 的 11 个工具
-    39 个 property、`default` 0 个、schema 含 null 的 **0** 个，26 个「非必填但无 null」
-    字段），本仓库无法保证它表达了 nullability。对它严格校验会把「对端本来就接受的
-    合法写法」打死（`read_file{encoding: null}` / `grep_search{path: null}` 在 gtsp
-    本体上实测 ACCEPT），属**新误杀**。
-    而本地 schema 由 #195 换成 TypeAdapter 后**已经能**表达 nullability
-    （`Optional[T]` → `type: [T, "null"]`），前提消失 ⇒ 不再豁免。
-
-    ⚠️ **分流按「schema 来源」，不按「字段是否必填」。** 后者正是本单修掉的病根
-    （见下方「为什么这条思路从根上不成立」）。
-
-    ## 为什么这条思路从根上不成立（#195 的根因）
-
-    它的前提是「schema 里表达不出 null 的合法性」。这个前提在 #195 之前是真的：
-    `python_type_to_json_schema` 把 `Optional[T]` 剥成 `T`，于是 `{"timezone": null}`
-    只能靠豁免放行。但豁免面按**「是否必填」**切，而 null 合法性该按**「注解是否含
-    None」**切——两条线不重合的地方就是 19 个注解不含 None 的字段（`create_task.description`
-    / `.note` / `list_tasks.open_only` …）。它们本不该接受 null，却被一并放行，
-    一路撞到 `NOT NULL constraint failed`，用户看到裸数据库错误。
-
-    ⇒ 正确修法是让 schema 表达 nullability（TypeAdapter），**豁免随之失去存在理由**。
-    「把豁免面再收窄一点」是错方向：它治的是症状（哪一类错误被吃掉），不是病因
-    （schema 不知道自己能不能 null）。
-
-    ## 豁免面必须恰好是「路径长度为 1 的字段」（H1 + H2，38 两轮打回）
-
-    ⚠️ 下面三条**在启用范围内仍然必须遵守**（返工后本函数重新生效，只是范围收窄到
-    `schema=` 外部路径）。谁若把 `len(path) != 1` 放宽成 `>=1`，H1/H2 立刻回潮。
-
-    本函数只该豁免**一个具名参数整体为 `null`** 这一种情形。`absolute_path` 长度
-    决定了「错在哪一层」，三者必须分开处理：
-
-    | `len(path)` | 含义 | 处置 |
-    | --- | --- | --- |
-    | `0` | **根节点**：整份参数不是对象（`function_args` 字面量就是 `null`）| **报错**（H1）|
-    | `1` | 单个参数整体为 `null`（`{"timezone": null}`）| 非必填 ⇒ 豁免；必填 ⇒ 报错 |
-    | `≥2` | **容器元素级** `null`（`{"tags": [null]}`、`{"a":{"b":null}}`）| **报错**（H2）|
-
-    ### H1：根节点漏网（38 首次打回）
-    只判 `instance is None` 时，根节点的 `type: object` 错误（`path=[]`、`instance=None`）
-    落到 `return True` 被豁免 ⇒ `func(**None)` ⇒ 英文原话 + 无 `error_code`。
-    实测修前 `get_tools(include_container_tools=True)` 的 **37 个工具喂 `'null'` 全漏**
-    （历史口径：写这段时工具数是 37，现值 49，见 `_drop_variadic_params` docstring 的实测行）。
-
-    ### H2：元素级漏网（38 二次打回）
-    修 H1 时只补了 `if not path`，**`path` 长度 ≥2 仍落到 `return True`**：
-    `{"depends_on": [null]}`（`items: integer`）被豁免 ⇒ `int(None)` ⇒ 同一旧形态。
-    实测修前 **10 个 array 型参数喂 `[None]` 全部放行**；**TSP 远端更严重** ——
-    `call_tool` 真的被调用了，**非法参数已越过进程边界发给对端**。
-
-    两次都是同一个假设（「null 都可以放过」）的两半，所以这里一次性把豁免面
-    收到**恰为长度 1**，而不是再逐个补 `len(path)==1` / `len(path)==2` 的分支。
-
-    ### 为什么不会误杀（#195 前的实测，外部 schema 路径现在仍适用）
-    真实 37 个工具里 `object` 型参数只有 4 个（`save_agent.i18n` 等；历史口径，工具数与
-    参数面现值见 `_drop_variadic_params` docstring 的实测行），它们的 schema
-    **都没有嵌套 `properties`**，`array` 也没有 `items.type == object` 的用例 ⇒
-    本项目不存在「嵌套对象内的非必填字段传 null 且应被允许」的合法签名。
-    反向对照：`{"timezone": null}`、`{"depends_on": null}`（字段整体 null）仍放行。
-
-    ⚠️ 这段结论只针对**本仓库工具**。外部 schema（gtsp）同样已实测：26 个「非必填但
-    无 null」字段中 14 个在 gtsp 本体上 ACCEPT null，其中 `read_file.encoding` /
-    `grep_search.path` 等是 `len(path)==1` 的典型形态 ⇒ 豁免面对它们是对的。
-    """
+    唯一不能动的是 `len(error.absolute_path) != 1` 这一支直接返回 `False`；改完跑 `tests/unit/service/funcToolService/test_tool_schema_nullable_tsp.py`，判据表与两次打回的实测见 `docs/tech/12_common/tool_args_validation.md`。"""
 
     if error.instance is not None or error.validator not in ("type", "enum"):
         return False
@@ -382,28 +291,11 @@ def _describe(error: ValidationError) -> str:
 
 
 def _unwrap_nullable_any_of(error: ValidationError) -> ValidationError:
-    """把 `anyOf:[X, {"type":"null"}]` 的错误「降回」X 自身的错误，只为**保住文案**。
+    """把 `anyOf:[X, {"type": "null"}]` 的错误换回 X 自身的错误，只为保住报错文案。
 
-    ## 为什么需要这一步（#195 返工的 S1）
+    `Optional[Literal[...]]` 的值不合法时，报错会落在 `validator="anyOf"`，用户看到的是「不满足 anyOf 约束 [{...}, {...}]」，比原来的「只能取 ['TODO','ON_HOLD'] 之一」难读得多。`enum` 属于 `_NULL_SENSITIVE_KEYS`、不能压成 `type: [string, null]`（否则 enum 会咬住 null），所以 schema 里必须保留 anyOf 两支。
 
-    #195 之前 `Optional[Literal['TODO','ON_HOLD']]` 被剥成 `{"enum": [...], "type": "string"}`，
-    传非法值时 jsonschema 报 `validator="enum"` ⇒ 用户看到
-    「参数 status 只能取 ['TODO', 'ON_HOLD'] 之一」。
-
-    #195 之后 schema 保留 `anyOf:[{enum:...,type:string},{type:null}]`（`enum` 属
-    `_NULL_SENSITIVE_KEYS`，**不能**扁平化成 `type:[string,null]`，否则 enum 会咬住 null），
-    于是 jsonschema 改报 `validator="anyOf"` ⇒ 文案退化成
-    「不满足 anyOf 约束 [{'enum': [...], 'type': 'string'}, {'type': 'null'}]」，
-    **对模型和用户都更难读**。这是本单引入的可见退化，必须修掉。
-
-    ## 边界（别把它做成「吞掉 anyOf」）
-
-    - 只在 `validator == "anyOf"`、`validator_value` 恰好是两支、且**其中一支恰为
-      `{"type": "null"}`** 时展开 —— 这正是 `Optional[T]` 的形态；
-    - 多分支 `Union[str, int]`（三支、无 null）**不展开**，保留 anyOf 描述
-      —— 那种形态本来就没有「某个单一约束」可说；
-    - 展开只影响**文案**，错误码/排序/是否放行的判定都在外面，一字不动。
-    """
+    只在 `validator == "anyOf"`、恰好两支、且其中一支正是 `{"type": "null"}` 时展开；`Union[str, int]` 这种多分支不展开。展开只影响文案，是否放行由外层判。"""
 
     if error.validator != "anyOf":
         return error
@@ -438,37 +330,11 @@ def validate_tool_args(
     func: Optional[Callable[..., Any]] = None,
     schema: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """校验一次 tool call 的参数。
+    """校验一次 tool call 的参数：通过返回 `None`，不通过返回 `{"success": False, "error_code": "invalid_tool_args", ...}`。
 
-    Args:
-        tool_name: 工具名，仅用于日志与错误文案。
-        args: `json.loads(function_args)` 的结果（正常是 dict；模型给 `[]` / `5` 时也可能
-            不是 dict，那本身就该被 schema 的 `type: object` 拦下）。
-        func: 本地工具的可调用对象；给了就按身份缓存取 schema。
-        schema: 已解析好的 schema（TSP 远端路径用）。**给了就不再用 `func`**。
+    放不放行取决于 schema 从哪来：`func=` 的由本仓库生成、写清了能不能为 null，一律严格；`schema=` 的由对端提供、说不清，才用 `_is_ignorable_null` 放过单个参数整体为 null。看的是「有没有传 `schema`」，不是「字段是否必填」——把它收紧，`read_file{encoding: null}` / `grep_search{path: null}` 这种 gtsp 本体实测 ACCEPT 的写法会被整批拒掉（38 报的阻断项 B1）。
 
-    Returns:
-        通过返回 `None`；不通过返回结构化失败返回体
-        `{"success": False, "error_code": "invalid_tool_args", "message": <字段级>}`。
-        schema 不可用时也返回 `None`（warning 已由取 schema 的函数记过）。
-
-    ## null 豁免按「schema 来源」分流（#195 返工，38 B1 打回后定）
-
-    | 路径 | schema 来源 | null 豁免 |
-    | --- | --- | --- |
-    | 本地（`func=`）| 本仓库 `python_type_to_json_schema`（#195 起 TypeAdapter）| **不豁免**，严格 |
-    | 外部（`schema=`）| 调用方/对端传入（目前唯一调用方 `tspDriver._execute_tsp_tool`）| **保留** `_is_ignorable_null` |
-
-    依据：豁免成立的前提是「schema 表达不出 null 的合法性」。本地 schema 由 #195 后
-    已经能表达（`Optional[T]` → `type: [T, "null"]`），前提消失 ⇒ 严格。
-    外部 schema 的生成器不归本仓库管，实测 gtsp v0.4.19 的 39 个 property 里
-    **schema 含 null 的 0 个**，其中 26 个「非必填但无 null」中有 14 个在 gtsp 本体上
-    真的 ACCEPT null ⇒ 对它严格会**误杀对端合法写法**（`read_file{encoding: null}`、
-    `grep_search{path: null}` 基线放行、交付曾全拒，即 38 报的阻断项 B1）。
-
-    ⚠️ **分流按来源，不按「字段是否必填」。** 后者是本单的病根：必填与否决定「键能否
-    省略」，注解是否含 None 决定「值能否为 null」，两者正交。
-    """
+    改完跑 `tests/unit/service/funcToolService/test_tool_schema_nullable_tsp.py`；两条路径的分流表与参数语义见 `docs/tech/12_common/tool_args_validation.md`。"""
 
     # ⚠️ 分流依据必须是「schema 从哪来」，不能看「字段是否必填」。
     # `schema is None` 进来时才是本地路径（下面用 `func` 现取 schema）；

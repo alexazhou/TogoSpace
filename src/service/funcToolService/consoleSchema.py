@@ -1,33 +1,8 @@
-"""`console` 的 **schema 派生层**：把 legacy tool 的参数 JSON Schema 翻译成命令行形态。
+"""把 legacy tool 的 JSON Schema 翻译成命令行的样子：选项名、类型、是否必填，供 help 与解析共用。
 
-## 为什么需要这一层（而不是继续手写）
+手写一份 help 或选项白名单，等于把同一件事记了两遍，新增参数或改了名字，副本不会报错，任何用例也不会变红——`tools.py` 的函数签名和 docstring 才是模型看到的参数说明，`consoleTool.HELP_DETAIL` 这类手抄副本与它之间没有任何自动检查（`taskService` 的手抄 `clear_fields` 就出过同类问题）。
 
-#196 P2 的验收标准之一是「加一条新命令只改命令表一处；help 自动生成，有一致性护栏
-测试」。手写 help 与手写 `options` 白名单在两处各存一份事实：
-
-- `tools.py` 的签名/docstring 才是**模型看到的参数面**（`get_function_metadata` 生成的就是
-  下发给模型的 schema，同源）；
-- `consoleTool.HELP_DETAIL` / `consoleCommands.CommandSpec.options` 是手抄副本。
-
-副本与事实之间没有任何机械约束，于是「加了参数但 help 没写」「改了参数名但选项名没改」
-都不会让任何用例变红，只能靠人记得。`taskService` 曾有手写 `clear_fields` 副本遮蔽派生
-常量、变异自证照样红但红错理由（#181 现场）——同一类陷阱。
-
-所以本模块**只做一件事**：从 schema 单向派生。派生物一律运行时算，不做快照。
-
-## 为什么依赖延迟到函数内 import
-
-`consoleCommands` 的设计约束是「只依赖标准库，单元测试可脱离 DB 直接跑」。本层必须
-import `tools`（那里才有被 schema 化的函数本体），所以把 import 全部放进函数体：
-模块顶层仍然只有标准库，`import consoleSchema` 不会拉起任何 service 依赖。
-
-## 与 #189 校验层的分工（不重复造第二份校验）
-
-本层只回答「命令行怎么写这个参数」：叫什么、类型属于哪一类（integer / boolean /
-array / string / object）、是否必填。**不校验取值合法性**（枚举、正数范围、业务规则）——
-那是 #189 第 2 跳 schema 校验 + 服务层的职责。在这里再做一遍就是第二个行为源，
-扩枚举时会漂移（#187 裁定③的同一逻辑）。
-"""
+加参数只改 `tools.py`，别手抄进 `HELP_DETAIL` / `CommandSpec.options`，也别在本层校验值是否合法（那归 `#189`）；改完跑 `tests/unit/service/funcToolService/test_console_kebab_option.py`，背景见 `docs/tech/11_refactor/console_tool_review.md` 第五节。"""
 
 from __future__ import annotations
 

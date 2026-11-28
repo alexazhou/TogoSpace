@@ -1,22 +1,8 @@
-"""`console` 工具：命令行入口，只做**收集与拼接**（设计 §5）。
+"""`console` 工具的命令行入口：只做收集与拼接，不认识任何具体工具名。
 
-设计依据：`docs/design/2026-11-20-console-tool-metadata/console_tool_metadata_design.md`。
-本模块现在**不认识任何具体工具名**：
+所以这里不能按工具名写死分支，也不能留一张手抄的命令表——新增一条命令就得改两处，help 与解析各走一套。命令由 `@tool(console=ConsoleCommand(...))` 声明、`consoleRegistry.get_table()` 派生，help 的用法与参数也全部派生，只补 `ToolSpec.help` / `ConsoleCommand.help`。
 
-| 旧实现 | 现实现 |
-| --- | --- |
-| `consoleCommands.COMMAND_SPECS`（手抄命令表） | `consoleRegistry.get_table()`（由 `@tool(...)` 派生） |
-| 5 个 verb 处理器（LIST / GET / SAVE / DELETE / DIRECT） | **一条四步流水线**（§5.1） |
-| `_HELP_OVERLAY` 按 key 手抄 + 各命令的定位特判 | help 纯拼接：用法/用途/参数全部派生，只补 `ToolSpec.help` / `ConsoleCommand.help` |
-
-保留的手写部分只剩三类，都是「命令表里推不出来的东西」：
-1. **全局用法说明**（重复选项、CSV / JSON 等价、`--from payload` 契约）；
-2. **错误格式**（`ConsoleError` 的 code / message / example）；
-3. **类型转换**（正整数收敛、CSV 拆分、JSON 字面量解析、布尔解析）。
-
-`_HELP_OVERLAY` 仍是手写补充说明（P2 #317 已逐条收拢过）：**它的判定口径、剩余条目
-为什么不搬进 `@tool(help=...)` / `ConsoleCommand(help=...)`、以及「复述」按什么口径判
-—— 全部见该常量定义处的注释**，本模块与 `toolSpec` 都不再讲第二遍。
+要手写的只有派生不出来的三类：全局用法说明、`ConsoleError` 的 code/message/example、类型转换（正整数、CSV、JSON 字面量、布尔）。设计见 `docs/design/2026-11-20-console-tool-metadata/console_tool_metadata_design.md` §5.1 / §5.3。
 """
 
 from __future__ import annotations
@@ -100,34 +86,10 @@ def _build_help_summary(specs: Optional[tuple[registry.ResolvedCommand, ...]] = 
 _CLEAR_FIELDS_PLACEHOLDER = "{ALLOWED_CLEAR_FIELDS}"
 
 
-#: 手写补充说明：**只放「命令级事实」** —— 参数清单 / 用法行 / 用途行里推不出来的那些。
+#: 这张表只放「命令级事实」：参数清单与用法行里推不出来的那些。
 #:
-#: 判定口径（P2 收拢时逐条过的，来源：设计 §5.3 + 审计报告 §7 + #317 报告 §2）：
-#: 1. **参数清单已经标注的**（必填/可选、参数名、类型、形态、别名、参数级语义）⇒ 不复述。
-#:    「是否重复」以**渲染出来的 help 文本**为准，不是以语义等价为准：例如 `dept create`
-#:    的四个必填参数在清单里已标（必填），overlay 再写「新建必须给 --name / …」就是把同一
-#:    件事说两遍；反过来 `dept update` / `agent update` 的数组参数描述只说「省略表示保持
-#:    现值」，「出现即全量替换」这句在它们的渲染文本里并没有出现过，所以保留。
-#: 2. **命令级语义**（错误码、服务层拒绝条件、PATCH 之外的副作用）⇒ 保留：schema 里没有
-#:    对应字段，命令表也推不出来。
-#: 3. **跨命令指引**（「改已有 X 请用 Y」）⇒ 保留：它描述的是命令之间的关系，不属于任何
-#:    单条 schema。
-#: 4. **全局规则**（重复选项、CSV / JSON 等价）⇒ 正本在 `help` 摘要（见
-#:    `_build_help_summary`），本表**不再重复**。
-#:    例外：判定不是纯语义题，还要看**已有契约**——`task update` 的「数组型选项可重复
-#:    出现 / 标量重复报 duplicate_option」虽与摘要重复，但 `test_console_meta` 钉着它
-#:    必须出现在该命令的 help 里（#187-④），删了就红；同理 `task create` 的「返回体
-#:    hint 会再提醒一次」被 `test_console_usability_pack` 钉着。这类冲突以用例为准，
-#:    要删先改用例（本单不碰）。
-#:
-#: 剩余条目为什么不搬进 `@tool(help=...)` / `ConsoleCommand(help=...)`：设计 §5.3 给了那个
-#: 归宿，但剩下这些要么横跨同一工具的多条命令（`dept ls` / `dept get` 共用
-#: `get_dept_info`），要么描述服务层行为（`DEPT_HAS_CHILDREN`、`no_update_action`），
-#: 按「命令 key 索引」放在一张表里比拆散进十几处工具声明更贴它们的实际归属。两种落点对
-#: help 输出没有差别（同一段文本换个存放位置，渲染顺序也不变），所以本单没有为此搬迁：
-#: 搬到 `@tool(help=...)` 要改十几处工具声明，收益只是「按设计放到名义上更对的地方」。
-#:
-#: **只许放「补充」，不许放参数清单**：放进去就等于又抄了一份事实。
+#: 算不算重复，以渲染出来的 help 文本为准，不看两句话意思是否接近：把已经渲染出来的内容再写一遍，help 里同一件事就出现两次；反过来删表里已有的条目，`test_console_meta` / `test_console_usability_pack` 会变红。全局规则（重复选项、CSV / JSON 等价）的正本在 `_build_help_summary`，这里不重复。
+#: 加条目只写四类：错误码、服务层拒绝条件、PATCH 之外的副作用、跨命令指引（「改已有 X 请用 Y」）。为什么不搬进 `@tool(help=...)` 见设计 §5.3。
 _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     # 服务层拒绝条件 + 跨命令指引（后者见口径 3）。
     "dept create": (

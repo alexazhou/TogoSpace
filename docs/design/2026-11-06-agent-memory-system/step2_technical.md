@@ -325,3 +325,27 @@ frontend/
    - `GET /agents/<id>/memories.json` 接口返回与 `clear_agent_data` / `clear_team_data` 清理联动验证。
 3. **前端组件测试（`frontend/src/components/agent/__tests__/`）**：
    - `AgentActivityDialog` 切换至「记忆」Tab 正常加载并展示活跃/归档记忆列表、星标标识与点击展开正文。
+
+### 7.3 手动 compact 的 HTTP 接口与错误映射
+
+> 本节是 `src/controller/agentController.py` 中 compact 视图类 docstring 的原文搬迁（2026-11-25，#359 压缩注释：类 docstring 从 30 行压到 5 行）。
+
+接口：`POST /agents/<agent_id>/compact.json` —— 手动触发上下文压缩。
+
+| 情形 | 状态码 | `error_code` |
+|---|---|---|
+| Agent 未装载进内存 | 400 | `agent_not_loaded` |
+| Agent 正在执行（ACTIVE） | 400 | `agent_is_active` |
+| 已有一次手动压缩在进行 | 400 | `compact_in_progress` |
+| 无可压缩历史 | 400 | `no_compactable_history` |
+| LLM 失败 / 摘要为空 / 其他 | 500 | （原样透出） |
+
+**前四种是业务拒绝转 400，其余异常必须仍是 500。**
+
+没有 `agent_not_found` 这一行：运行时「不存在」与「未装载」**不可区分** —— 两者都查内存 `_agents`，`get_agent_or_none` 都返回 None。补一条 SQL 查库的判断只会造出一个永远进不去的假分支，所以统一归到 `agent_not_loaded`。
+
+「无可压缩历史」走 `NoCompactableHistoryError` 类型判断而不是匹配异常文案：文案改一个字就静默失效，而它决定的是「400 业务提示」还是「500 故障」，这个分支不该建在错误字符串上。`CompactInProgressError` 同理。
+
+**副作用须知**：`_execute_compact` 在判定「无可压缩」前**已经写了一条 COMPACT 活动并置 FAILED**（`agentTurnRunner.py` 里 `add_activity` 在前、`build_plan` 在后）。这条活动保留不动 —— 它准确记录了「用户点了压缩、系统判定没得压」，删掉反而让面板少一条真实轨迹。
+
+**压缩不可取消**：手动压缩全程不碰 `status`（保持 IDLE），所以此刻点「停止」会拿到 `agent_not_active` —— 如实回答（确实没有 turn 可取消），不是回归。中途打断会留下「摘要已插库但内存未裁剪」的半成品，比让它跑完更危险；本单不提供取消能力，前端按钮在压缩期间禁用。

@@ -654,30 +654,11 @@ async def _handle_depends_on_change(
     depends_on: Sequence[int],
     note: str,
 ) -> dict:
-    """`update_task` 的「仅依赖变更」路径。
+    """`update_task` 的「仅依赖变更」路径：三态、权限与状态联动都在这里判。
 
-    **三态语义**（由调用方按 `depends_on is not None` 判定是否进入本函数）：
-    - 省略 = 不改（不会走到这里）；
-    - `[]` = **清空依赖**；
-    - `[1, 2]` = **整体替换**（不是增量追加）。
+    `None` 是不改、`[]` 是清空、`[1, 2]` 是整体替换——把 `depends_on=[]` 当成「没提供」，清空依赖就失效。只有任务创建人能改：允许执行人改，他就能自己拆掉「依赖未满足不能开工」这道闸门。校验全部在写库前做完，任一失败原列表一字未动，不留半改。
 
-    权限：**只有任务创建人**能改依赖。执行人不能给自己解绑依赖（否则
-    「依赖未满足不能开工」这条闸门可以被执行方自行拆除）；验收人同理。
-
-    校验全部在**写库之前**完成（形态收口 → 存在性/同团队 → 环，自依赖视为「长度 1 的环」），
-    任一失败即返回错误，保证「拒绝后依赖列表一字未变」（不留半改）。
-
-    错误码（小马哥 2026-11-17 00:51 命名口径，全部 `task_depends_on_*` 前缀）：
-    `task_depends_on_not_creator` / `task_depends_on_invalid_input` /
-    `task_depends_on_invalid_target` / `task_depends_on_cycle`（自依赖与直接环、间接环合并）/
-    `task_depends_on_terminal`。
-
-    状态联动：
-    - 依赖已全部 DONE（或已清空）且任务为 `PENDING` ⇒ `TODO`（与创建时推导一致）；
-    - 存在未完成依赖且任务为 `TODO` ⇒ 回退 `PENDING`（TODO 尚未认领，回退无在途代价；
-      **这是超出需求字面的一处加固**：若不回退，TODO 任务仍可被 claim 绕过依赖闸门）；
-    - 任务已 `IN_PROGRESS` / `REVIEWING` ⇒ **状态不变**（回退会中断在途工作），
-      但事件里如实记录「当前存在未完成依赖」。
+    错误码统一 `task_depends_on_*`（not_creator / invalid_input / invalid_target / cycle / terminal），自依赖按长度 1 的环处理；`TODO` 任务加上未完成依赖要回退 `PENDING`，`IN_PROGRESS` / `REVIEWING` 只记事件不改状态。
     """
     old_status = task.status
     reason = (note or '').strip()
@@ -1685,27 +1666,11 @@ async def update_task(
     reassign_stage: Optional[dict] = None,
     depends_on: Optional[Sequence[int]] = None,
 ) -> dict:
-    """更新协作任务：流转状态 / 交棒打回 / 调整节点链 / 追加评论 / 修改验收人 / 修改依赖。
+    """更新协作任务：流转状态 / 交棒打回 / 调整节点链 / 追加评论 / 改验收人 / 改依赖。
 
-    **意图互斥**：`new_status`（状态流转，非自环）、`workflow_action`、
-    `append_stages` / `remove_stage_index` / `reassign_stage`、验收人变更、
-    依赖变更，这几类意图**只能出现一类**，同时给多个返回 `error_code="ambiguous_task_update"`
-    （避免「一次调用里既交棒又换人」这种无法审计的原子动作）。
+    五类意图只能出现一类，同时给多个返回 `ambiguous_task_update`——一次调用里既交棒又换人，事后查不出到底发生了什么。`depends_on` 的三态是 `None` 不改、`[]` 清空、`[1, 2]` 整体替换。
 
-    `depends_on` 的三态（**调用方必须区分**）：
-    - 省略（`None`）= 不改依赖；
-    - `[]` = **清空依赖**（显式意图，不是「未提供」）；
-    - `[1, 2]` = 整体替换为新依赖列表（不是增量追加）。
-
-    v3 新参数（step1 §5.2）：
-    - `workflow_action="advance"`：交棒给下一节点（末节点则整单 DONE）；
-    - `workflow_action="reject"` + `target_stage=t`：打回任意前序节点（`note` 必填）；
-    - `append_stages=[...]`：后置加签（追加节点）；
-    - `remove_stage_index=i`：删除未开始的 `EXECUTION` 节点（`REVIEW` 节点禁删）；
-    - `reassign_stage={"stage_index": i, "owner_id": x}`：节点换人。
-
-    单任务写操作按 `task_id` 加进程内互斥锁（step2 §6.1），保证同一任务不会被
-    并发双推；锁内再走单事务，跨进程由数据库事务兜底。
+    v3 的 `workflow_action=advance/reject`、`append_stages`、`remove_stage_index`（`REVIEW` 节点禁删）、`reassign_stage` 按 step1 §5.2；写操作按 `task_id` 加进程内互斥锁，锁内单事务。
     """
     lock = _task_lock(task_id)
     async with lock:
@@ -2328,34 +2293,11 @@ async def list_tasks(
     mine: bool = False,
     include_upcoming: bool = False,
 ) -> dict:
-    """查询协作任务列表。
+    """查询协作任务列表：返回 `tasks`、`count`（本页条数）、`total`（符合条件的总数，跨页）。
 
-    返回 `tasks`（本页，高优先级优先）、`count`（本页条数）、
-    `total`（**符合条件的任务总数**，跨页、不受 `limit` 影响）——
-    `total > count` 即说明还有更多任务被 `limit` 截断。`limit` 会原样回显
-    （工具层已收敛过范围，这里回显的是**实际生效值**）。
+    `total > count` 才表示被 `limit` 截断。`status` 列表里混进非法值要整体报错并列出全部非法项，静默丢弃会让调用方拿到看起来正常、其实被悄悄缩小的结果集；部门树缺失时 `scope="team"` 退化为只看自己，并显式带上 `scope_degraded=True`，否则调用方会以为拿到了全团队数据。
 
-    `status` 接受**单值或列表**（单值 `"TODO"` / 列表 `["TODO","DONE"]`），
-    大小写不敏感。列表里只要有非法值就**整体报错**并把非法项全列出来——
-    不静默丢弃后返回一个看起来正常的子集（静默降级正是这里要避免的）。
-
-    `title_keyword` 按**任务标题**过滤：大小写不敏感子串匹配，`None` 表示不按标题
-    过滤；空串/纯空白由工具层拦掉（`LIKE '%%'` 会匹配全部，等于静默取消过滤）。
-
-    `order` 是排序口径，**默认 `ORDER_PRIORITY_FIRST` 与新增该参数前完全一致**
-    （Web 列表接口依赖它）：`ORDER_PRIORITY_FIRST` = 优先级优先、同级 id 升序；
-    `ORDER_ID_DESC` = 最新在前（Agent 侧用）。非法值由 DAL 抛 `ValueError`。
-
-    `scope` 是**过滤条件**（与 assignee / reviewer 并列，三者至少给一个，工具层入口检查）：
-    - `None`（默认）：不加范围过滤——保持历史行为，Web 列表接口依赖它拿全团队数据；
-    - `"self"`：与我相关 = 我执行 **OR** 我验收，等价 `agent_ids=[caller_id]`；
-    - `"team"`：我可见范围（Root Leader 全团队 / 部门主管 自己+子孙部门），
-      无管理视角且没给精确过滤器时返回 `error_code="scope_not_permitted"`
-      （**不静默降级为自己**，否则调用方会误以为拿到全团队数据）。
-    与 assignee / reviewer 同传时：先按 scope 算范围、再叠加精确过滤（AND）。
-    唯一例外：`scope="team"` 但调用者没有管理视角、又给了精确过滤器 ⇒ 忽略 scope
-    按过滤器查（「成员查自己的任务」不该无条件报错）。
-    部门树缺失时 `scope="team"` 退化为只看自己，并显式返回 `scope_degraded=True`。
+    `order` 默认 `ORDER_PRIORITY_FIRST`（Web 列表接口依赖它），`title_keyword` 的空串与纯空白要拦掉（`LIKE '%%'` 会匹配全部），无管理视角又没给精确过滤器时返回 `scope_not_permitted`。
     """
     if scope not in (None, 'self', 'team'):
         return {

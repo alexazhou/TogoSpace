@@ -591,26 +591,9 @@ class AgentHistoryStore:
     def build_compact_plan(self) -> CompactPlan | None:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
 
-        压缩区间选取逻辑：
-        1. 若尾部存在 pending infer 占位，先排除占位
-        2. 从尾部跳过连续的 USER 消息（保留最新用户输入）
-        3. 若保留区之前存在未完成的 tool_call 尾巴，则从该 assistant(tool_call) 起整体保留
-        4. 压缩更早的稳定前缀
+        直接从头压会把最新的用户输入一起压掉，或者把未完成的 tool_call 尾巴截断在中间，压缩完第一轮推理就少上下文。所以从尾部先去掉 pending infer 占位、跳过连续的 USER 消息，遇到未完成的 tool_call 尾巴就连它一起保留，只压更早的稳定前缀。
 
-        示例：
-            [USER: u1, ASSISTANT: a1, USER: u2]
-                                   ^-- 跳过 u2
-            压缩 [USER: u1, ASSISTANT: a1]
-
-            [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1, USER: u2]
-                                   ^------------------------^-- 未完成 tool_call 尾巴 + 最新 USER 一并保留
-            压缩 [USER: u1]
-
-            [USER: u1, ASSISTANT: a1] → 末尾不是 USER，压缩全部
-
-        返回：
-            - source_messages: 待压缩的消息列表
-            - insert_seq: COMPACT_SUMMARY 的插入位置
+        返回 `source_messages`（待压缩）与 `insert_seq`（插入位置）；改选中规则前先跑 `tests/unit/service/agentService/test_build_compact_plan.py`。
         """
         self._assert_compact_invariant()
         items = list(self._items)

@@ -108,25 +108,11 @@ class Arg:
 
 @dataclass(frozen=True)
 class ConsoleCommand:
-    """工具挂到 console 上的一条子命令。
+    """工具挂到 console 上的一条子命令声明。
 
-    Attributes:
-        resource: 资源词（`dept` / `task`）；顶层命令直接填命令名（如 `reload`）。
-        action: 动作词：单个 `str` 或元组（首个为主名用于 help 展示，其余为别名，
-            如 `("rm", "remove")`）；顶层命令留空 `""`。
-        args: 位置槽与别名声明；未列出的函数参数默认作为 `--选项` 自动暴露。
-        payload: 是否接受整包 JSON（尾部内联 `'<json>'` 或 `--from payload`）。
-        help: 命令级 help 补充（只进 console help，不进模型 schema）。
-        exclude: 该命令**不暴露也不要**的工具参数名（D1=A / #323）。一工具多命令时用它
-            裁剪参数子集：被排除的参数既不出现在 help 参数清单里，也不在解析白名单里
-            （传了就是 `unknown_option`）。只能排除**未声明且非位置槽**的 schema 参数
-            —— 位置槽要收窄请改 `Arg.required`。
-        locators: 同一组**互斥定位参数**（#334 / C-16 家族）。列出的工具参数属于同一
-            定位语义，调用时**最多一个来源**（位置槽 / `--选项` / payload 三处合起来计数）：
-            同时给出 >1 个就在入口报 `ambiguous_input_source`，不再让底层 `if id is not None`
-            静默丢掉另一个。只对「真的支持二选一」的命令声明（如 `dept rm` / `room rm` 的
-            `<id>` 与 `--name`）；单一必填定位（`dept get <id>`）不要声明——它的 `--name`
-            已在 #323 裁剪掉，写了也没人传得进来。
+    `args` 里的位置槽与别名决定参数怎么暴露，未列出的函数参数默认成为 `--选项`，所以 `exclude` 只能排除「未声明且非位置槽」的 schema 参数（要收窄位置槽就改 `Arg.required`），用错地方本该能传的参数会变成 `unknown_option`。`locators` 该声明而不声明时，`dept rm <id> --name x` 这种同时给两个来源的调用会被底层 `if id is not None` 静默丢掉一个。
+
+    只在真支持二选一的命令上声明 `locators`（如 `dept rm` / `room rm` 的 `<id>` 与 `--name`），单一必填定位不要声明；`action` 首个为主名、其余为别名。
     """
 
     resource: str

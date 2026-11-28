@@ -1,41 +1,8 @@
-"""前端日志桥（#197）：把前端 console 日志收下来写进后端本地文件。
+"""接收前端 console 日志，写进 `{STORAGE_ROOT}/logs/backend/frontend/frontend.log`。
 
-## 为什么需要
+开关关着的机器上会凭空多出一个空的 `frontend.log`，所以建文件只能发生在「开关确认打开、且确实有一条要写」之后：`RotatingFileHandler` 一构造就会建文件，不能在 `init_backend_logger` 阶段就挂。前端的开关只用来省流量，真正决定写不写盘的是后端的 `TOGOSPACE_FRONTEND_DEBUG`——只信前端自觉的话，任何能连上 ws 的客户端都能往磁盘写日志。
 
-前端（桌面端 / 浏览器）运行时的 log 拿不到、无法落库，排查前端问题只能靠人肉看
-devtools。本模块让后端把前端日志落成本地文件，事后可取。
-
-## 开关（两道，缺一不可）
-
-1. **环境变量 `TOGOSPACE_FRONTEND_DEBUG`**（与 Tauri 外壳注入 `window.tgconfig.frontendDebug`
-   用的是同一个变量）：**后端**据此决定是否真的写盘。`/system/status.json` 也把它暴露成
-   `frontend_debug` 字段，前端据此决定是否发送。
-2. 前端侧还有自己的判断（`desktopLog.ts` 的 `debugForwardingEnabled()`）。
-
-**为什么后端必须再判一次**：只靠前端自觉等于没有门控 —— 任何能连上 ws 的客户端都能
-往盘上写。后端这一道是真正的闸门，前端那道只是省流量。
-
-## 写什么、不写什么
-
-- `warn` / `error` **和** `log` 都接收（开关打开时全量才有排查价值），级别由前端报文带上来。
-- 单条消息在**后端**再截断一次（`MAX_MESSAGE_CHARS`）：不信任客户端，防止一条超长日志
-  把文件撑爆。
-- 单条长度、总量上限由既有 `RotatingFileHandler`（100MB × 3）承担，不新造轮子。
-
-## 文件何时出现
-
-**首条日志落盘时才创建**（`logUtil` 里该条目带 `lazy=True`，不在
-`init_backend_logger` 阶段建文件）。原因很直接：`RotatingFileHandler` 一构造就建
-文件，若在启动时就挂上，开关关着的机器上也会凭空多出一个空 `frontend.log` ——
-而交付标准要求「开关关闭时无该文件」。所以建文件这件事只能发生在
-「开关已确认为开 + 确实有一条要写」之后。
-
-## 时间戳
-
-前端报文可以带 `ts`（浏览器侧 `Date.now()`），写盘时**两者都留**：后端收到的时间
-（writer 的 `asctime`）用来对齐后端其他日志，前端时间用来判断「是前端卡住了还是后端
-收晚了」——这类差异恰恰是排查白屏/卡顿的关键，只留一个就看不出来了。
-"""
+改这里时保持 `logUtil` 里那条 `lazy=True`，改完跑 `tests/unit/util/test_frontend_log.py`；两道开关、单条截断与时间戳见 `docs/tech/08_debugging/frontend_log_bridge.md`。"""
 
 from __future__ import annotations
 
