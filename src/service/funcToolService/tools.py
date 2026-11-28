@@ -105,10 +105,10 @@ async def web_search(query: str, _context: ToolCallContext = None) -> ThirdParty
 
 @tool(visibility=ToolVisibility.TOOL_ONLY)
 async def webfetch(url: str, _context: ToolCallContext = None) -> dict:
-    """读取网页正文转成 Markdown。
+    """读取网页正文转成 Markdown，用于深入阅读搜索到的页面内容。
     不执行 JavaScript：SPA 只拿空壳，别反复重试同一地址。
     内网/本机地址会被拒（fetch_blocked_host）。
-    不解析 PDF/Office/图片；超 100000 字符截断并注明原文长度。
+    不解析 PDF / Office / 图片；超 100000 字符截断并注明原文长度。
 
     Args:
         url: 要读取的网页地址，必须是 http 或 https 的绝对地址。

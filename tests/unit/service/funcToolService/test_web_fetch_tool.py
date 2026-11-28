@@ -593,27 +593,23 @@ def test_webfetch_description_is_compact_and_keeps_deciding_info():
 
     两条判据必须成对：只钉体积，把文案删空也是绿；只钉必留项，重新写回 700 字也是绿。
 
-    体积两个口径都钉（`#388` 的改前数字 773 与 667 是同一段文案的两种量法）：
-    - 模型可见口径 `get_function_metadata()["description"]`（不含 `Args:` 段与缩进）：667
-    - 文件里原始 docstring 口径 `callable.__doc__`（含 `Args:` 段与缩进）：773
-
-    本单起点 `6c14eb96` 上这两个数是 764 / 878（#387 的文案比 `0.6_dev` 长）。
+    体积只钉**模型可见口径** `get_function_metadata()["description"]`（≤200）：
+    这才是模型收到的字。`callable.__doc__`（含 `Args:` 段与缩进）与它不是同一个量，
+    `Args:` 段进 schema 的结构化参数说明、不在 description 里，**不作判据**
+    （主管 12:06 在 #388 上定的口径；报数可以两个都给）。
+    改前：模型可见 667（`294e55a0`）/ 764（本单起点 `6c14eb96`），含 Args 的原文 773 / 878。
     """
     description = _webfetch_description()
     assert len(description) <= 200, (
         f"webfetch description 已膨胀到 {len(description)} 字符（上限 200）：\n{description}"
     )
 
-    raw_doc = get_func_tool("webfetch").callable.__doc__ or ""
-    assert len(raw_doc) <= 200, (
-        f"webfetch 原始 docstring 已膨胀到 {len(raw_doc)} 字符（同口径上限 200，"
-        f"含 `Args:` 段与缩进）：\n{raw_doc}"
-    )
     for phrase, why in (
         ("Markdown", "①用途：返回的是 Markdown 正文"),
+        ("用于深入阅读", "①用途：搜完该读的行为提示"),
         ("不执行 JavaScript", "②不跑页面脚本"),
         ("反复重试同一地址", "②SPA 空壳时别反复重试同一地址"),
-        ("PDF/Office/图片", "③不解析 PDF/Office/图片"),
+        ("PDF / Office / 图片", "③不解析 PDF / Office / 图片"),
         ("100000", "④正文截断阈值"),
         ("原文长度", "④截断后末尾注明原文长度"),
         ("fetch_blocked_host", "⑤内网 / 本机地址被拒"),

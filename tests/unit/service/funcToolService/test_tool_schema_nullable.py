@@ -852,7 +852,16 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 # `webfetch.description` 一段文字（`tests/fixtures/tool_schema_snapshot.json` 的 diff
 # 也只有这一行）；复核方式：在 `6c14eb96` 上现算结构并 diff，变化的工具只有
 # `['webfetch']` 且 `description 变=True / required 变=False / params 变=False`。
-BASELINE_TEXT_DIGEST = "b1e55e0b6824159f5de52df227ce00b4b3a428338ece9ebf7a38e29b90e999f5"
+# #388 重算（`5d00a775…` → `faa529c2…`）：webfetch 的工具说明瘦身，**判据只认模型可见口径**
+# 764 → 144 字符（`294e55a0` 667 / 本单起点 `6c14eb96` 764 → 144；含 `Args:` 段与缩进的
+# 原始 docstring 只是报数 773 / 878 → 218，不作判据）。删掉重定向次数 / 超时 / 5MB / UA /
+# 返回字段名 / 7 个 error_code 全列 / 导航残留提示，保留「用途（含用于深入阅读）、不跑 JS
+# 与 SPA 空壳别反复重试、不解析 PDF / Office / 图片、超 100000 字符截断且注明原文长度」
+# 并新增「内网 / 本机地址会被拒」。**工具数 49 / 参数数 163 / required 全部不变**，只动
+# `webfetch.description` 一段文字（`tests/fixtures/tool_schema_snapshot.json` 的 diff
+# 也只有这一行）；复核方式：在 `6c14eb96` 上现算结构并 diff，变化的工具只有
+# `['webfetch']` 且 `description 变=True / required 变=False / params 变=False`。
+BASELINE_TEXT_DIGEST = "faa529c2a1eeaa14cf5761471c209a6b11b9611835793c4640e03a5d4d7e2d55"
 
 
 def _text_digest() -> tuple[str, int, int]:

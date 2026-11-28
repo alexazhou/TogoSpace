@@ -1761,7 +1761,7 @@
     ]
   },
   "webfetch": {
-    "description": "读取网页正文转成 Markdown。\n不执行 JavaScript：SPA 只拿空壳，别反复重试同一地址。\n内网/本机地址会被拒（fetch_blocked_host）。\n不解析 PDF/Office/图片；超 100000 字符截断并注明原文长度。",
+    "description": "读取网页正文转成 Markdown，用于深入阅读搜索到的页面内容。\n不执行 JavaScript：SPA 只拿空壳，别反复重试同一地址。\n内网/本机地址会被拒（fetch_blocked_host）。\n不解析 PDF / Office / 图片；超 100000 字符截断并注明原文长度。",
     "parameters": {
       "url": {
         "description": "要读取的网页地址，必须是 http 或 https 的绝对地址。",
