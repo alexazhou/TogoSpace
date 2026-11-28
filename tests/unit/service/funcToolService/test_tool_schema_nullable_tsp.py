@@ -26,6 +26,11 @@ gtsp v0.4.19（`assets/execute/gtsp/gtsp-darwin-arm64`，md5 `b32f5cdc…`）`sc
 交付「26/26 全拒」就是 B1。而直连 gtsp 本体实测 14/26 **ACCEPT** null
 （`read_file.encoding`、`grep_search.path` 等）⇒ 严格校验打死了对端合法写法。
 
+**v0.6.0 重评（#391）**：同一个判据重跑一遍新二进制 —— 11 工具 / **43** property、
+**30 个**「非必填但 schema 无 null」字段（新增的 4 个来自 `process_output`），
+仍然 **0 个 default、0 个 null 分支**；直连实测这 4 个新参数也接受 null。
+所以「保留豁免」的理由没变，名单 26 → 30（依据见 `_GTSPS_NULL_CASES` 上方注释）。
+
 ### 反面：豁免恢复不能把 H1/H2 一起放回来
 
 所以本文件里除了「26 个放行」，还并列了「根节点 null 仍拒 / 元素级 null 仍拒 /
@@ -58,8 +63,22 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 #: 保证快照没腐化。
 _GTSPS_SCHEMA_FIXTURE = _REPO_ROOT / "tests" / "fixtures" / "gtsp_tool_schema.json"
 
-#: 38 报的 B1 名单：gtsp 11 工具中「非必填但 schema 无 null」的 26 个字段。
+#: 38 报的 B1 名单：gtsp 11 工具中「非必填但 schema 无 null」的字段。
 #: 写死作**外部锚点**（从 schema 现算会跟着被测代码一起漂移）。
+#:
+#: **v0.6.0 重评（#391）**：26 → 30。gtsp v0.5.0 是 11 工具 / 39 property / 26 个此类字段；
+#: v0.6.0 升到 11 工具 / **43** property（`process_output` 新增 4 个可选参），这 4 个
+#: 全部「非必填 + schema 无 null」，按本名单的定义必须并入，否则豁免面会出现 4 个
+#: 无判据的洞。依据（都可复现）：
+#:  1. `gtsp-* schema -o` 实测：4 个新参数 `type` 分别为 `integer` / `integer` /
+#:     `integer` / `boolean`，无一含 null 分支；`process_output.required` 仍只有
+#:     `["process_id"]`；
+#:  2. 直连 gtsp v0.6.0 实测（`pytspclient` 走 stdio，`process_id=proc_nope`）：
+#:     4 个参数分别传 `null` ⇒ 全部越过参数校验、走到执行层报
+#:     `[resource/not_found] process "proc_nope" not found`（与 `block: null` 同形）；
+#:     改传错误类型（`stdout_offset="abc"` / `include_output="yes"`）⇒ 报
+#:     `[protocol/invalid_params] invalid unmarshal…`。⇒ 对端**接受 null、拒绝错类型**，
+#:     正是 B1 的判定依据（我们的严格校验若拒 null 就是误杀对端合法写法）。
 _GTSPS_NULL_CASES: list[tuple[str, str]] = [
     ("list_dir", "depth"),
     ("list_dir", "ignore_patterns"),
@@ -87,6 +106,11 @@ _GTSPS_NULL_CASES: list[tuple[str, str]] = [
     ("execute_bash", "timeout_action"),
     ("process_output", "block"),
     ("process_output", "timeout"),
+    # ↓ v0.6.0 新增（#391 重评，依据见名单上方注释）
+    ("process_output", "stdout_offset"),
+    ("process_output", "stderr_offset"),
+    ("process_output", "tail_lines"),
+    ("process_output", "include_output"),
 ]
 
 
@@ -236,8 +260,8 @@ def test_null_policy_is_decided_by_schema_source_not_by_requiredness() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_gtsp_real_schema_accepts_null_for_all_26_fields(gtsp_schemas) -> None:
-    """用**真实 gtsp schema**（非手造）逐个覆盖 B1 名单的 26 个字段 ⇒ 全部放行。
+def test_gtsp_real_schema_accepts_null_for_all_listed_fields(gtsp_schemas) -> None:
+    """用**真实 gtsp schema**（非手造）逐个覆盖 B1 名单的每个字段 ⇒ 全部放行。
 
     手造 schema 发现不了 B1（首版那条用例就是手造的、断言「必拒」，把错误行为钉成了
     期望值）。这里的数据来自 `gtsp-* schema -o`，是**外部锚点**。
@@ -246,9 +270,14 @@ def test_gtsp_real_schema_accepts_null_for_all_26_fields(gtsp_schemas) -> None:
     - 基线 `e2d63303`：26/26 放行；
     - 首版交付 `2b90245b`：**26/26 全拒**（B1 就是这里暴露的）；
     - 本版：26/26 放行。
+
+    #391（gtsp v0.6.0）：名单 26 → **30**，新增的是 `process_output` 的 4 个可选参。
+    它们不是「顺便加两条让它绿」——是 v0.6.0 schema 实测多出 4 个「非必填且无 null」字段，
+    且直连 gtsp 实测接受 null（依据见 `_GTSPS_NULL_CASES` 上方注释）。少列一个，
+    那条参数被严格校验拒掉时无人发现。
     """
 
-    assert len(_GTSPS_NULL_CASES) == 26
+    assert len(_GTSPS_NULL_CASES) == 30
 
     failures: list[str] = []
     for tool_name, field in _GTSPS_NULL_CASES:
@@ -279,7 +308,7 @@ def test_gtsp_schema_really_cannot_express_null(gtsp_tools) -> None:
             if "null" in types:
                 null_expressible.append(f"{tool['name']}.{name}")
 
-    assert total_props == 39, total_props
+    assert total_props == 43, total_props
     assert null_expressible == [], f"gtsp schema 已能表达 null，分流理由需重估：{null_expressible}"
 
 

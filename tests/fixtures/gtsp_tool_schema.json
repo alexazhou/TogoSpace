@@ -1,13 +1,14 @@
 {
  "__provenance__": {
-  "binary_md5": "ae2e8f575857c8601e5c0e8088827f7b",
-  "dumped_at": "2026-11-15",
-  "gtsp_version": "v0.5.0",
+  "binary_md5": "9b4928a125d19e004cb2baef0ce70767",
+  "dumped_at": "2026-11-28",
+  "gtsp_version": "v0.6.0",
   "note": "真实远端 schema 快照；不由本仓库生成器产出",
   "source": "assets/execute/gtsp/gtsp-darwin-arm64 schema -o"
  },
  "tools": [
   {
+   "name": "list_dir",
    "description": "- Efficiently explores file system structure\n- Supports recursive listing with depth control\n- Default ignores common build/cache directories: .git, .venv, node_modules, __pycache__, .mypy_cache, dist, build, etc.\n- Pass ignore_patterns to add extra exclusions, or leave empty to use defaults only\n- Returns metadata like size, modification time, and type\n- Results are limited to 50 items by default; set limit to get more. If truncated=true, narrow your query\n- Use this tool when you need to understand the directory structure or find files in a specific path",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -41,10 +42,10 @@
      "dir_path"
     ],
     "type": "object"
-   },
-   "name": "list_dir"
+   }
   },
   {
+   "name": "read_file",
    "description": "- Reads and returns the content of a specified file\n- Supports line-based slicing for reading specific portions of large files\n- Full reads of files larger than 25KB are truncated to the first ~1KB of content and marked with 'truncated: true' (plus a notice); use 'start_line'/'end_line' or 'grep_search' to page through large files\n- Detects and rejects binary files for safety\n- Each content line is prefixed with its 1-based line number (e.g. \"   12│code\") for reference\n- When using 'edit', provide the exact text WITHOUT the line-number prefix\n- Use this tool when you need to read the contents of a file to understand its logic or data",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -71,10 +72,10 @@
      "file_path"
     ],
     "type": "object"
-   },
-   "name": "read_file"
+   }
   },
   {
+   "name": "read_image",
    "description": "- Reads and returns an image file as base64 plus metadata (mime_type/format/width/height/size_bytes)\n- Detects format by magic bytes (png/jpeg/gif/webp/bmp), not by file extension\n- Width/height are returned for png/jpeg/gif; webp/bmp return 0 (no external image lib in v1)\n- Rejects images over the max size limit (default 5MB; 0 disables the limit)\n- Use this tool when the agent needs to view or analyze an image file (e.g. a screenshot)",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -89,10 +90,10 @@
      "file_path"
     ],
     "type": "object"
-   },
-   "name": "read_image"
+   }
   },
   {
+   "name": "write_file",
    "description": "- Writes complete content to a specified file\n- Automatically creates missing parent directories\n- Uses atomic writing (temp file then rename) for safety\n- Enforces a size limit to prevent accidental large writes\n- Use this tool when you need to create a new file or fully overwrite an existing one",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -116,10 +117,10 @@
      "content"
     ],
     "type": "object"
-   },
-   "name": "write_file"
+   }
   },
   {
+   "name": "edit",
    "description": "- Performs precision string replacement in a file\n- Requires an exact, unique match for the 'old_string' unless 'allow_multiple' is set\n- Preserves indentation and line endings\n- Use this tool when you need to make surgical changes to specific parts of a file without rewriting it entirely",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -152,11 +153,11 @@
      "new_string"
     ],
     "type": "object"
-   },
-   "name": "edit"
+   }
   },
   {
-   "description": "- High-performance code searching tool\n- Supports both literal strings and regular expressions\n- Provides context lines around matches to help understand code logic\n- Includes built-in safety limits for total matches and matches per file\n- Use this tool when you need to find specific strings, patterns, or definitions across multiple files without reading them one by one\n- NOTE: Common build, dependency, and version control directories (e.g., .git, node_modules, dist, build, .venv) and binary/media file types are automatically excluded to improve performance and reduce noise.",
+   "name": "grep_search",
+   "description": "- High-performance code searching tool\n- Supports both literal strings and regular expressions\n- Provides context lines around matches to help understand code logic\n- Includes built-in safety limits for total matches and matches per file\n- Returns match file paths relative to the `path` argument (relative to the working directory when `path` is omitted)\n- Use this tool when you need to find specific strings, patterns, or definitions across multiple files without reading them one by one\n- NOTE: Common build, dependency, and version control directories (e.g., .git, node_modules, dist, build, .venv) and binary/media file types are automatically excluded to improve performance and reduce noise.",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -186,7 +187,7 @@
       "type": "integer"
      },
      "path": {
-      "description": "Optional: Subdirectory to search within. Defaults to the current directory.",
+      "description": "Optional: Subdirectory to search within. Defaults to the current directory. Returned match paths are relative to this directory.",
       "type": "string"
      },
      "pattern": {
@@ -202,11 +203,11 @@
      "pattern"
     ],
     "type": "object"
-   },
-   "name": "grep_search"
+   }
   },
   {
-   "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths sorted by modification time\n- Use this tool when you need to find files by name patterns\n- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead\n- You can call multiple tools in a single response. It is always better to speculatively perform multiple searches in parallel if they are potentially useful.",
+   "name": "glob",
+   "description": "- Fast file pattern matching tool that works with any codebase size\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths sorted by modification time, relative to the `path` argument (relative to the working directory when `path` is omitted)\n- Use this tool when you need to find files by name patterns\n- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead\n- You can call multiple tools in a single response. It is always better to speculatively perform multiple searches in parallel if they are potentially useful.",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -216,7 +217,7 @@
       "type": "boolean"
      },
      "path": {
-      "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided.",
+      "description": "The directory to search in. If not specified, the current working directory will be used. Returned matches are relative to this directory. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided.",
       "type": "string"
      },
      "pattern": {
@@ -228,11 +229,11 @@
      "pattern"
     ],
     "type": "object"
-   },
-   "name": "glob"
+   }
   },
   {
-   "description": "- Executes a shell command in a controlled environment\n- Shell: Unix: commands are interpreted by `bash -c`\n- Paths: Working directory: the directory gtsp was started from, or --workdir if given (execute_bash does not change it per call).\nPaths: ordinary POSIX paths, the same ones read_file/write_file use.\n- Three execution modes:\n  1. Synchronous, kill on timeout (timeout_action: \"kill\"): waits up to task_timeout seconds (default 180s); returns the result if the command finishes, otherwise kills the process group and returns partial output\n  2. Synchronous, background on timeout (timeout_action: \"background\", default): waits up to task_timeout seconds (default 180s); returns the result if the command finishes, otherwise promotes the still-running process to background and returns a process_id\n  3. Asynchronous (run_in_background: true): starts the command immediately in the background and returns a process_id without waiting (task_timeout and timeout_action are ignored)\n- Synchronous mode leftover descendants: if descendant processes forked by the command (e.g., '&' or daemons) are still running after the command exits, they are NOT automatically terminated; the result will include process_id, leftover_processes, and a message so you can terminate them with process_stop or inspect them with process_output (unclaimed processes persist until server shutdown)\n- Prefer run_in_background: true for intentionally long-running tasks (such as starting servers or listening on ports)\n- Use process_output to poll or wait for background process completion\n- Automatically truncates large outputs to protect context window\n- Use this tool when you need to run shell commands, build scripts, run tests, or perform other system-level operations",
+   "name": "execute_bash",
+   "description": "- Executes a shell command in a controlled environment\n- Shell: Unix: commands are interpreted by `bash -c`\n- Paths: Working directory: the directory gtsp was started from, or --workdir if given (execute_bash does not change it per call).\nPaths: ordinary POSIX paths, the same ones read_file/write_file use.\n- Three execution modes:\n  1. Synchronous, kill on timeout (timeout_action: \"kill\"): waits up to task_timeout seconds (default 180s); returns the result if the command finishes, otherwise kills the process group and returns partial output\n  2. Synchronous, background on timeout (timeout_action: \"background\", default): waits up to task_timeout seconds (default 180s); returns the result if the command finishes, otherwise promotes the still-running process to background and returns a process_id\n  3. Asynchronous (run_in_background: true): starts the command immediately in the background and returns a process_id without waiting (task_timeout and timeout_action are ignored)\n- Synchronous mode leftover descendants: if descendant processes forked by the command (e.g., '&' or daemons) are still running after the command exits, they are NOT automatically terminated; the result will include process_id, leftover_processes, and a message so you can terminate them with process_stop or inspect them with process_output (unclaimed processes persist until server shutdown)\n- Prefer run_in_background: true for intentionally long-running tasks (such as starting servers or listening on ports)\n- Use process_output to poll or wait for background process completion\n- Output is capped per stream at 300 lines / 20 KB, keeping BOTH the head (true first 4 KB) and the tail: the head keeps context and the tail keeps the failure/result. Dropped text is replaced by a single marker like '... (N bytes omitted) ...'; when the ring buffer also evicted bytes you get '... (N bytes omitted; M bytes evicted by buffer) ...' and stdout_overflow/stderr_overflow are set\n- When a result carries process_id (timeout promotion or leftover handover) it also carries stdout_offset/stderr_offset: pass them to process_output to read only newer output. Never derive a cursor from len(stdout), because markers make the text longer than the bytes it represents\n- Use this tool when you need to run shell commands, build scripts, run tests, or perform other system-level operations",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -266,25 +267,45 @@
      "command"
     ],
     "type": "object"
-   },
-   "name": "execute_bash"
+   }
   },
   {
-   "description": "- Retrieves output from a running or completed background process\n- Use block:true (default) to wait for process completion up to the timeout\n- Use block:false for a non-blocking snapshot of current output\n- Returns stdout, stderr, running status, and exit code when complete\n- Process IDs are only valid while the server session is active; they are lost on server restart\n- process_id is only returned when a process is promoted to background (via task_timeout expiry or run_in_background:true), not for processes that complete synchronously",
+   "name": "process_output",
+   "description": "- Retrieves output from a running or completed background process\n- process_id comes from: execute_bash with run_in_background:true, a task_timeout promotion (timeout_action:'background'), or a sync run that exited but left descendants alive (handover)\n- Default (no stdout_offset/stderr_offset/tail_lines) returns the TAIL of each stream: at most the last 300 lines and at most 20 KB - i.e. the latest result, not a repeated 20% head\n- Incremental polling: pass back the stdout_offset/stderr_offset you got last time to read only new bytes; pass 0 to re-read what the buffer still retains\n- tail_lines: at most the last N lines (max 1000) of both streams; do not combine tail_lines with *_offset (mutually exclusive)\n- include_output:false skips the output entirely (zero-copy) and just advances the cursors - ideal for wait loops\n- block:true (default) waits for the process (and any surviving descendants) to finish, up to timeout ms; timeout > 60000 is clamped to 60000, timeout <= 0 returns immediately\n- Buffer retention per stream: the first 4 KB is kept verbatim plus a 512 KB sliding window of the newest bytes; anything between them is evicted and unreachable. Each call is additionally capped at 300 lines / 20 KB, with markers such as '... (N bytes omitted) ...' or '... (N bytes omitted; M bytes evicted by buffer) ...' where text was dropped\n- The retained first 4 KB is reachable only through a head+tail view (execute_bash results); explicit *_offset pagination reads the sliding window alone, so once a stream has evicted bytes, an offset below the window start reports *_offset_expired and the page resumes at the window start\n- Flag semantics: truncated is stream-level - true whenever some bytes of that stream became unreachable (clipped page or buffer overflow), NOT a verdict on the offset you passed; *_offset_expired says that specific offset was lost, has_more says a next page exists. Walking a stream that never overflowed page by page leaves truncated false\n- Never infer the next cursor from len(stdout): use the returned stdout_offset/stderr_offset (they account for dropped markers and rune alignment)\n- If an explicit *_offset page comes back empty while *_pending_bytes > 0, the stream has unterminated output (prompt / progress bar); read the default tail mode to see it now\n- running is true while the main process lives OR surviving descendants exist; exit_code is null in both those cases\n- Process IDs are only valid while the server session is active; they are lost on server restart",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
      "block": {
-      "description": "Whether to wait for process completion. Defaults to true.",
+      "description": "Whether to wait for process completion (and for surviving descendants to exit). Defaults to true.",
+      "type": "boolean"
+     },
+     "include_output": {
+      "description": "Defaults to true. When false, no output is returned at all (zero-copy) and the cursors advance to the latest finalized position (committed bytes); use tail_lines or an earlier *_offset afterwards to read results.",
       "type": "boolean"
      },
      "process_id": {
-      "description": "The process ID returned by execute_bash.",
+      "description": "The process ID returned by execute_bash (background start, timeout promotion, or sync handover). Opaque string, shape like proc_1.",
       "type": "string"
      },
+     "stderr_offset": {
+      "description": "Explicit incremental read start for stderr (omit for the default tail mode).",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "stdout_offset": {
+      "description": "Explicit incremental read start for stdout (omit for the default tail mode). Page boundaries may fall inside a line; resume from the returned stdout_offset to concatenate pages byte-exactly.",
+      "minimum": 0,
+      "type": "integer"
+     },
+     "tail_lines": {
+      "description": "Return at most the last N lines of both streams (values > 1000 are clamped). Mutually exclusive with stdout_offset/stderr_offset.",
+      "maximum": 1000,
+      "minimum": 1,
+      "type": "integer"
+     },
      "timeout": {
-      "description": "Max wait time in ms when block:true. Defaults to 30000, max 60000. Note: actual effective wait time is also limited by the client's transport request timeout (typically 30-65s); if you need to wait longer, use block:false and poll repeatedly.",
+      "description": "Max wait time in ms when block:true. Defaults to 30000, values > 60000 are clamped to 60000, values <= 0 return immediately. Note: actual effective wait time is also limited by the client's transport request timeout (typically 30-65s); if you need to wait longer, use block:false and poll repeatedly.",
       "type": "integer"
      }
     },
@@ -292,10 +313,10 @@
      "process_id"
     ],
     "type": "object"
-   },
-   "name": "process_output"
+   }
   },
   {
+   "name": "process_stop",
    "description": "- Terminates a running background process\n- If the process has already exited, this is a no-op and returns successfully\n- Returns process_id, success (true/false), and exit_code\n- Use this to clean up long-running background processes",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -310,10 +331,10 @@
      "process_id"
     ],
     "type": "object"
-   },
-   "name": "process_stop"
+   }
   },
   {
+   "name": "process_list",
    "description": "- Lists all currently running background processes started by execute_bash\n- Returns process_id, command, running_time, and status for each process\n- Use this to check what background processes are active before calling process_output or process_stop",
    "input_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -321,8 +342,7 @@
     "properties": {},
     "required": [],
     "type": "object"
-   },
-   "name": "process_list"
+   }
   }
  ]
 }
