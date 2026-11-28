@@ -204,8 +204,19 @@ Free code signing provided by [SignPath.io](https://signpath.io/), certificate b
 
 如果 Togobot 对你有帮助，欢迎点一个 ⭐ Star，这是对我们最大的鼓励！
 
+## 感谢
+
+感谢以下社区帮助提供交流和推广
+
+* **[Linux.do](https://linux.do)**
+* **[V站](https://www.v2ex.com)**
+
+
 ---
 
 ## 📄 开源协议
 
 本项目基于 [MIT License](LICENSE) 开源。
+
+
+
