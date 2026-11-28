@@ -844,7 +844,15 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 # **工具数 49 / 参数数 163 / required 全部不变**，只动 `webfetch.description` 一段文字；
 # 复核方式：在 `294e55a0` 上现算结构并 diff，变化的工具只有 `['webfetch']` 且
 # `description 变=True / required 变=False / params 变=False`。
-BASELINE_TEXT_DIGEST = "5d00a77521d36733c1fa2d75b878e21da55621b0314d233bcad050088b1099fb"
+# #388 重算（`5d00a775…` → `b1e55e0b…`）：webfetch 的工具说明瘦身（773 → 199 字符，
+# 同口径含 `Args:` 段与缩进；模型可见口径 667 → 125），删掉重定向次数 / 超时 / 5MB /
+# UA / 返回字段名 / 7 个 error_code 全列 / 导航残留提示，保留「用途、不跑 JS 与 SPA 空壳
+# 别反复重试、不解析 PDF/Office/图片、超 100000 字符截断且注明原文长度」并新增
+# 「内网/本机地址会被拒」。**工具数 49 / 参数数 163 / required 全部不变**，只动
+# `webfetch.description` 一段文字（`tests/fixtures/tool_schema_snapshot.json` 的 diff
+# 也只有这一行）；复核方式：在 `6c14eb96` 上现算结构并 diff，变化的工具只有
+# `['webfetch']` 且 `description 变=True / required 变=False / params 变=False`。
+BASELINE_TEXT_DIGEST = "b1e55e0b6824159f5de52df227ce00b4b3a428338ece9ebf7a38e29b90e999f5"
 
 
 def _text_digest() -> tuple[str, int, int]:

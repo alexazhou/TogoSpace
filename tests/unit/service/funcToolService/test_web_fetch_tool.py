@@ -588,6 +588,50 @@ def test_tool_description_states_no_js_limit():
         assert phrase in description, f"工具描述缺少关键限制: {phrase}"
 
 
+def test_webfetch_description_is_compact_and_keeps_deciding_info():
+    """#388：description 压到 ≤200 字符，但决定模型行为的 5 条信息必须逐条在场。
+
+    两条判据必须成对：只钉体积，把文案删空也是绿；只钉必留项，重新写回 700 字也是绿。
+
+    体积两个口径都钉（`#388` 的改前数字 773 与 667 是同一段文案的两种量法）：
+    - 模型可见口径 `get_function_metadata()["description"]`（不含 `Args:` 段与缩进）：667
+    - 文件里原始 docstring 口径 `callable.__doc__`（含 `Args:` 段与缩进）：773
+
+    本单起点 `6c14eb96` 上这两个数是 764 / 878（#387 的文案比 `0.6_dev` 长）。
+    """
+    description = _webfetch_description()
+    assert len(description) <= 200, (
+        f"webfetch description 已膨胀到 {len(description)} 字符（上限 200）：\n{description}"
+    )
+
+    raw_doc = get_func_tool("webfetch").callable.__doc__ or ""
+    assert len(raw_doc) <= 200, (
+        f"webfetch 原始 docstring 已膨胀到 {len(raw_doc)} 字符（同口径上限 200，"
+        f"含 `Args:` 段与缩进）：\n{raw_doc}"
+    )
+    for phrase, why in (
+        ("Markdown", "①用途：返回的是 Markdown 正文"),
+        ("不执行 JavaScript", "②不跑页面脚本"),
+        ("反复重试同一地址", "②SPA 空壳时别反复重试同一地址"),
+        ("PDF/Office/图片", "③不解析 PDF/Office/图片"),
+        ("100000", "④正文截断阈值"),
+        ("原文长度", "④截断后末尾注明原文长度"),
+        ("fetch_blocked_host", "⑤内网 / 本机地址被拒"),
+    ):
+        assert phrase in description, (
+            f"必留信息缺失（{why}）：{phrase!r}\n当前 description=\n{description}"
+        )
+
+    # ⑤ 的另一半在参数说明里（`url` 必须 http/https 绝对地址），本单不动它，但钉住。
+    tool = get_func_tool("webfetch")
+    assert tool is not None
+    url_desc = get_function_metadata("webfetch", tool.callable)["parameters"]["properties"]["url"][
+        "description"
+    ]
+    for phrase in ("http", "https", "绝对地址"):
+        assert phrase in url_desc, f"`url` 参数说明缺少：{phrase!r}，当前={url_desc!r}"
+
+
 async def test_run_tool_call_entry_returns_markdown(base_url, allow_local_requests):
     """判据 1：从统一入口 `run_tool_call` 走到底。"""
     context = ToolCallContext(agent_id=7, team_id=2, tool_name="webfetch")
