@@ -861,7 +861,11 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 # `webfetch.description` 一段文字（`tests/fixtures/tool_schema_snapshot.json` 的 diff
 # 也只有这一行）；复核方式：在 `6c14eb96` 上现算结构并 diff，变化的工具只有
 # `['webfetch']` 且 `description 变=True / required 变=False / params 变=False`。
-BASELINE_TEXT_DIGEST = "faa529c2a1eeaa14cf5761471c209a6b11b9611835793c4640e03a5d4d7e2d55"
+# #389 重算（`faa529c2…` → `bd2aab67…`）：在 #388 收口版上补「返回文本可能含导航/侧栏
+# 残留，引用时不要当作正文内容」一句（模型可见 144 → **172**；含 `Args` 的原文 218 → 250
+# 只报数、不作判据）。**工具数 49 / 参数数 163 / required 全部不变**，只动
+# `webfetch.description` 一处。
+BASELINE_TEXT_DIGEST = "bd2aab6763544de75fbc61e9ab6dcb7872df44651424f025c82f70d6c363f506"
 
 
 def _text_digest() -> tuple[str, int, int]:

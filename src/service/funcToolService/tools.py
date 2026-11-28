@@ -109,6 +109,7 @@ async def webfetch(url: str, _context: ToolCallContext = None) -> dict:
     不执行 JavaScript：SPA 只拿空壳，别反复重试同一地址。
     内网/本机地址会被拒（fetch_blocked_host）。
     不解析 PDF / Office / 图片；超 100000 字符截断并注明原文长度。
+    返回文本可能含导航/侧栏残留，引用时不要当作正文内容。
 
     Args:
         url: 要读取的网页地址，必须是 http 或 https 的绝对地址。

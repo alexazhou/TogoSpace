@@ -613,10 +613,16 @@ def test_webfetch_description_is_compact_and_keeps_deciding_info():
         ("100000", "④正文截断阈值"),
         ("原文长度", "④截断后末尾注明原文长度"),
         ("fetch_blocked_host", "⑤内网 / 本机地址被拒"),
+        ("导航/侧栏残留", "⑥返回可能含导航 / 侧栏残留"),
+        ("引用时不要当作正文内容", "⑥行为指引：别把残留当正文引用"),
     ):
         assert phrase in description, (
             f"必留信息缺失（{why}）：{phrase!r}\n当前 description=\n{description}"
         )
+
+    # ⑥ 的判据是行为指引「别当正文引用」，不是语气建议「请忽略」（#389 主管裁定）：
+    # 「请忽略」无法检验，写回它等于把这条判据变回橡皮图章。
+    assert "请忽略" not in description, "⑥ 退化回无法检验的语气建议「请忽略」"
 
     # ⑤ 的另一半在参数说明里（`url` 必须 http/https 绝对地址），本单不动它，但钉住。
     tool = get_func_tool("webfetch")
