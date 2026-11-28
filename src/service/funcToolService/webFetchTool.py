@@ -38,8 +38,13 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+#: 直通内容类型：本来就是文本格式，按原文返回，**绝不进 `html_to_markdown`**。
+#: Markdown 里 `#` / `*` / `<div>` / `1. ` 都是正文语法，丢给 HTML 转换会被当标签/实体处理，
+#: 原文会被改写（`<div>` 丢失、`*` 变成列表项、`#` 变成标题）。
+PASSTHROUGH_CONTENT_TYPES = ("text/plain", "text/markdown")
+
 #: 允许处理的 Content-Type（小写、已去掉 charset 部分）。
-ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
+ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml") + PASSTHROUGH_CONTENT_TYPES
 
 #: 一次性固定清洗清单：这些标签连同内容一起丢掉（`decompose` 而不是 `extract`，
 #: 因为它们的文本对 Agent 无意义 —— 脚本源码、样式表、`<noscript>` 里的回退文案）。
@@ -460,12 +465,13 @@ async def fetch_markdown(url: str) -> dict[str, Any]:
                 if mime not in ALLOWED_CONTENT_TYPES:
                     return _error(
                         "fetch_unsupported_content_type",
-                        f"不支持的内容类型: {mime or '未声明'}（只支持 HTML / XHTML / 纯文本）",
+                        f"不支持的内容类型: {mime or '未声明'}（只支持 HTML / XHTML / 纯文本 / Markdown）",
                     )
 
                 text = _decode_body(body, charset)
 
-                if mime == "text/plain":
+                if mime in PASSTHROUGH_CONTENT_TYPES:
+                    # 纯文本 / Markdown 直通：不做任何转换，避免 HTML 转换改写正文语法。
                     markdown = text.strip()
                 else:
                     try:

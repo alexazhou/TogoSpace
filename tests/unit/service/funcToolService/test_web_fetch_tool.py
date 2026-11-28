@@ -24,6 +24,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import aiohttp
 import pytest
 
 from service import funcToolService
@@ -38,6 +39,31 @@ from service.roomService import ToolCallContext
 
 _GBK_TEXT = "这是用 GBK 编码的中文页面，用来验证编码探测没有退化成乱码。"
 _LONG_SOURCE = "".join(f"<p>第{i}段：这是一段用于撑大页面的填充文本。</p>" for i in range(6000))
+
+#: Markdown 直通判据的样本（#387）。刻意**不带首尾空白**：直通分支与 `text/plain` 共用
+#: `strip()` 归一化，去掉首尾空白后 `strip()` 是恒等变换，"逐字符相同"才是字面成立的。
+#: 内容覆盖 `#` 标题、`*`/`**` 强调、`<div>` 裸 HTML、有序/无序列表、代码围栏、引用块。
+_MARKDOWN_SOURCE = (
+    "# 一级标题\n"
+    "\n"
+    "正文含 **加粗**、*斜体* 与行内代码 `code`。\n"
+    "\n"
+    "1. 第一项\n"
+    "2. 第二项\n"
+    "\n"
+    "- 无序项 A\n"
+    "- 无序项 B\n"
+    "\n"
+    '<div class="note">HTML 片段原样保留</div>\n'
+    "\n"
+    "```python\n"
+    "print('代码围栏')\n"
+    "```\n"
+    "\n"
+    "> 引用块\n"
+    "\n"
+    "末尾一行没有换行符"
+)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -83,6 +109,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, "text/html", f"<html><body><p>{_GBK_TEXT}</p></body></html>".encode("gbk"))
         elif path == "/plain":
             self._send(200, "text/plain; charset=utf-8", "纯文本内容 line1\nline2\n".encode("utf-8"))
+        elif path == "/markdown":
+            # 规范写法（RFC 7763）：jsDelivr 等按此标注 `.md`
+            self._send(200, "text/markdown; charset=utf-8", _MARKDOWN_SOURCE.encode("utf-8"))
+        elif path == "/x-markdown":
+            # 非标准遗留写法：**当前不放行**（决策与依据见 #387 报告 §4）
+            self._send(200, "text/x-markdown; charset=utf-8", _MARKDOWN_SOURCE.encode("utf-8"))
+        elif path == "/text-csv":
+            # 白名单逐项枚举的哨兵：绝不能被放宽成 `text/*`
+            self._send(200, "text/csv; charset=utf-8", b"a,b\n1,2\n")
         elif path == "/404":
             self._send(404, "text/html; charset=utf-8", b"<html><body>not found</body></html>")
         elif path == "/500":
@@ -367,6 +402,76 @@ async def test_fetch_markdown_passes_text_plain_through(base_url, allow_local_re
     assert result["message"].startswith("纯文本内容")
 
 
+# ---------------------------------------------------------------------------
+# 2b. `text/markdown` 直通（#387）
+# ---------------------------------------------------------------------------
+
+
+async def test_fetch_markdown_passes_text_markdown_through_char_exact(base_url, allow_local_requests):
+    """判据 1：`text/markdown` 必须直通——返回正文与源文件**逐字符相同**。
+
+    失效形态：把 Markdown 丢给 `html_to_markdown`。那样 `<div>` 会被当标签丢掉、
+    `**加粗**` 变成 `<strong>` 再转回来、`#` 变标题层级——内容看起来"还行"，但原文已经被改写。
+    """
+    result = await webFetchTool.fetch_markdown(f"{base_url}/markdown")
+
+    assert result["success"] is True, result
+    assert result["content_type"] == "text/markdown"
+    assert result["message"] == _MARKDOWN_SOURCE, "Markdown 正文被改写（多半是走了 HTML 转换）"
+    assert result["original_chars"] == len(_MARKDOWN_SOURCE)
+    for marker in ("# 一级标题", "**加粗**", "*斜体*", '<div class="note">', "1. 第一项", "```python", "> 引用块"):
+        assert marker in result["message"], f"Markdown 语法被破坏: {marker}"
+
+
+async def test_fetch_markdown_markdown_never_calls_html_converter(base_url, allow_local_requests, monkeypatch):
+    """比"正文相同"更硬：`text/markdown` 分支**不得调用** `html_to_markdown`。
+
+    "正文相同"是结果判据，若哪天转换器恰好对某类样本幂等，结果判据会假绿；这里直接
+    钉住"没调用"这件事。
+    """
+    calls: list[str] = []
+
+    def _forbidden(text: str) -> str:
+        calls.append(text)
+        raise AssertionError("text/markdown 不得进 HTML 转换")
+
+    monkeypatch.setattr(webFetchTool, "html_to_markdown", _forbidden)
+
+    result = await webFetchTool.fetch_markdown(f"{base_url}/markdown")
+
+    assert calls == [], "Markdown 走了 HTML 转换分支"
+    assert result["success"] is True
+    assert result["message"] == _MARKDOWN_SOURCE
+
+
+async def test_fetch_markdown_rejects_legacy_x_markdown(base_url, allow_local_requests):
+    """决策记录：`text/x-markdown`（非标准遗留写法）**不放行**，依据见 #387 报告 §4。"""
+    result = await webFetchTool.fetch_markdown(f"{base_url}/x-markdown")
+
+    assert result["success"] is False
+    assert result["error_code"] == "fetch_unsupported_content_type"
+    assert "text/x-markdown" in result["message"]
+
+
+async def test_fetch_markdown_rejects_other_text_subtypes(base_url, allow_local_requests):
+    """白名单是**逐项枚举**，不是 `text/*`：`text/csv` 仍必须被拒。"""
+    result = await webFetchTool.fetch_markdown(f"{base_url}/text-csv")
+
+    assert result["success"] is False
+    assert result["error_code"] == "fetch_unsupported_content_type"
+
+
+async def test_fetch_markdown_http_html_still_converted(base_url, allow_local_requests):
+    """判据 2：`text/html` 行为不变——仍进 HTML 转换（`<script>` 丢弃、标题保留）。"""
+    result = await webFetchTool.fetch_markdown(f"{base_url}/ok")
+
+    assert result["success"] is True
+    assert result["content_type"] == "text/html"
+    assert "主标题" in result["message"]
+    assert "不该出现" not in result["message"], "<script> 内容没被清掉，HTML 分支行为变了"
+    assert "<h1>" not in result["message"], "HTML 未被转成 Markdown"
+
+
 @pytest.mark.parametrize("status_path", ["/404", "/500"])
 async def test_fetch_markdown_maps_http_errors_to_structured_result(base_url, allow_local_requests, status_path):
     """404 / 500 必须是结构化失败体，不抛裸异常。"""
@@ -563,6 +668,41 @@ async def test_real_non_html_is_unsupported():
     result = await webFetchTool.fetch_markdown("https://httpbin.org/image/png")
     assert result["success"] is False
     assert result["error_code"] == "fetch_unsupported_content_type"
+
+
+@_network
+async def test_real_jsdelivr_markdown_matches_source_bytes_char_exact():
+    """#387 判据 1 的真实版本：jsDelivr 的 `.md` 标 `text/markdown`。
+
+    逐字符比对的对象不是"我记得的内容"，而是**同一 URL 的原始字节**（另开一个
+    不经本工具的 aiohttp 请求取回、解码、`strip()` 后比）：这样"没被 HTML 转换改写"
+    是被源文件本身证明的，而不是靠断言里手写的片段。
+    """
+    url = "https://cdn.jsdelivr.net/gh/microsoft/vscode@main/README.md"
+
+    result = await webFetchTool.fetch_markdown(url)
+
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        async with session.get(url, headers={"User-Agent": webFetchTool.USER_AGENT}) as response:
+            assert response.status == 200
+            source = (await response.read()).decode("utf-8")
+
+    assert result["success"] is True, result
+    assert result["content_type"] == "text/markdown"
+    assert result["message"] == source.strip(), "Markdown 正文与源文件不是逐字符相同"
+    assert "#" in result["message"], "Markdown 标题标记丢失"
+
+
+@_network
+async def test_real_github_raw_markdown_still_text_plain():
+    """对照：同一份文件的 GitHub raw 版本标 `text/plain`，历史上能读——现在两条都通。"""
+    result = await webFetchTool.fetch_markdown(
+        "https://raw.githubusercontent.com/microsoft/vscode/main/README.md"
+    )
+
+    assert result["success"] is True, result
+    assert result["content_type"] == "text/plain"
+    assert "#" in result["message"]
 
 
 @_network

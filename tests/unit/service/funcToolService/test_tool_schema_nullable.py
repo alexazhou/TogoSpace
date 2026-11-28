@@ -839,7 +839,12 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 # #315 P0（变化 a）：`save_*` 拆成 `create_*/update_*`（45→49 工具、146→163 参数），
 # 新增 8 个工具的 description 与参数说明必须进基线，否则「说明漂移」在这 8 个工具上
 # 无人钉住。digest 由改后代码现算，改动逐项登记在报告 §「6 项有意变化 · a」。
-BASELINE_TEXT_DIGEST = "e936e0446f879ac202c69aa6884fc35cf09058ec174669681f5278ec4414dfff"
+# #387 重算（`e936e044…` → `5d00a775…`）：webfetch 支持 `text/markdown`，docstring 里
+# 「只支持 HTML / 纯文本」那句话要改成含 Markdown（否则模型看到的能力说明与实际行为不符）。
+# **工具数 49 / 参数数 163 / required 全部不变**，只动 `webfetch.description` 一段文字；
+# 复核方式：在 `294e55a0` 上现算结构并 diff，变化的工具只有 `['webfetch']` 且
+# `description 变=True / required 变=False / params 变=False`。
+BASELINE_TEXT_DIGEST = "5d00a77521d36733c1fa2d75b878e21da55621b0314d233bcad050088b1099fb"
 
 
 def _text_digest() -> tuple[str, int, int]:
