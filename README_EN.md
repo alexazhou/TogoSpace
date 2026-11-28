@@ -154,12 +154,6 @@ python3 -m venv .venv
 cd frontend && npm install && npm run dev
 ```
 
-### Live demo
-
-Don't want to install anything? Try the [demo site](https://demo.togoagent.org) first.
-
----
-
 ## 💡 What can you use it for?
 
 - **Software development**: The PM breaks down requirements → the engineer writes code in a Docker sandbox → the test engineer verifies it. You just look at the result.
